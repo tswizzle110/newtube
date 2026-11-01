@@ -13,7 +13,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("serve", help="run the web app")
-    sub.add_parser("selftest", help="check that YouTube extraction works from this machine")
+    st = sub.add_parser("selftest", help="check that YouTube extraction works from this machine")
+    st.add_argument("--dump", metavar="DIR", help="save redacted raw extractor output here "
+                                                  "(handy for tests / bug reports)")
     sub.add_parser("migrate", help="apply database migrations")
     return p
 
@@ -28,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "selftest":
         from .selftest import run
 
-        return run()
+        return run(dump_dir=args.dump)
     if args.command == "migrate":
         from .db.connection import migrate_cli
 

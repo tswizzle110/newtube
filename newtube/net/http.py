@@ -56,14 +56,21 @@ def check_url(url: str) -> None:
         raise HostNotAllowed(f"host not on allowlist: {host}")
 
 
+class _SilentLogger:
+    """yt-dlp prints errors itself; we catch and report them, so drop its output."""
+
+    def debug(self, msg: str) -> None: ...
+    def warning(self, msg: str) -> None: ...
+    def error(self, msg: str) -> None: ...
+
+
 def ytdlp_network_opts(settings: Settings) -> dict[str, Any]:
     """Network-related yt-dlp options, so yt-dlp looks and behaves like the rest of us."""
     opts: dict[str, Any] = {
         "http_headers": dict(BASE_HEADERS),
         "socket_timeout": 20,
         "retries": 2,
-        "quiet": True,
-        "no_warnings": True,
+        "logger": _SilentLogger(),
         "cachedir": False,   # don't write into ~/.cache
     }
     if settings.outbound_proxy:

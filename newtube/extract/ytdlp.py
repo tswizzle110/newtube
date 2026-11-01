@@ -199,11 +199,14 @@ class YtDlpExtractor:
         except yt_dlp.utils.DownloadError as e:
             raise classify_error(str(e)) from e
 
-    async def video_info(self, video_id: str, *, background: bool = False) -> VideoInfo:
+    async def raw_video_info(self, video_id: str, *, background: bool = False) -> dict[str, Any]:
+        """The unparsed yt-dlp info dict. yt-dlp specific; used by selftest --dump."""
         if not VIDEO_ID_RE.match(video_id):
             raise ExtractionError(f"bad video id: {video_id!r}")
-        info = await self._extract(f"https://www.youtube.com/watch?v={video_id}", {}, background)
-        return parse_video_info(info)
+        return await self._extract(f"https://www.youtube.com/watch?v={video_id}", {}, background)
+
+    async def video_info(self, video_id: str, *, background: bool = False) -> VideoInfo:
+        return parse_video_info(await self.raw_video_info(video_id, background=background))
 
     async def resolve_channel(self, ref: str, *, background: bool = False) -> ChannelInfo:
         url = normalize_channel_ref(ref)
