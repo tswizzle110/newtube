@@ -109,6 +109,7 @@ class ChannelInfo:
     handle: str | None = None
     avatar_url: str | None = None
     description: str | None = None
+    subscriber_count: int | None = None
 
 
 @dataclass
@@ -166,5 +167,13 @@ class Extractor(Protocol):
 
     async def playlist(self, playlist_id: str, limit: int = 100, *,
                        background: bool = False) -> list[VideoSummary]: ...
+
+    async def channel_page(self, channel_id: str, limit: int = 30, *,
+                           background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
+        """Channel header + newest uploads from ONE request."""
+        ...
+
+    async def playlist_page(self, playlist_id: str, limit: int = 100, *,
+                            background: bool = False) -> tuple[PlaylistSummary, list[VideoSummary]]: ...
 
     # Later: related videos, comments.

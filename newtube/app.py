@@ -21,6 +21,7 @@ from .jobs.scheduler import Scheduler
 from .media.diskcache import DiskCache
 from .net.http import OutboundClient
 from .net.ratelimit import RateLimiter
+from .services.lists import ListService
 from .services.videos import VideoService
 
 log = logging.getLogger("newtube")
@@ -37,6 +38,11 @@ class Context:
     images: DiskCache
     auth: Auth
     run_scheduler: bool = True
+    lists: ListService | None = None
+
+    def __post_init__(self) -> None:
+        if self.lists is None:
+            self.lists = ListService(self.conn, self.extractor)
 
 
 def build_context(settings: Settings | None = None) -> Context:
@@ -56,7 +62,7 @@ def build_context(settings: Settings | None = None) -> Context:
 
 def create_app(ctx: Context | None = None) -> FastAPI:
     from .api import auth as auth_api
-    from .api import events, media, subscriptions, videos
+    from .api import events, lists, media, subscriptions, videos
     from .security import GuardMiddleware
 
     @contextlib.asynccontextmanager
@@ -79,6 +85,7 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app.add_middleware(GuardMiddleware)
     app.include_router(auth_api.router)
     app.include_router(events.router)
+    app.include_router(lists.router)
     app.include_router(media.router)
     app.include_router(videos.router)
     app.include_router(subscriptions.router)

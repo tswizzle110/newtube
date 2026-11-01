@@ -6,7 +6,9 @@ from newtube.app import Context, create_app
 from newtube.auth import Auth
 from newtube.config import Settings
 from newtube.db.connection import connect, migrate
-from newtube.extract.base import ChannelInfo, Chapter, Format, VideoInfo, VideoUnavailable
+from newtube.extract.base import (
+    ChannelInfo, ChannelSummary, Chapter, Format, PlaylistSummary, VideoInfo, VideoSummary, VideoUnavailable,
+)
 from newtube.media.diskcache import DiskCache
 from newtube.net.http import OutboundClient
 from newtube.net.ratelimit import RateLimiter
@@ -32,6 +34,7 @@ class FakeExtractor:
 
     def __init__(self):
         self.calls = 0
+        self.list_calls = 0
 
     async def video_info(self, video_id, *, background=False):
         if video_id == "unavailable":
@@ -46,6 +49,28 @@ class FakeExtractor:
 
     async def resolve_channel(self, ref, *, background=False):
         return ChannelInfo(CID, "YouTube", "@YouTube", "https://yt3.ggpht.com/av")
+
+    # ---- lists (shapes copied from real yt-dlp results; see tests/fixtures_entries.py)
+    async def search(self, query, kind="video", limit=20, *, background=False):
+        self.list_calls += 1
+        return {
+            "video": [VideoSummary(VID, "Found video", CID, "Chan", 100, 5)],
+            "channel": [ChannelSummary(CID, "YouTube", "@YouTube", "official", "https://yt3.ggpht.com/av", 46600000)],
+            "playlist": [PlaylistSummary("PLBDA2E52FB1EF80C9", "World History", "CrashCourse", None,
+                                         "https://i.ytimg.com/vi/Yocja_N5s1I/hq720.jpg")],
+        }[kind]
+
+    async def channel_page(self, channel_id, limit=30, *, background=False):
+        self.list_calls += 1
+        # like the real channel tab: entries carry no views / date / channel name
+        return (ChannelInfo(channel_id, "YouTube", "@YouTube", "https://yt3.ggpht.com/av", "official", 46600000),
+                [VideoSummary(VID, "Upload one", channel_id, "YouTube", 607), VideoSummary("bbbbbbbbbbb", "Upload two", channel_id, "YouTube", 60)])
+
+    async def playlist_page(self, playlist_id, limit=100, *, background=False):
+        self.list_calls += 1
+        return (PlaylistSummary(playlist_id, "World History", "CrashCourse", 2),
+                [VideoSummary(VID, "Part 1", CID, "CrashCourse", 671, 17000000),
+                 VideoSummary("bbbbbbbbbbb", "Part 2", CID, "CrashCourse", 575, 9100000)])
 
 
 import contextlib
@@ -184,3 +209,88 @@ def test_avatar_stored_in_old_protocol_relative_form_still_loads(env):
     ctx.conn.execute("INSERT INTO channels(id,title,avatar_url,created_at) VALUES (?,?,?,1)",
                      (CID, "Chan", "//yt3.ggpht.com/av=s88"))
     assert client.get(f"/api/avatar/{CID}").content == b"AVATAR"
+
+
+# ---- search, channel and playlist pages, image proxy --------------------------------------
+
+
+def test_search_returns_each_kind_and_logs_the_query(env):
+    client, ctx, *_ = env
+    for kind, key in (("video", "Found video"), ("channel", "YouTube"), ("playlist", "World History")):
+        r = client.get("/api/search", params={"q": "zoo", "kind": kind}).json()
+        assert r["kind"] == kind and r["results"][0]["kind"] == kind and r["results"][0]["title"] == key
+    rows = ctx.conn.execute("SELECT payload FROM events WHERE type='search'").fetchall()
+    assert len(rows) == 3 and '"q": "zoo"' in rows[0]["payload"]
+
+
+def test_search_is_cached_and_validated(env):
+    client, ctx, ex, _ = env
+    for _ in range(3):
+        client.get("/api/search", params={"q": "Same Query", "kind": "video"})
+    client.get("/api/search", params={"q": "same query ", "kind": "video"})     # case/space-insensitive
+    assert ex.list_calls == 1
+    assert client.get("/api/search", params={"q": "x", "kind": "everything"}).status_code == 400
+    assert client.get("/api/search", params={"q": ""}).status_code == 422
+    assert client.get("/api/search", params={"q": "x" * 201}).status_code == 422
+    assert client.get("/api/search", params={"q": "x", "limit": 500}).status_code == 422
+
+
+def test_search_results_are_enriched_with_local_state_after_the_cache(env):
+    client, ctx, *_ = env
+    ctx.conn.execute("INSERT INTO channels(id,title,created_at) VALUES (?,?,1)", (CID, "Chan"))
+    ctx.conn.execute("INSERT INTO videos(id,channel_id,title,published_at,view_count,first_seen_at)"
+                     " VALUES (?,?,?,?,?,1)", (VID, CID, "t", 1700000000, 999))
+    ctx.conn.execute("INSERT INTO video_progress VALUES (?,?,?,?,?)", (VID, 40, 100, 0, 1))
+    v = client.get("/api/search", params={"q": "zoo"}).json()["results"][0]
+    assert (v["published_at"], v["resume_position"], v["completed"]) == (1700000000, 40, False)
+    assert v["view_count"] == 5                          # extractor's own value is not overwritten
+    ctx.conn.execute("UPDATE video_progress SET position=90, completed=1")
+    v2 = client.get("/api/search", params={"q": "zoo"}).json()["results"][0]   # served from cache
+    assert (v2["resume_position"], v2["completed"]) == (90, True)               # ...but state is fresh
+
+
+def test_channel_page_fills_in_the_channel_and_knows_if_subscribed(env):
+    client, ctx, ex, _ = env
+    page = client.get(f"/api/channel/{CID}").json()
+    assert page["channel"]["title"] == "YouTube" and page["channel"]["subscriber_count"] == 46600000
+    assert [v["title"] for v in page["videos"]] == ["Upload one", "Upload two"]
+    assert page["videos"][0]["channel_title"] == "YouTube" and page["subscribed"] is False
+    client.post("/api/subscriptions", json={"ref": "@YouTube"})
+    assert client.get(f"/api/channel/{CID}").json()["subscribed"] is True
+    client.get(f"/api/channel/{CID}")
+    assert ex.list_calls == 1                                     # page cached
+    assert client.get("/api/channel/nope").status_code == 400
+
+
+def test_channel_page_gets_upload_dates_from_rss_data_already_stored(env):
+    client, ctx, *_ = env
+    client.post("/api/subscriptions", json={"ref": "@YouTube"})  # RSS poll stores 'aaaaaaaaaaa'
+    first = client.get(f"/api/channel/{CID}").json()["videos"][0]
+    assert first["id"] == VID and first["published_at"] is not None and first["view_count"] == 1234
+
+
+def test_playlist_page(env):
+    client, *_ = env
+    page = client.get("/api/playlist/PLBDA2E52FB1EF80C9").json()
+    assert page["playlist"]["title"] == "World History" and len(page["videos"]) == 2
+    assert client.get("/api/playlist/short").status_code == 400
+
+
+def test_image_proxy_only_serves_youtube_image_hosts_and_caches(env):
+    client, ctx, ex, seen = env
+    ok = client.get("/api/img", params={"u": "//yt3.ggpht.com/av=s176"})          # protocol-relative
+    assert ok.status_code == 200 and ok.content == b"AVATAR" and ok.headers["content-type"] == "image/png"
+    client.get("/api/img", params={"u": "https://yt3.ggpht.com/av=s176"})
+    assert sum("ggpht" in str(q.url) for q in seen) == 1                         # second came from cache
+    assert client.get("/api/img", params={"u": "https://i.ytimg.com/vi/x/hq.jpg"}).content == b"JPEG"
+    for bad in ("https://evil.example/x.jpg", "http://i.ytimg.com/x.jpg",
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UC1",         # allowlisted, not an image host
+                "https://rr1.googlevideo.com/videoplayback", "file:///etc/passwd"):
+        assert client.get("/api/img", params={"u": bad}).status_code == 400, bad
+
+
+def test_list_endpoints_require_login(env):
+    from fastapi.testclient import TestClient
+    anon = TestClient(env[0].app)
+    for url in ("/api/search?q=x", f"/api/channel/{CID}", "/api/playlist/PLBDA2E52FB1EF80C9", "/api/img?u=x"):
+        assert anon.get(url).status_code == 401, url

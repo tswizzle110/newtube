@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -14,7 +16,7 @@ from ..extract.base import Format
 from ..media.dash import Rep, build_mpd, select_formats
 from ..media.isobmff import NotDashMp4, Ranges, probe_ranges
 from ..media.ranges import clamp_range
-from ..net.http import absolute_url
+from ..net.http import HostNotAllowed, absolute_url, check_url
 from .deps import get_ctx, valid_channel_id, valid_video_id
 
 router = APIRouter(prefix="/api")
@@ -56,6 +58,36 @@ async def avatar(channel_id: str, ctx: Context = Depends(get_ctx)) -> Response:
         if r.status_code != 200:
             raise HTTPException(404, "no avatar")
         body, ctype = r.content, r.headers.get("content-type", "image/jpeg")
+        ctx.images.put(key, body, ctype)
+    return Response(body, media_type=ctype, headers={"Cache-Control": "private, max-age=604800"})
+
+
+IMAGE_HOSTS = ("ytimg.com", "ggpht.com", "googleusercontent.com")
+MAX_IMAGE_BYTES = 3 * 1024 * 1024
+
+
+@router.get("/img")
+async def proxied_image(u: str, ctx: Context = Depends(get_ctx)) -> Response:
+    """Fetch an image from YouTube's image hosts on the browser's behalf (channel avatars and
+    playlist thumbnails of things you haven't subscribed to). Only those hosts are allowed."""
+    url = absolute_url(u) or ""
+    try:
+        check_url(url)
+    except HostNotAllowed as e:
+        raise HTTPException(400, "host not allowed") from e
+    host = (urlsplit(url).hostname or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in IMAGE_HOSTS):
+        raise HTTPException(400, "not an image host")
+    key = "img:" + hashlib.sha256(url.encode()).hexdigest()
+    hit = ctx.images.get(key)
+    if hit:
+        body, ctype = hit
+    else:
+        r = await ctx.http.get_media(url)
+        ctype = r.headers.get("content-type", "")
+        if r.status_code != 200 or not ctype.startswith("image/") or len(r.content) > MAX_IMAGE_BYTES:
+            raise HTTPException(404, "no image")
+        body = r.content
         ctx.images.put(key, body, ctype)
     return Response(body, media_type=ctype, headers={"Cache-Control": "private, max-age=604800"})
 

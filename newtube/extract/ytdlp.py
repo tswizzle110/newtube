@@ -171,6 +171,7 @@ def parse_channel_info(info: dict[str, Any]) -> ChannelInfo:
         handle=handle if handle and handle.startswith("@") else None,
         avatar_url=absolute_url(avatar),
         description=info.get("description"),
+        subscriber_count=info.get("channel_follower_count"),
     )
 
 
@@ -305,6 +306,28 @@ class YtDlpExtractor:
                        background: bool = False) -> list[VideoSummary]:
         info = await self.raw_playlist(playlist_id, limit, background=background)
         return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+
+    async def channel_page(self, channel_id: str, limit: int = 30, *,
+                           background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
+        info = await self.raw_channel_videos(channel_id, limit, background=background)
+        try:
+            ch = parse_channel_info(info)
+        except ExtractionError:     # header fields missing: still show the uploads
+            ch = ChannelInfo(channel_id, info.get("channel") or info.get("title") or channel_id)
+        ch.id = channel_id
+        videos = [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+        for v in videos:            # the channel tab doesn't repeat who uploaded each video
+            v.channel_id, v.channel_title = v.channel_id or channel_id, v.channel_title or ch.title
+        return ch, videos
+
+    async def playlist_page(self, playlist_id: str, limit: int = 100, *,
+                            background: bool = False) -> tuple[PlaylistSummary, list[VideoSummary]]:
+        info = await self.raw_playlist(playlist_id, limit, background=background)
+        videos = [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+        head = PlaylistSummary(playlist_id, info.get("title") or "Playlist",
+                               info.get("channel") or info.get("uploader"),
+                               info.get("playlist_count") or len(videos), None)
+        return head, videos
 
     async def comments(self, *a: Any, **k: Any) -> Any:
         raise NotImplementedError("comments: later in phase 2")
