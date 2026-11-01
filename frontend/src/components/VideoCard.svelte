@@ -1,9 +1,11 @@
 <script>
   import { duration, ago, views } from '../lib/format.js'
-  import { impression, trackClick } from '../lib/tracker.js'
+  import { impression, trackClick, trackEvent } from '../lib/tracker.js'
   import { navigate } from '../lib/router.svelte.js'
 
-  let { video, surface, position, requestId } = $props()
+  // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
+  let { video, surface, position, requestId, extra = '', searchQuery = null } = $props()
+  const href = $derived(`/watch?v=${video.id}&src=${surface}${extra}`)
 
   const pct = $derived(
     video.duration && video.resume_position ? Math.min(100, (video.resume_position / video.duration) * 100) : 0,
@@ -14,12 +16,15 @@
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
     e.preventDefault()
     trackClick({ video_id: video.id, surface, position, request_id: requestId })
-    navigate(`/watch?v=${video.id}&src=${surface}`)
+    if (searchQuery) {
+      trackEvent('search_click', { video_id: video.id, payload: { q: searchQuery, kind: 'video', position } })
+    }
+    navigate(href)
   }
 </script>
 
 <article class="card" use:impression={{ videoId: video.id, surface, position, requestId }}>
-  <a class="thumb" href={`/watch?v=${video.id}&src=${surface}`} onclick={open} tabindex="-1" aria-hidden="true">
+  <a class="thumb" {href} onclick={open} tabindex="-1" aria-hidden="true">
     {#if !imgFailed}
       <img src={`/api/thumb/${video.id}/mqdefault`} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
     {/if}
@@ -28,8 +33,12 @@
     {#if pct > 0 && !video.completed}<span class="bar"><span style:width={pct + '%'}></span></span>{/if}
   </a>
   <div class="meta">
-    <a class="title" href={`/watch?v=${video.id}&src=${surface}`} onclick={open} title={video.title}>{video.title}</a>
-    <a class="chan muted" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
+    <a class="title" {href} onclick={open} title={video.title}>{video.title}</a>
+    {#if video.channel_id}
+      <a class="chan muted" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
+    {:else}
+      <span class="chan muted">{video.channel_title}</span>
+    {/if}
     <div class="muted small">
       {[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}
     </div>

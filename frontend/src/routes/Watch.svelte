@@ -1,12 +1,14 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { router } from '../lib/router.svelte.js'
+  import { router, navigate } from '../lib/router.svelte.js'
   import { duration as fmt, ago, views } from '../lib/format.js'
   import Player from '../components/Player.svelte'
 
   const id = router.query.get('v')
   const source = router.query.get('src') ?? 'direct'
+  const list = router.query.get('list')   // present when playing from a playlist
+  let pl = $state(null)
 
   let video = $state(null)
   let error = $state('')
@@ -16,6 +18,7 @@
 
   onMount(() => {
     let timer
+    if (list) api.get(`/api/playlist/${list}`).then((p) => (pl = p)).catch(() => {})
     api.get(`/api/video/${id}`).then((v) => {
       video = v
       document.title = `${v.title} · newtube`
@@ -25,6 +28,11 @@
   })
 
   const current = $derived(video?.chapters?.findLastIndex((c) => c.start <= t) ?? -1)
+  const at = $derived(pl ? pl.videos.findIndex((v) => v.id === id) : -1)
+  const next = $derived(at >= 0 ? pl.videos[at + 1] : null)
+  const watchHref = (vid) => `/watch?v=${vid}&src=playlist&list=${list}`
+  // Playlist autoplay: when this video ends, go to the next one.
+  const advance = () => { if (next) navigate(watchHref(next.id)) }
 </script>
 
 <div class="watch">
@@ -34,12 +42,26 @@
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}
-    <Player {video} {source} startAt={video.resume_position} bind:api={player} />
+    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list ? advance : null} />
     <h1>{video.title}</h1>
     <div class="byline">
       <a class="chan" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
       <span class="muted">{[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}</span>
     </div>
+
+    {#if pl}
+      <section class="plist">
+        <h2>{pl.playlist.title} <span class="muted">· {at + 1 || '?'} / {pl.videos.length}</span></h2>
+        <ol>
+          {#each pl.videos as v, i (v.id)}
+            <li class:current={v.id === id}>
+              <a href={watchHref(v.id)}><span class="ts">{i + 1}</span><span>{v.title}</span>
+                {#if v.duration}<span class="muted dur">{fmt(v.duration)}</span>{/if}</a>
+            </li>
+          {/each}
+        </ol>
+      </section>
+    {/if}
 
     {#if video.chapters.length}
       <section>
@@ -77,6 +99,12 @@
   .chapters button:hover { background: var(--bg-hover); }
   .current button { background: var(--bg-elev); color: var(--accent); font-weight: 600; }
   .ts { color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 4.5ch; }
+  .plist ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto;
+    border: 1px solid var(--border); border-radius: var(--radius); }
+  .plist a { display: flex; gap: 12px; padding: 7px 12px; align-items: baseline; }
+  .plist a:hover { background: var(--bg-hover); }
+  .plist li.current a { background: var(--bg-elev); color: var(--accent); font-weight: 600; }
+  .plist .dur { margin-left: auto; font-variant-numeric: tabular-nums; }
   .desc { background: var(--bg-elev); border-radius: var(--radius); padding: 14px 16px; }
   .desc pre { font: inherit; white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; max-height: 6.5em; overflow: hidden; }
   .desc.open pre { max-height: none; }

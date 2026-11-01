@@ -23,3 +23,9 @@ export function ago(ts) {
 
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 export const views = (n) => (n == null ? '' : compact.format(n) + ' views')
+
+const subsFmt = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
+export const subscribers = (n) => (n == null ? '' : subsFmt.format(n) + ' subscribers')
+
+// Avatars / playlist thumbnails of things we don't have locally go through our image proxy.
+export const img = (u) => (u ? '/api/img?u=' + encodeURIComponent(u) : '')

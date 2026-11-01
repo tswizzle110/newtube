@@ -1,11 +1,14 @@
 <script>
   import { onMount } from 'svelte'
-  import { router, interceptLinks } from './lib/router.svelte.js'
+  import { router, interceptLinks, navigate } from './lib/router.svelte.js'
   import { auth, checkAuth, logout } from './lib/auth.svelte.js'
   import Login from './routes/Login.svelte'
   import Feed from './routes/Feed.svelte'
   import Channels from './routes/Channels.svelte'
   import Watch from './routes/Watch.svelte'
+  import Search from './routes/Search.svelte'
+  import Channel from './routes/Channel.svelte'
+  import Playlist from './routes/Playlist.svelte'
 
   onMount(checkAuth)
 
@@ -19,9 +22,25 @@
   })
 
   const is = (p) => router.pathname === p
+
+  // Search box: `/` focuses it from anywhere (like YouTube), Enter searches videos.
+  let searchEl = $state()
+  let q = $state(new URLSearchParams(location.search).get('q') ?? '')
+  function doSearch(e) {
+    e.preventDefault()
+    const v = q.trim()
+    if (v) navigate(`/search?q=${encodeURIComponent(v)}&kind=video`)
+    searchEl?.blur()
+  }
+  function onKey(e) {
+    if (e.key === '/' && !e.target.closest?.('input, textarea, select, [contenteditable]')) {
+      e.preventDefault()
+      searchEl?.focus(); searchEl?.select()
+    }
+  }
 </script>
 
-<svelte:window onclick={interceptLinks} />
+<svelte:window onclick={interceptLinks} onkeydown={onKey} />
 
 {#if !auth.ready}
   <!-- checking session -->
@@ -34,6 +53,10 @@
       <a href="/" class:active={is('/')}>Subscriptions</a>
       <a href="/channels" class:active={is('/channels')}>Channels</a>
     </nav>
+    <form class="search" onsubmit={doSearch} role="search">
+      <input class="input" bind:this={searchEl} bind:value={q} placeholder="Search  ( / )" aria-label="Search"
+             maxlength="200" onkeydown={(e) => e.key === 'Escape' && e.target.blur()} />
+    </form>
     <span class="spacer"></span>
     <button class="btn" onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')} title="Toggle theme">
       {theme === 'dark' ? '☀' : '☾'}
@@ -47,6 +70,12 @@
       <Channels />
     {:else if is('/watch')}
       <Watch />
+    {:else if is('/search')}
+      <Search />
+    {:else if router.pathname.startsWith('/channel/')}
+      <Channel />
+    {:else if is('/playlist')}
+      <Playlist />
     {:else}
       <div class="page"><h1>Not found</h1><a href="/" class="muted">Back to subscriptions</a></div>
     {/if}
@@ -62,4 +91,6 @@
   nav a:hover { background: var(--bg-hover); color: var(--text); }
   nav a.active { color: var(--text); background: var(--bg-hover); }
   .spacer { flex: 1; }
+  .search { flex: 0 1 460px; }
+  .search .input { width: 100%; }
 </style>

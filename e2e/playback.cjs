@@ -98,6 +98,42 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   s = await state(p);
   check('muxed fallback plays when DASH is unavailable', s.t > 1 && s.w === 640, JSON.stringify(s));
 
+  // ---- search, channel and playlist pages
+  await p.goto(BASE + '/'); await p.waitForSelector('header');
+  await p.keyboard.press('/');
+  check('/ focuses the search box', await V(p, () => document.activeElement?.getAttribute('aria-label') === 'Search'));
+  await p.keyboard.type('zoo'); await p.keyboard.press('Enter');
+  await p.waitForSelector('.card');
+  check('search shows video results', p.url().includes('/search?q=zoo') && (await p.locator('.card .title').first().innerText()).includes('Search result video'));
+  await p.waitForTimeout(500);
+  check('result thumbnails load through our proxy', await V(p, () => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }));
+  await p.click('.tabs a:has-text("Channels")'); await p.waitForSelector('.row');
+  check('channel result avatar loads via /api/img (protocol-relative url handled)', await V(p, () => { const i = document.querySelector('.row img'); return !!i && i.complete && i.naturalWidth > 0 && i.src.includes('/api/img'); }));
+  await p.click('.row'); await p.waitForSelector('.head');
+  check('channel page: header and uploads', (await p.locator('.head h1').innerText()) === 'E2E Channel' && (await p.locator('.grid .card').count()) === 2);
+  await p.click('.head button'); await p.waitForFunction(() => document.querySelector('.head button')?.innerText.includes('Subscribed'));
+  const subs = await V(p, async () => (await (await fetch('/api/subscriptions')).json()));
+  check('Subscribe button subscribes', subs.some(x => x.id === 'UC' + 'a'.repeat(22)));
+  await p.goto(BASE + '/search?q=zoo&kind=playlist'); await p.waitForSelector('.card');
+  await p.click('.card'); await p.waitForSelector('.grid .card');
+  check('playlist result opens the playlist page', p.url().includes('/playlist?list=PLe2eplaylist00') && (await p.locator('.grid .card').count()) === 2);
+  await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
+  check('watch page shows playlist position', (await p.locator('.plist h2').innerText()).includes('1 / 2'));
+  await p.waitForFunction(() => document.querySelector('video')?.readyState >= 3, null, { timeout: 20000 });
+  await p.keyboard.press('9');                          // jump to 90%: the video ends in a couple of seconds
+  const advanced = await p.waitForURL(/v=e2eMUXED001/, { timeout: 15000 }).then(() => true).catch(() => false);
+  check('playlist autoplays the next video when one ends', advanced, p.url());
+  await p.evaluate(() => navigator.sendBeacon('/api/events', new Blob(['{}'], { type: 'application/json' }))); // flush path
+  await p.waitForTimeout(300);
+  await p.goto(BASE + '/search?q=zoo'); await p.waitForSelector('.card');
+  await p.click('.card .title'); await p.waitForURL(/\/watch/);
+  await p.waitForTimeout(6000);                                   // tracker batches for 5 s
+  const evs = await (await ctx.request.get(BASE + '/__events')).json();
+  const searches = evs.filter(e => e.type === 'search' && JSON.parse(e.payload).q === 'zoo');
+  const sclick = evs.filter(e => e.type === 'search_click' && e.video_id === 'e2eVIDEO001');
+  check('search queries are logged (server side, per kind)', searches.length >= 2, searches.map(e => JSON.parse(e.payload).kind).join(','));
+  check('search_click logged with query and position', sclick.length >= 1 && JSON.parse(sclick[0].payload).q === 'zoo' && JSON.parse(sclick[0].payload).position === 0, JSON.stringify(sclick[0]?.payload));
+
   const hits = await (await ctx.request.get(BASE + '/__hits')).json();
   const gv = hits.filter(h => /^\/(v360|v180|aud|mux)$/.test(h[0]));
   check('video bytes only via Range requests', gv.length > 0 && gv.every(h => h[1] && h[1].startsWith('bytes=')), gv.length + ' requests');

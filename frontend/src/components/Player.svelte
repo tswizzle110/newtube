@@ -4,7 +4,7 @@
   import { WatchTracker, trackEvent } from '../lib/tracker.js'
 
   // video: metadata from /api/video/<id>.  startAt: resume position (s).  api: bindable handle.
-  let { video, startAt = 0, source = 'direct', api = $bindable() } = $props()
+  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null } = $props()
 
   let box, el
   let paused = $state(true)
@@ -268,6 +268,7 @@
     bind:paused bind:volume bind:muted
     ontimeupdate={onTime} onprogress={onTime}
     ondurationchange={() => Number.isFinite(el.duration) && (dur = el.duration)}
+    onended={() => onended?.()}
     onclick={toggle} ondblclick={toggleFullscreen}
     onerror={() => mode === 'muxed' && (error = 'Playback error')}></video>
 
