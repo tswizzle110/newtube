@@ -18,6 +18,7 @@ import asyncio
 import datetime as dt
 import re
 import time
+from urllib.parse import quote_plus
 from typing import Any
 
 import yt_dlp
@@ -26,13 +27,17 @@ from ..config import Settings
 from ..net.http import ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
 from .base import (
-    AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ExtractionError, Format,
-    VideoInfo, VideoUnavailable,
+    AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, ExtractionError, Format,
+    PlaylistSummary, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
 )
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9._-]{3,}$")
+PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{13,64}$")
+
+# YouTube's `sp` search-filter parameter (type = video / channel / playlist).
+SEARCH_FILTERS = {"video": "EgIQAQ%3D%3D", "channel": "EgIQAg%3D%3D", "playlist": "EgIQAw%3D%3D"}
 
 
 # ------------------------------------------------------------ pure parsing
@@ -169,6 +174,48 @@ def parse_channel_info(info: dict[str, Any]) -> ChannelInfo:
     )
 
 
+def _last_thumb(e: dict[str, Any]) -> str | None:
+    thumbs = [x for x in (e.get("thumbnails") or []) if x.get("url")]
+    return thumbs[-1]["url"] if thumbs else e.get("thumbnail")
+
+
+def parse_entry(e: dict[str, Any]) -> SearchItem | None:
+    """Turn one flat yt-dlp list entry into a summary. The kind is inferred from the id's shape
+    (UC... channel, 11 chars video, longer playlist), not from the query, because result pages
+    mix kinds. Returns None for anything else (shelves, ads, 'Shorts' rows)."""
+    id_ = e.get("id") or ""
+    title = e.get("title") or ""
+    if CHANNEL_ID_RE.match(id_):
+        handle = e.get("uploader_id") if str(e.get("uploader_id", "")).startswith("@") else None
+        if handle is None:
+            m = re.search(r"/(@[A-Za-z0-9._-]+)", e.get("url") or "")
+            handle = m.group(1) if m else None
+        return ChannelSummary(id_, title or e.get("channel") or id_, handle, e.get("description"),
+                              _last_thumb(e), e.get("channel_follower_count"))
+    if VIDEO_ID_RE.match(id_):
+        pub = e.get("timestamp") or e.get("release_timestamp")
+        return VideoSummary(
+            id_, title, e.get("channel_id"), e.get("channel") or e.get("uploader"),
+            int(e["duration"]) if e.get("duration") else None, e.get("view_count"),
+            int(pub) if pub else None,
+            e.get("live_status") in ("is_live", "is_upcoming") or bool(e.get("is_live")))
+    if PLAYLIST_ID_RE.match(id_):
+        return PlaylistSummary(id_, title, e.get("channel") or e.get("uploader"),
+                               e.get("playlist_count") or e.get("n_entries"), _last_thumb(e))
+    return None
+
+
+def parse_entries(info: dict[str, Any]) -> list[SearchItem]:
+    out: list[SearchItem] = []
+    seen: set[str] = set()
+    for e in info.get("entries") or []:
+        item = parse_entry(e) if isinstance(e, dict) else None
+        if item and item.id not in seen:
+            seen.add(item.id)
+            out.append(item)
+    return out
+
+
 # ------------------------------------------------------------ implementation
 
 
@@ -216,9 +263,48 @@ class YtDlpExtractor:
         )
         return parse_channel_info(info)
 
-    # Phase 2.
-    async def search(self, *a: Any, **k: Any) -> Any:
-        raise NotImplementedError("search arrives in phase 2")
+    # ---- lists: search, channel uploads, playlists ----------------------------------------
+    # Each has a raw_* twin returning yt-dlp's untouched dict (used by `selftest --dump`).
+
+    @staticmethod
+    def _flat(limit: int) -> dict[str, Any]:
+        return {"extract_flat": "in_playlist", "playlistend": limit, "noplaylist": False}
+
+    async def raw_search(self, query: str, kind: str = "video", limit: int = 20, *,
+                         background: bool = False) -> dict[str, Any]:
+        query = query.strip()
+        if not 1 <= len(query) <= 200 or kind not in SEARCH_FILTERS:
+            raise ExtractionError("bad search request")
+        url = f"https://www.youtube.com/results?search_query={quote_plus(query)}&sp={SEARCH_FILTERS[kind]}"
+        return await self._extract(url, self._flat(max(1, min(limit, 50))), background)
+
+    async def search(self, query: str, kind: str = "video", limit: int = 20, *,
+                     background: bool = False) -> list[SearchItem]:
+        return parse_entries(await self.raw_search(query, kind, limit, background=background))
+
+    async def raw_channel_videos(self, channel_id: str, limit: int = 30, *,
+                                 background: bool = False) -> dict[str, Any]:
+        if not CHANNEL_ID_RE.match(channel_id):
+            raise ExtractionError(f"bad channel id: {channel_id!r}")
+        return await self._extract(f"https://www.youtube.com/channel/{channel_id}/videos",
+                                   self._flat(max(1, min(limit, 100))), background)
+
+    async def channel_videos(self, channel_id: str, limit: int = 30, *,
+                             background: bool = False) -> list[VideoSummary]:
+        info = await self.raw_channel_videos(channel_id, limit, background=background)
+        return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+
+    async def raw_playlist(self, playlist_id: str, limit: int = 100, *,
+                           background: bool = False) -> dict[str, Any]:
+        if not PLAYLIST_ID_RE.match(playlist_id):
+            raise ExtractionError(f"bad playlist id: {playlist_id!r}")
+        return await self._extract(f"https://www.youtube.com/playlist?list={playlist_id}",
+                                   self._flat(max(1, min(limit, 200))), background)
+
+    async def playlist(self, playlist_id: str, limit: int = 100, *,
+                       background: bool = False) -> list[VideoSummary]:
+        info = await self.raw_playlist(playlist_id, limit, background=background)
+        return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
 
     async def comments(self, *a: Any, **k: Any) -> Any:
-        raise NotImplementedError("comments arrive in phase 2")
+        raise NotImplementedError("comments: later in phase 2")

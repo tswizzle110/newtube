@@ -104,3 +104,58 @@ def test_formats_keep_language_preference_for_original_audio_detection():
                          "vcodec": "none", "acodec": "mp4a.40.2", "protocol": "https", "language": "en-US",
                          "language_preference": 10, "format_note": "English (US) original (default), medium"}])
     assert fm[0].language_preference == 10 and fm[0].language == "en-US"
+
+
+# ---- list entries. SYNTHETIC samples shaped like yt-dlp's flat output; `selftest --dump`
+# ---- writes the real thing, to be swapped in as fixtures. --------------------------------
+
+from newtube.extract.base import ChannelSummary, PlaylistSummary, VideoSummary  # noqa: E402
+from newtube.extract.ytdlp import parse_entries, parse_entry  # noqa: E402
+
+
+def test_parse_entry_classifies_by_id_shape():
+    v = parse_entry({"id": "jNQXAC9IVRw", "title": "Zoo", "duration": 19.0, "view_count": 5,
+                     "channel_id": UC, "channel": "jawed", "live_status": "not_live"})
+    assert isinstance(v, VideoSummary) and (v.duration, v.channel_id, v.is_live) == (19, UC, False)
+    c = parse_entry({"id": UC, "title": "YouTube", "url": "https://www.youtube.com/@YouTube",
+                     "channel_follower_count": 1000, "thumbnails": [{"url": "https://yt3.ggpht.com/a"}]})
+    assert isinstance(c, ChannelSummary) and c.handle == "@YouTube" and c.avatar_url.endswith("/a")
+    pl = parse_entry({"id": "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI", "title": "List", "channel": "Crash",
+                      "playlist_count": 40})
+    assert isinstance(pl, PlaylistSummary) and pl.video_count == 40
+
+
+def test_parse_entry_ignores_unknown_shapes_and_live():
+    assert parse_entry({"id": "short", "title": "x"}) is None
+    assert parse_entry({"title": "no id"}) is None
+    assert parse_entry({"id": "jNQXAC9IVRw", "title": "t", "live_status": "is_live"}).is_live
+
+
+def test_parse_entries_dedupes_and_mixes_kinds():
+    info = {"entries": [{"id": "jNQXAC9IVRw", "title": "a"}, {"id": "jNQXAC9IVRw", "title": "dup"},
+                        {"id": UC, "title": "chan"}, None, "junk", {"id": "x", "title": "?"}]}
+    assert [type(i).__name__ for i in parse_entries(info)] == ["VideoSummary", "ChannelSummary"]
+
+
+async def test_search_builds_filtered_url_and_validates(monkeypatch):
+    from newtube.config import Settings
+    from newtube.extract.ytdlp import YtDlpExtractor
+    from newtube.net.ratelimit import RateLimiter
+    ex = YtDlpExtractor(Settings(), RateLimiter(0, 0, 10))
+    seen = {}
+
+    async def fake(url, extra, background):
+        seen.update(url=url, extra=extra)
+        return {"entries": [{"id": "jNQXAC9IVRw", "title": "Zoo"}]}
+    monkeypatch.setattr(ex, "_extract", fake)
+    res = await ex.search("me at the zoo & more", "channel", limit=500)
+    assert "search_query=me+at+the+zoo+%26+more" in seen["url"] and seen["url"].endswith("sp=EgIQAg%3D%3D")
+    assert seen["extra"]["playlistend"] == 50           # clamped
+    assert res[0].id == "jNQXAC9IVRw"
+    for bad in [("", "video"), ("x" * 201, "video"), ("ok", "everything")]:
+        with pytest.raises(ExtractionError):
+            await ex.search(*bad)
+    with pytest.raises(ExtractionError):
+        await ex.raw_channel_videos("not-a-channel")
+    with pytest.raises(ExtractionError):
+        await ex.raw_playlist("../etc/passwd")

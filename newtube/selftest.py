@@ -20,7 +20,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .config import Settings, load_settings
-from .extract.base import Extractor, VideoInfo
+from .extract.base import ChannelSummary, Extractor, PlaylistSummary, VideoInfo, VideoSummary
+from .extract.rss import feed_url, parse_feed
 from .net.http import HostNotAllowed, OutboundClient, check_url
 from .net.ratelimit import RateLimiter
 
@@ -28,6 +29,7 @@ from .net.ratelimit import RateLimiter
 TEST_VIDEO = "jNQXAC9IVRw"                       # "Me at the zoo", the first YouTube video
 TEST_CHANNEL_HANDLE = "@YouTube"
 TEST_CHANNEL_ID = "UCBR8-60-B28hp2BmDPdntcQ"     # official YouTube channel (RSS test)
+TEST_QUERIES = {"video": "me at the zoo", "channel": "youtube", "playlist": "crash course"}
 
 
 @dataclass
@@ -61,6 +63,8 @@ class SelfTest:
         self.settings, self.extractor, self.http, self.dump_dir = settings, extractor, http, dump_dir
         self.results: list[Result] = []
         self.info: VideoInfo | None = None
+        self.playlist_id: str | None = None
+        self.samples: list[str] = []
 
     async def _check(self, name: str, fn: Callable[[], Awaitable[str]]) -> None:
         t0 = time.monotonic()
@@ -69,6 +73,19 @@ class SelfTest:
         except Exception as e:  # noqa: BLE001 - a selftest must report, not crash
             detail, ok = f"{type(e).__name__}: {e}", False
         self.results.append(Result(name, ok, time.monotonic() - t0, detail))
+
+    def _dump(self, name: str, raw: object) -> None:
+        """With --dump: save redacted raw extractor output, plus the first entries as short text
+        samples (samples.txt) that are easy to paste into a bug report."""
+        if not self.dump_dir:
+            return
+        self.dump_dir.mkdir(parents=True, exist_ok=True)
+        red = redact_info(raw)
+        (self.dump_dir / f"{name}.json").write_text(json.dumps(red, indent=1))
+        entries = red.get("entries") if isinstance(red, dict) else None
+        for e in (entries or [])[:2]:
+            self.samples.append(f"## {name}\n{json.dumps(e)[:900]}\n")
+        (self.dump_dir / "samples.txt").write_text("\n".join(self.samples))
 
     # ---- individual checks -------------------------------------------------
 
@@ -93,13 +110,18 @@ class SelfTest:
         raise RuntimeError("example.com was NOT refused")
 
     async def rss(self) -> str:
-        r = await self.http.get(
-            f"https://www.youtube.com/feeds/videos.xml?channel_id={TEST_CHANNEL_ID}")
+        r = await self.http.get(feed_url(TEST_CHANNEL_ID))
         r.raise_for_status()
-        n = r.text.count("<entry>")
-        if n == 0:
-            raise RuntimeError("feed had no <entry> elements")
-        return f"{n} entries"
+        if self.dump_dir:
+            self.dump_dir.mkdir(parents=True, exist_ok=True)
+            (self.dump_dir / "rss.xml").write_text(r.text)
+        feed = parse_feed(r.text)           # the same parser the app uses
+        if not feed.entries:
+            raise RuntimeError("feed parsed but has no entries")
+        if feed.channel_id != TEST_CHANNEL_ID:
+            raise RuntimeError(f"channel id {feed.channel_id!r} != requested {TEST_CHANNEL_ID!r}")
+        e = feed.entries[0]
+        return f"'{feed.channel_title}': {len(feed.entries)} entries, newest '{e.title[:40]}'"
 
     async def video_info(self) -> str:
         if self.dump_dir and hasattr(self.extractor, "raw_video_info"):
@@ -160,6 +182,52 @@ class SelfTest:
         c = await self.extractor.resolve_channel(TEST_CHANNEL_HANDLE)
         return f"{TEST_CHANNEL_HANDLE} -> {c.id} '{c.title}', avatar {'yes' if c.avatar_url else 'no'}"
 
+    async def _search(self, kind: str, cls: type) -> str:
+        raw_fn = getattr(self.extractor, "raw_search", None)
+        if raw_fn is None:
+            raise RuntimeError("extractor has no search")
+        raw = await raw_fn(TEST_QUERIES[kind], kind, 10)
+        self._dump(f"search_{kind}", raw)
+        from .extract.ytdlp import parse_entries
+        items = parse_entries(raw)
+        got = [i for i in items if isinstance(i, cls)]
+        if not got:
+            kinds = sorted({type(i).__name__ for i in items}) or ["nothing"]
+            raise RuntimeError(f"no {cls.__name__} in results (parsed: {', '.join(kinds)}; "
+                               f"{len(raw.get('entries') or [])} raw entries)")
+        if kind == "playlist":
+            self.playlist_id = got[0].id
+        return f"{len(got)}/{len(items)} parsed as {cls.__name__}; first: '{got[0].title[:40]}'"
+
+    async def search_video(self) -> str:
+        return await self._search("video", VideoSummary)
+
+    async def search_channel(self) -> str:
+        return await self._search("channel", ChannelSummary)
+
+    async def search_playlist(self) -> str:
+        return await self._search("playlist", PlaylistSummary)
+
+    async def channel_videos(self) -> str:
+        from .extract.ytdlp import parse_entries
+        raw = await self.extractor.raw_channel_videos(TEST_CHANNEL_ID, 10)  # type: ignore[attr-defined]
+        self._dump("channel_videos", raw)
+        vids = [i for i in parse_entries(raw) if isinstance(i, VideoSummary)]
+        if not vids:
+            raise RuntimeError(f"no videos parsed from {len(raw.get('entries') or [])} raw entries")
+        return f"{len(vids)} videos; newest '{vids[0].title[:40]}', duration {vids[0].duration}s"
+
+    async def playlist_videos(self) -> str:
+        if not self.playlist_id:
+            raise RuntimeError("skipped: playlist search found no playlist")
+        from .extract.ytdlp import parse_entries
+        raw = await self.extractor.raw_playlist(self.playlist_id, 10)  # type: ignore[attr-defined]
+        self._dump("playlist", raw)
+        vids = [i for i in parse_entries(raw) if isinstance(i, VideoSummary)]
+        if not vids:
+            raise RuntimeError(f"no videos parsed from {len(raw.get('entries') or [])} raw entries")
+        return f"{self.playlist_id[:14]}...: {len(vids)} videos; first '{vids[0].title[:40]}'"
+
     async def sponsorblock(self) -> str:
         p = sponsorblock_prefix(TEST_VIDEO)
         r = await self.http.get(f"https://sponsor.ajay.app/api/skipSegments/{p}")
@@ -172,7 +240,10 @@ class SelfTest:
             ("environment", self.environment), ("allowlist", self.allowlist),
             ("rss", self.rss), ("video_info", self.video_info),
             ("stream_range", self.stream_range), ("thumbnail", self.thumbnail),
-            ("channel", self.channel), ("sponsorblock", self.sponsorblock),
+            ("channel", self.channel), ("search_video", self.search_video),
+            ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
+            ("channel_videos", self.channel_videos), ("playlist", self.playlist_videos),
+            ("sponsorblock", self.sponsorblock),
         ]:
             await self._check(name, fn)
         return self.results
@@ -181,7 +252,7 @@ class SelfTest:
 def format_results(results: list[Result]) -> str:
     lines = []
     for r in results:
-        lines.append(f"[{' OK ' if r.ok else 'FAIL'}] {r.name:<13}{r.seconds:5.1f}s  {r.detail}")
+        lines.append(f"[{' OK ' if r.ok else 'FAIL'}] {r.name:<15}{r.seconds:5.1f}s  {r.detail}")
     bad = sum(not r.ok for r in results)
     lines.append("")
     lines.append("all checks passed" if not bad else f"{bad} check(s) FAILED")

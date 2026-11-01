@@ -111,6 +111,41 @@ class ChannelInfo:
     description: str | None = None
 
 
+@dataclass
+class VideoSummary:
+    """A video as it appears in a list (search results, channel tab, playlist): no formats."""
+    id: str
+    title: str
+    channel_id: str | None = None
+    channel_title: str | None = None
+    duration: int | None = None
+    view_count: int | None = None
+    published_at: int | None = None
+    is_live: bool = False
+
+
+@dataclass
+class ChannelSummary:
+    id: str
+    title: str
+    handle: str | None = None
+    description: str | None = None
+    avatar_url: str | None = None
+    subscriber_count: int | None = None
+
+
+@dataclass
+class PlaylistSummary:
+    id: str
+    title: str
+    channel_title: str | None = None
+    video_count: int | None = None
+    thumbnail_url: str | None = None
+
+
+SearchItem = VideoSummary | ChannelSummary | PlaylistSummary
+
+
 class Extractor(Protocol):
     """Everything the app needs from YouTube. Methods are async; lane choice
     (interactive vs background) is made by the caller via the rate limiter."""
@@ -121,4 +156,15 @@ class Extractor(Protocol):
         """``ref`` may be a UC... id, an @handle, or a youtube.com channel URL."""
         ...
 
-    # Phase 2: search, channel_videos, playlist, related, comments.
+    async def search(self, query: str, kind: str = "video", limit: int = 20, *,
+                     background: bool = False) -> list[SearchItem]:
+        """``kind`` is 'video', 'channel' or 'playlist'."""
+        ...
+
+    async def channel_videos(self, channel_id: str, limit: int = 30, *,
+                             background: bool = False) -> list[VideoSummary]: ...
+
+    async def playlist(self, playlist_id: str, limit: int = 100, *,
+                       background: bool = False) -> list[VideoSummary]: ...
+
+    # Later: related videos, comments.

@@ -82,8 +82,8 @@ def due_for_poll(conn: sqlite3.Connection, interval: int, now: int | None = None
     return [r["id"] for r in rows]
 
 
-def get_feed(conn: sqlite3.Connection, *, limit: int = 60, before: int | None = None,
-             hide_shorts: bool = False) -> list[sqlite3.Row]:
+def get_feed(conn: sqlite3.Connection, *, limit: int = 60,
+             before: int | None = None) -> list[sqlite3.Row]:
     sql = ("SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar,"
            "  p.position AS resume_position, p.completed AS completed"
            " FROM videos v JOIN subscriptions s ON s.channel_id = v.channel_id"
@@ -94,8 +94,6 @@ def get_feed(conn: sqlite3.Connection, *, limit: int = 60, before: int | None = 
     if before is not None:
         sql += " AND v.published_at < ?"
         args.append(before)
-    if hide_shorts:
-        sql += " AND v.is_short = 0"
     sql += " ORDER BY v.published_at DESC LIMIT ?"
     args.append(limit)
     return conn.execute(sql, args).fetchall()
