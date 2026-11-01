@@ -47,6 +47,14 @@ class HostNotAllowed(Exception):
     """Raised when code tries to contact a host outside the allowlist."""
 
 
+def absolute_url(url: str | None) -> str | None:
+    """YouTube returns channel avatars as protocol-relative URLs ("//yt3.ggpht.com/..."); the
+    allowlist only accepts full https URLs, so complete them."""
+    if url and url.startswith("//"):
+        return "https:" + url
+    return url
+
+
 def check_url(url: str) -> None:
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()

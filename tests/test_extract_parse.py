@@ -159,3 +159,48 @@ async def test_search_builds_filtered_url_and_validates(monkeypatch):
         await ex.raw_channel_videos("not-a-channel")
     with pytest.raises(ExtractionError):
         await ex.raw_playlist("../etc/passwd")
+
+
+# ---- the same parsing against REAL entries (tests/fixtures_entries.py) ----------------------
+
+from tests import fixtures_entries as real  # noqa: E402
+
+
+def test_real_search_video_entry():
+    v = parse_entry(real.SEARCH_VIDEO)
+    assert isinstance(v, VideoSummary)
+    assert (v.id, v.title, v.duration, v.view_count) == ("jNQXAC9IVRw", "Me at the zoo", 19, 447482126)
+    assert (v.channel_id, v.channel_title, v.published_at, v.is_live) == ("UC4QobU6STFB0P71PMvOGN5A", "jawed", None, False)
+
+
+def test_real_search_channel_entry_avatar_is_made_absolute_https():
+    c = parse_entry(real.SEARCH_CHANNEL)
+    assert isinstance(c, ChannelSummary)
+    assert (c.id, c.title, c.handle, c.subscriber_count) == ("UCBR8-60-B28hp2BmDPdntcQ", "YouTube", "@YouTube", 46600000)
+    assert c.avatar_url.startswith("https://yt3.ggpht.com/") and c.avatar_url.endswith("s176-c-k-c0x00ffffff-no-rj-mo")
+    from newtube.net.http import check_url
+    check_url(c.avatar_url)          # would raise for the original "//yt3..." form
+
+
+def test_real_search_playlist_entry():
+    p = parse_entry(real.SEARCH_PLAYLIST)
+    assert isinstance(p, PlaylistSummary)
+    assert (p.id, p.title, p.channel_title, p.video_count) == ("PLBDA2E52FB1EF80C9", "World History", "CrashCourse", None)
+    assert p.thumbnail_url.startswith("https://i.ytimg.com/vi/Yocja_N5s1I/")
+
+
+def test_real_channel_tab_entry_has_no_channel_or_views():
+    v = parse_entry(real.CHANNEL_TAB_VIDEO)
+    assert isinstance(v, VideoSummary) and v.duration == 607
+    assert (v.channel_id, v.channel_title, v.view_count) == (None, None, None)   # caller must fill these in
+
+
+def test_real_playlist_video_entry():
+    v = parse_entry(real.PLAYLIST_VIDEO)
+    assert (v.id, v.channel_id, v.view_count, v.duration) == ("Yocja_N5s1I", "UCX6b17PVsYBQ0ip5gyeme-Q", 17000000, 671)
+
+
+def test_channel_info_avatar_is_absolute():
+    c = parse_channel_info({"channel_id": UC, "channel": "C", "thumbnails": [
+        {"id": "avatar_uncropped", "url": "//yt3.ggpht.com/x=s0"}]})
+    assert c.avatar_url == "https://yt3.ggpht.com/x=s0"

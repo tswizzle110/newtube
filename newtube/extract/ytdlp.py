@@ -24,7 +24,7 @@ from typing import Any
 import yt_dlp
 
 from ..config import Settings
-from ..net.http import ytdlp_network_opts
+from ..net.http import absolute_url, ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
 from .base import (
     AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, ExtractionError, Format,
@@ -169,14 +169,14 @@ def parse_channel_info(info: dict[str, Any]) -> ChannelInfo:
         id=cid,
         title=info.get("channel") or info.get("uploader") or info.get("title") or cid,
         handle=handle if handle and handle.startswith("@") else None,
-        avatar_url=avatar,
+        avatar_url=absolute_url(avatar),
         description=info.get("description"),
     )
 
 
 def _last_thumb(e: dict[str, Any]) -> str | None:
     thumbs = [x for x in (e.get("thumbnails") or []) if x.get("url")]
-    return thumbs[-1]["url"] if thumbs else e.get("thumbnail")
+    return absolute_url(thumbs[-1]["url"] if thumbs else e.get("thumbnail"))
 
 
 def parse_entry(e: dict[str, Any]) -> SearchItem | None:

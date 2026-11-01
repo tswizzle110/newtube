@@ -175,3 +175,12 @@ def test_cache_entries_from_older_code_are_ignored(env):
                      ("video:aaaaaaaaaaa", json.dumps(stale), 1, int(time.time()) + 9999))
     assert client.get("/api/video/aaaaaaaaaaa").json()["title"] == "Title"
     assert ex.calls == 1
+
+
+def test_avatar_stored_in_old_protocol_relative_form_still_loads(env):
+    """Regression: avatars saved as '//yt3.ggpht.com/..' (as YouTube returns them) were refused
+    by the https-only allowlist, giving a broken image for every subscription."""
+    client, ctx, *_ = env
+    ctx.conn.execute("INSERT INTO channels(id,title,avatar_url,created_at) VALUES (?,?,?,1)",
+                     (CID, "Chan", "//yt3.ggpht.com/av=s88"))
+    assert client.get(f"/api/avatar/{CID}").content == b"AVATAR"

@@ -14,6 +14,7 @@ from ..extract.base import Format
 from ..media.dash import Rep, build_mpd, select_formats
 from ..media.isobmff import NotDashMp4, Ranges, probe_ranges
 from ..media.ranges import clamp_range
+from ..net.http import absolute_url
 from .deps import get_ctx, valid_channel_id, valid_video_id
 
 router = APIRouter(prefix="/api")
@@ -51,7 +52,7 @@ async def avatar(channel_id: str, ctx: Context = Depends(get_ctx)) -> Response:
     if hit:
         body, ctype = hit
     else:
-        r = await ctx.http.get_media(row["avatar_url"])
+        r = await ctx.http.get_media(absolute_url(row["avatar_url"]))
         if r.status_code != 200:
             raise HTTPException(404, "no avatar")
         body, ctype = r.content, r.headers.get("content-type", "image/jpeg")
