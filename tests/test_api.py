@@ -7,7 +7,7 @@ from newtube.auth import Auth
 from newtube.config import Settings
 from newtube.db.connection import connect, migrate
 from newtube.extract.base import (
-    ChannelInfo, ChannelSummary, Chapter, Format, PlaylistSummary, VideoInfo, VideoSummary, VideoUnavailable,
+    ChannelInfo, Comment, CommentPage, ChannelSummary, Chapter, Format, PlaylistSummary, VideoInfo, VideoSummary, VideoUnavailable,
 )
 from newtube.media.diskcache import DiskCache
 from newtube.net.http import OutboundClient
@@ -35,6 +35,7 @@ class FakeExtractor:
     def __init__(self):
         self.calls = 0
         self.list_calls = 0
+        self.comment_calls = []
 
     async def video_info(self, video_id, *, background=False):
         if video_id == "unavailable":
@@ -49,6 +50,18 @@ class FakeExtractor:
 
     async def resolve_channel(self, ref, *, background=False):
         return ChannelInfo(CID, "YouTube", "@YouTube", "https://yt3.ggpht.com/av")
+
+    # ---- comments (synthetic): 45 top-level comments exist; threads 1-5 have 3 replies, thread 5 has none
+    async def comments(self, video_id, sort="top", limit=20, *, replies_for=0, replies_per_thread=10,
+                       background=False):
+        self.comment_calls.append((sort, limit, replies_for))
+        out = []
+        for i in range(min(limit, 45)):
+            cid = f"Ugx{i:07d}"
+            out.append(Comment(cid, f"{sort} comment {i}", f"Author{i}", like_count=100 - i, time_text="2 days ago"))
+            if i < replies_for and i != 4:
+                out += [Comment(f"{cid}.r{j}", f"reply {j} to {i}", "Replier", parent=cid) for j in range(3)]
+        return CommentPage(out, 4321)
 
     # ---- lists (shapes copied from real yt-dlp results; see tests/fixtures_entries.py)
     async def search(self, query, kind="video", limit=20, *, background=False):
@@ -294,3 +307,92 @@ def test_list_endpoints_require_login(env):
     anon = TestClient(env[0].app)
     for url in ("/api/search?q=x", f"/api/channel/{CID}", "/api/playlist/PLBDA2E52FB1EF80C9", "/api/img?u=x"):
         assert anon.get(url).status_code == 401, url
+
+
+# ---- comments --------------------------------------------------------------------------------
+
+V = "aaaaaaaaaaa"
+
+
+def test_comments_first_page_has_more_and_estimate(env):
+    client, ctx, ex, _ = env
+    r = client.get(f"/api/comments/{V}").json()
+    assert len(r["comments"]) == 20 and r["has_more"] is True and r["total_estimate"] == 4321
+    assert r["comments"][0]["text"] == "top comment 0" and r["max_reply_threads"] == 10
+    assert ex.comment_calls == [("top", 20, 0)]
+
+
+def test_comments_cached_and_smaller_requests_are_sliced_from_cache(env):
+    client, ctx, ex, _ = env
+    client.get(f"/api/comments/{V}?limit=40")
+    assert len(client.get(f"/api/comments/{V}?limit=20").json()["comments"]) == 20
+    assert client.get(f"/api/comments/{V}?limit=20").json()["has_more"] is True   # 40 are held
+    assert ex.comment_calls == [("top", 40, 0)]                                    # one fetch only
+
+
+def test_load_more_refetches_bigger_and_stops_when_comments_run_out(env):
+    client, ctx, ex, _ = env
+    client.get(f"/api/comments/{V}?limit=20")
+    r = client.get(f"/api/comments/{V}?limit=60").json()                           # only 45 exist
+    assert len(r["comments"]) == 45 and r["has_more"] is False
+    assert ex.comment_calls == [("top", 20, 0), ("top", 60, 0)]
+
+
+def test_sorts_are_cached_separately_and_validated(env):
+    client, ctx, ex, _ = env
+    assert client.get(f"/api/comments/{V}?sort=new").json()["comments"][0]["text"] == "new comment 0"
+    client.get(f"/api/comments/{V}?sort=top")
+    assert [c[0] for c in ex.comment_calls] == ["new", "top"]
+    assert client.get(f"/api/comments/{V}?sort=hot").status_code == 400
+    assert client.get(f"/api/comments/{V}?limit=101").status_code == 422
+    assert client.get("/api/comments/short").status_code == 400
+
+
+def test_replies_need_loaded_comments_and_are_capped_at_ten_threads(env):
+    client, ctx, ex, _ = env
+    cid = lambda i: f"Ugx{i:07d}"
+    assert client.get(f"/api/comments/{V}/replies/{cid(0)}").status_code == 404      # nothing loaded yet
+    client.get(f"/api/comments/{V}?limit=20")
+    assert client.get(f"/api/comments/{V}/replies/{cid(10)}").status_code == 409     # the 11th comment
+    assert client.get(f"/api/comments/{V}/replies/{cid(10)}").json()["detail"].startswith("Replies are only")
+    assert client.get(f"/api/comments/{V}/replies/{cid(9)}").status_code == 200       # the 10th is fine
+    assert client.get(f"/api/comments/{V}/replies/not-a-loaded-comment").status_code == 404
+    assert client.get(f"/api/comments/{V}/replies/x").status_code == 400
+
+
+def test_expanding_a_thread_fetches_up_to_it_once_and_serves_earlier_ones_from_cache(env):
+    client, ctx, ex, _ = env
+    cid = lambda i: f"Ugx{i:07d}"
+    client.get(f"/api/comments/{V}?limit=20")
+    r3 = client.get(f"/api/comments/{V}/replies/{cid(2)}").json()
+    assert [x["text"] for x in r3["replies"]] == ["reply 0 to 2", "reply 1 to 2", "reply 2 to 2"]
+    assert r3["truncated"] is False
+    assert ex.comment_calls[-1] == ("top", 3, 3)                       # walked threads 1-3 only
+    n = len(ex.comment_calls)
+    assert len(client.get(f"/api/comments/{V}/replies/{cid(0)}").json()["replies"]) == 3
+    assert len(client.get(f"/api/comments/{V}/replies/{cid(1)}").json()["replies"]) == 3
+    assert len(ex.comment_calls) == n                                  # no more requests
+    assert client.get(f"/api/comments/{V}/replies/{cid(4)}").json()["replies"] == []   # a thread with none
+    assert ex.comment_calls[-1] == ("top", 5, 5)                       # deeper: one bigger walk
+
+
+def test_loading_more_comments_keeps_replies_already_fetched(env):
+    client, ctx, ex, _ = env
+    client.get(f"/api/comments/{V}?limit=20")
+    client.get(f"/api/comments/{V}/replies/Ugx0000001")
+    client.get(f"/api/comments/{V}?limit=40")
+    n = len(ex.comment_calls)
+    assert len(client.get(f"/api/comments/{V}/replies/Ugx0000001").json()["replies"]) == 3
+    assert len(ex.comment_calls) == n
+
+
+def test_comments_require_login_and_surface_extractor_failures(env):
+    from fastapi.testclient import TestClient
+    from newtube.extract.base import BotCheck
+    client, ctx, ex, _ = env
+    assert TestClient(client.app).get(f"/api/comments/{V}").status_code == 401
+
+    async def boom(*a, **k):
+        raise BotCheck("Sign in to confirm you're not a bot")
+    ex.comments = boom
+    assert client.get(f"/api/comments/{V}?sort=new").status_code == 503
