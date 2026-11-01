@@ -33,6 +33,11 @@ class Settings:
     request_jitter: float = 0.6         # extra random 0..jitter seconds
     background_daily_cap: int = 2000    # background-lane requests per day
 
+    # JavaScript runtime yt-dlp uses to solve YouTube's challenges.
+    # "deno" (default), "node", "bun" or "quickjs". Leave the path empty to find it on PATH.
+    js_runtime: str = "deno"
+    js_runtime_path: str = ""
+
     # Size-capped LRU cache for thumbnails/captions (bytes).
     cache_max_bytes: int = 3 * 1024**3
 

@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn>=0.30",
     "httpx>=0.27",
     "yt-dlp",          # keep current: `uv lock --upgrade-package yt-dlp`
+    "yt-dlp-ejs",      # YouTube JS-challenge solver scripts (so nothing is fetched at runtime)
 ]
 
 [dependency-groups]
