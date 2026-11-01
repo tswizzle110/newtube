@@ -1,0 +1,118 @@
+"""Batch endpoint for everything the frontend logs. Local SQLite only."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+
+from .. import tracking
+from ..app import Context
+from ..db.queries.events import log_event
+from .deps import CHANNEL_ID, VIDEO_ID, get_ctx
+
+router = APIRouter(prefix="/api")
+
+# Signals the frontend is allowed to log. Add new names here when you add new signals.
+EVENT_TYPES = {
+    "play", "pause", "seek", "speed_change", "quality_change", "fullscreen",
+    "comments_opened", "comments_scrolled", "chapter_click", "description_expanded",
+    "like", "unlike", "not_interested", "more_like_this", "dont_recommend_channel",
+    "search", "search_click", "feed_refresh",
+    "sb_skip", "sb_undo", "sb_manual_skip", "sb_vote",
+}
+SURFACES = {"for_you", "subs", "search", "related", "channel", "playlist", "history"}
+MAX_PAYLOAD = 2048
+
+
+class ImpressionIn(BaseModel):
+    video_id: str
+    surface: str
+    position: int | None = None
+    request_id: str | None = Field(None, max_length=64)
+    visible_ms: int | None = Field(None, ge=0, le=3_600_000)
+
+
+class ClickIn(BaseModel):
+    video_id: str
+    surface: str
+    request_id: str | None = Field(None, max_length=64)
+    position: int | None = None
+
+
+class EventIn(BaseModel):
+    type: str
+    video_id: str | None = None
+    channel_id: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    payload: dict[str, Any] | None = None
+
+
+class WatchIn(BaseModel):
+    session_id: str = Field(max_length=64)
+    video_id: str
+    source: str | None = Field(None, max_length=32)
+    position: float = Field(ge=0)
+    duration: float | None = Field(None, gt=0)
+    intervals: list[list[float]] = Field(default_factory=list, max_length=2000)
+    ended: bool = False
+
+
+class BatchIn(BaseModel):
+    impressions: list[ImpressionIn] = Field(default_factory=list, max_length=500)
+    clicks: list[ClickIn] = Field(default_factory=list, max_length=100)
+    events: list[EventIn] = Field(default_factory=list, max_length=500)
+    watch: list[WatchIn] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/events")
+async def ingest(batch: BatchIn, ctx: Context = Depends(get_ctx)) -> dict[str, int]:
+    c = ctx.conn
+    stored = {"impressions": 0, "clicks": 0, "events": 0, "watch": 0, "rejected": 0}
+    c.execute("BEGIN")
+    try:
+        for i in batch.impressions:
+            if not VIDEO_ID.match(i.video_id) or i.surface not in SURFACES:
+                stored["rejected"] += 1
+                continue
+            tracking.record_impression(c, video_id=i.video_id, surface=i.surface,
+                                       position=i.position, request_id=i.request_id,
+                                       visible_ms=i.visible_ms)
+            stored["impressions"] += 1
+        for k in batch.clicks:
+            if not VIDEO_ID.match(k.video_id) or k.surface not in SURFACES:
+                stored["rejected"] += 1
+                continue
+            if k.request_id:
+                c.execute("UPDATE impressions SET clicked=1 WHERE request_id=? AND video_id=?",
+                          (k.request_id, k.video_id))
+            log_event(c, "click", video_id=k.video_id,
+                      payload={"surface": k.surface, "position": k.position,
+                               "request_id": k.request_id})
+            stored["clicks"] += 1
+        for e in batch.events:
+            bad = (e.type not in EVENT_TYPES
+                   or (e.video_id and not VIDEO_ID.match(e.video_id))
+                   or (e.channel_id and not CHANNEL_ID.match(e.channel_id))
+                   or (e.payload is not None and len(json.dumps(e.payload)) > MAX_PAYLOAD))
+            if bad:
+                stored["rejected"] += 1
+                continue
+            log_event(c, e.type, video_id=e.video_id, channel_id=e.channel_id,
+                      session_id=e.session_id, payload=e.payload)
+            stored["events"] += 1
+        for w in batch.watch:
+            if not VIDEO_ID.match(w.video_id):
+                stored["rejected"] += 1
+                continue
+            tracking.record_watch(c, session_id=w.session_id, video_id=w.video_id, source=w.source,
+                                  position=w.position, duration=w.duration,
+                                  intervals=w.intervals, ended=w.ended)
+            stored["watch"] += 1
+        c.execute("COMMIT")
+    except Exception:
+        c.execute("ROLLBACK")
+        raise
+    return stored
