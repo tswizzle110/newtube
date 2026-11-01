@@ -27,8 +27,8 @@ from ..config import Settings
 from ..net.http import absolute_url, ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
 from .base import (
-    AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, ExtractionError, Format,
-    PlaylistSummary, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
+    AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, Comment, CommentPage,
+    ExtractionError, Format, PlaylistSummary, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
 )
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -217,6 +217,33 @@ def parse_entries(info: dict[str, Any]) -> list[SearchItem]:
     return out
 
 
+def parse_comment(c: dict[str, Any]) -> Comment | None:
+    """One comment from yt-dlp's ``info['comments']`` (field names as read from yt-dlp's source)."""
+    if not c.get("id") or not isinstance(c.get("text"), str):
+        return None
+    parent = c.get("parent")
+    return Comment(
+        id=c["id"], text=c["text"], author=c.get("author") or "",
+        parent=None if parent in (None, "root") else parent,
+        author_id=c.get("author_id"), author_thumbnail=absolute_url(c.get("author_thumbnail")),
+        like_count=c.get("like_count"),
+        timestamp=int(c["timestamp"]) if c.get("timestamp") else None,
+        time_text=c.get("_time_text") or None,
+        is_pinned=bool(c.get("is_pinned")), is_hearted=bool(c.get("is_favorited")),
+        is_uploader=bool(c.get("author_is_uploader")), is_verified=bool(c.get("author_is_verified")))
+
+
+def parse_comments(info: dict[str, Any]) -> list[Comment]:
+    seen: set[str] = set()
+    out: list[Comment] = []
+    for raw in info.get("comments") or []:
+        c = parse_comment(raw) if isinstance(raw, dict) else None
+        if c and c.id not in seen:
+            seen.add(c.id)
+            out.append(c)
+    return out
+
+
 # ------------------------------------------------------------ implementation
 
 
@@ -329,5 +356,38 @@ class YtDlpExtractor:
                                info.get("playlist_count") or len(videos), None)
         return head, videos
 
-    async def comments(self, *a: Any, **k: Any) -> Any:
-        raise NotImplementedError("comments: later in phase 2")
+    # ---- comments ------------------------------------------------------------------------
+    # yt-dlp reads comments as part of a full video extraction and can neither page nor target a
+    # single thread: replies cost one extra request PER THREAD walked. So we (a) pace its internal
+    # requests, (b) keep limits small, and (c) the caller caches what comes back.
+
+    async def raw_comments(self, video_id: str, sort: str = "top", limit: int = 20, *,
+                           replies_for: int = 0, replies_per_thread: int = 10,
+                           background: bool = False) -> dict[str, Any]:
+        if (not VIDEO_ID_RE.match(video_id) or sort not in ("top", "new")
+                or not 1 <= limit <= 100 or not 0 <= replies_for <= 15
+                or not 1 <= replies_per_thread <= 30):
+            raise ExtractionError("bad comments request")
+        if replies_for:     # first k threads, each with up to R replies (depth 2)
+            parents, depth = min(replies_for, limit), "2"
+            total = parents * (1 + replies_per_thread)
+            per_thread = str(replies_per_thread)
+        else:               # top level only: depth 1 means no reply requests at all
+            parents, depth, total, per_thread = limit, "1", limit, "0"
+        # yt-dlp's positional arg: max_comments=total,parents,replies,replies-per-thread,depth
+        extra = {
+            "getcomments": True,
+            "extractor_args": {"youtube": {
+                "max_comments": [str(total), str(parents), "all", per_thread, depth],
+                "comment_sort": [sort]}},
+            "sleep_interval_requests": self._settings.min_request_interval,
+        }
+        info = await self._extract(f"https://www.youtube.com/watch?v={video_id}", extra, background)
+        return {"comments": info.get("comments") or [], "comment_count": info.get("comment_count")}
+
+    async def comments(self, video_id: str, sort: str = "top", limit: int = 20, *,
+                       replies_for: int = 0, replies_per_thread: int = 10,
+                       background: bool = False) -> CommentPage:
+        raw = await self.raw_comments(video_id, sort, limit, replies_for=replies_for,
+                                      replies_per_thread=replies_per_thread, background=background)
+        return CommentPage(parse_comments(raw), raw.get("comment_count"))

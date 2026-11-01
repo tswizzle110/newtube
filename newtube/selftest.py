@@ -82,8 +82,8 @@ class SelfTest:
         self.dump_dir.mkdir(parents=True, exist_ok=True)
         red = redact_info(raw)
         (self.dump_dir / f"{name}.json").write_text(json.dumps(red, indent=1))
-        entries = red.get("entries") if isinstance(red, dict) else None
-        for e in (entries or [])[:2]:
+        entries = (red.get("entries") or red.get("comments")) if isinstance(red, dict) else None
+        for e in (entries or [])[:3]:
             self.samples.append(f"## {name}\n{json.dumps(e)[:900]}\n")
         (self.dump_dir / "samples.txt").write_text("\n".join(self.samples))
 
@@ -228,6 +228,32 @@ class SelfTest:
             raise RuntimeError(f"no videos parsed from {len(raw.get('entries') or [])} raw entries")
         return f"{self.playlist_id[:14]}...: {len(vids)} videos; first '{vids[0].title[:40]}'"
 
+    async def comments_top(self) -> str:
+        from .extract.ytdlp import parse_comments
+        raw = await self.extractor.raw_comments(TEST_VIDEO, "top", 10)  # type: ignore[attr-defined]
+        self._dump("comments_top", raw)
+        top = [c for c in parse_comments(raw) if c.parent is None]
+        if len(top) < 3:
+            raise RuntimeError(f"only {len(top)} top-level comments parsed from "
+                               f"{len(raw.get('comments') or [])} raw")
+        c = top[0]
+        return (f"{len(top)} comments (YouTube says ~{raw.get('comment_count')}); first by "
+                f"'{c.author}': '{c.text[:30]}', {c.like_count} likes, '{c.time_text}'")
+
+    async def comment_replies(self) -> str:
+        from .extract.ytdlp import parse_comments
+        raw = await self.extractor.raw_comments(  # type: ignore[attr-defined]
+            TEST_VIDEO, "top", 10, replies_for=2, replies_per_thread=5)
+        self._dump("comments_replies", raw)
+        cs = parse_comments(raw)
+        replies = [c for c in cs if c.parent]
+        if not replies:
+            raise RuntimeError(f"no replies among {len(cs)} comments fetched for the first 2 threads")
+        parents = {c.id for c in cs if c.parent is None}
+        orphans = [c for c in replies if c.parent not in parents]
+        return (f"{len(replies)} replies under {len({c.parent for c in replies})} of the first "
+                f"{len(parents)} comments" + (f" ({len(orphans)} orphaned!)" if orphans else ""))
+
     async def sponsorblock(self) -> str:
         p = sponsorblock_prefix(TEST_VIDEO)
         r = await self.http.get(f"https://sponsor.ajay.app/api/skipSegments/{p}")
@@ -243,6 +269,7 @@ class SelfTest:
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
             ("channel_videos", self.channel_videos), ("playlist", self.playlist_videos),
+            ("comments_top", self.comments_top), ("comment_replies", self.comment_replies),
             ("sponsorblock", self.sponsorblock),
         ]:
             await self._check(name, fn)

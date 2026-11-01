@@ -204,3 +204,57 @@ def test_channel_info_avatar_is_absolute():
     c = parse_channel_info({"channel_id": UC, "channel": "C", "thumbnails": [
         {"id": "avatar_uncropped", "url": "//yt3.ggpht.com/x=s0"}]})
     assert c.avatar_url == "https://yt3.ggpht.com/x=s0"
+
+
+# ---- comments. SYNTHETIC dicts: field names taken from yt-dlp's source (`_extract_comment`);
+# ---- `selftest --dump` writes real ones to replace these. ----------------------------------
+
+from newtube.extract.ytdlp import parse_comment, parse_comments  # noqa: E402
+
+TOP = {"id": "Ugx1", "parent": "root", "text": "first!", "author": "Ann", "author_id": UC,
+       "author_thumbnail": "//yt3.ggpht.com/a=s48", "like_count": 1200, "author_is_uploader": False,
+       "is_favorited": True, "is_pinned": True, "_time_text": "2 days ago", "timestamp": 1700000000}
+REPLY = {"id": "Ugx1.r1", "parent": "Ugx1", "text": "reply", "author": "Bob", "like_count": 3}
+
+
+def test_parse_comment_fields_and_root_parent():
+    c = parse_comment(TOP)
+    assert c.parent is None and (c.text, c.author, c.like_count) == ("first!", "Ann", 1200)
+    assert (c.is_pinned, c.is_hearted, c.is_uploader) == (True, True, False)
+    assert c.time_text == "2 days ago" and c.timestamp == 1700000000
+    assert c.author_thumbnail == "https://yt3.ggpht.com/a=s48"        # made absolute
+    r = parse_comment(REPLY)
+    assert r.parent == "Ugx1" and r.timestamp is None and not r.is_pinned
+
+
+def test_parse_comments_skips_junk_and_dupes():
+    info = {"comments": [TOP, REPLY, dict(TOP), {"id": "x"}, {"text": "no id"}, None, "junk",
+                         {"id": "Ugx9", "text": 5}]}
+    assert [c.id for c in parse_comments(info)] == ["Ugx1", "Ugx1.r1"]
+    assert parse_comments({}) == [] and parse_comments({"comments": None}) == []
+
+
+async def test_comments_request_builds_yt_dlp_limits(monkeypatch):
+    from newtube.config import Settings
+    from newtube.extract.ytdlp import YtDlpExtractor
+    from newtube.net.ratelimit import RateLimiter
+    ex = YtDlpExtractor(Settings(min_request_interval=0.7), RateLimiter(0, 0, 10))
+    seen = {}
+
+    async def fake(url, extra, background):
+        seen.update(url=url, **extra)
+        return {"comments": [TOP, REPLY], "comment_count": 4321, "formats": ["huge"]}
+    monkeypatch.setattr(ex, "_extract", fake)
+
+    page = await ex.comments("jNQXAC9IVRw", "new", 20)             # top level only
+    args = seen["extractor_args"]["youtube"]
+    assert args["max_comments"] == ["20", "20", "all", "0", "1"] and args["comment_sort"] == ["new"]
+    assert seen["getcomments"] is True and seen["sleep_interval_requests"] == 0.7
+    assert page.total_estimate == 4321 and len(page.comments) == 2
+    await ex.comments("jNQXAC9IVRw", "top", 20, replies_for=3, replies_per_thread=5)
+    assert seen["extractor_args"]["youtube"]["max_comments"] == ["18", "3", "all", "5", "2"]
+    for bad in [dict(sort="hot"), dict(limit=0), dict(limit=101), dict(replies_for=16), dict(replies_per_thread=0)]:
+        with pytest.raises(ExtractionError):
+            await ex.comments("jNQXAC9IVRw", **bad)
+    with pytest.raises(ExtractionError):
+        await ex.comments("bad id")

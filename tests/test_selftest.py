@@ -36,6 +36,14 @@ class FakeExtractor:
     async def raw_playlist(self, playlist_id, limit=100, *, background=False):
         return {"entries": [{"id": "jNQXAC9IVRw", "title": "Zoo"}]}
 
+    async def raw_comments(self, video_id, sort="top", limit=20, *, replies_for=0, replies_per_thread=10,
+                           background=False):
+        cs = [{"id": f"Ugx{i}", "parent": "root", "text": f"comment {i}", "author": "A", "like_count": i}
+              for i in range(5)]
+        if replies_for:
+            cs += [{"id": "Ugx0.r", "parent": "Ugx0", "text": "reply", "author": "B"}]
+        return {"comments": cs, "comment_count": 99}
+
 
 def handler(req: httpx.Request) -> httpx.Response:
     if "videos.xml" in str(req.url):
@@ -59,7 +67,8 @@ async def test_all_good_paths_report_ok_except_failing_channel():
     assert results["sponsorblock"].ok
     assert not results["channel"].ok          # one failure doesn't stop the others
     assert "2 entries" in results["rss"].detail
-    for name in ("search_video", "search_channel", "search_playlist", "channel_videos", "playlist"):
+    for name in ("search_video", "search_channel", "search_playlist", "channel_videos", "playlist",
+                 "comments_top", "comment_replies"):
         assert results[name].ok, (name, results[name].detail)
 
 

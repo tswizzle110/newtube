@@ -147,6 +147,29 @@ class PlaylistSummary:
 SearchItem = VideoSummary | ChannelSummary | PlaylistSummary
 
 
+@dataclass
+class Comment:
+    id: str
+    text: str
+    author: str
+    parent: str | None = None          # None for a top-level comment, else the parent comment's id
+    author_id: str | None = None
+    author_thumbnail: str | None = None
+    like_count: int | None = None
+    timestamp: int | None = None       # YouTube only says "2 days ago", so this is an estimate
+    time_text: str | None = None       # ...and this is what YouTube actually said
+    is_pinned: bool = False
+    is_hearted: bool = False           # liked by the video's creator
+    is_uploader: bool = False
+    is_verified: bool = False
+
+
+@dataclass
+class CommentPage:
+    comments: list[Comment]
+    total_estimate: int | None = None
+
+
 class Extractor(Protocol):
     """Everything the app needs from YouTube. Methods are async; lane choice
     (interactive vs background) is made by the caller via the rate limiter."""
@@ -176,4 +199,13 @@ class Extractor(Protocol):
     async def playlist_page(self, playlist_id: str, limit: int = 100, *,
                             background: bool = False) -> tuple[PlaylistSummary, list[VideoSummary]]: ...
 
-    # Later: related videos, comments.
+    async def comments(self, video_id: str, sort: str = "top", limit: int = 20, *,
+                       replies_for: int = 0, replies_per_thread: int = 10,
+                       background: bool = False) -> CommentPage:
+        """Top-level comments (``sort`` is 'top' or 'new'). With ``replies_for=k`` the replies of
+        the first k top-level comments are included too. NOTE: yt-dlp can't page or target one
+        thread, so cost grows with ``limit`` and ``replies_for``; a provider with real
+        continuation tokens (e.g. Invidious Companion) could do better behind this same method."""
+        ...
+
+    # Later: related videos.
