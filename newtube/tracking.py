@@ -14,6 +14,7 @@ import time
 Interval = tuple[float, float]
 MAX_INTERVALS = 2000
 COMPLETE_FRACTION = 0.9
+TAIL_SECONDS = 10.0   # stopping within this long of the end counts as finished (5% for short videos)
 
 
 def merge_intervals(intervals: list[Interval]) -> list[Interval]:
@@ -74,7 +75,8 @@ def record_watch(conn: sqlite3.Connection, *, session_id: str, video_id: str, so
         for r in conn.execute("SELECT intervals FROM watch_sessions WHERE video_id=?", (video_id,)):
             all_iv += [tuple(i) for i in json.loads(r["intervals"])]
         fraction = total_length(merge_intervals(all_iv)) / duration
-        completed = int(fraction >= COMPLETE_FRACTION or position >= duration - 10)
+        tail = min(TAIL_SECONDS, duration * 0.05)
+        completed = int(fraction >= COMPLETE_FRACTION or position >= duration - tail)
     conn.execute(
         "INSERT INTO video_progress(video_id,position,duration,completed,updated_at) VALUES (?,?,?,?,?)"
         " ON CONFLICT(video_id) DO UPDATE SET position=excluded.position,"

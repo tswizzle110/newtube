@@ -5,6 +5,7 @@
   import Login from './routes/Login.svelte'
   import Feed from './routes/Feed.svelte'
   import Channels from './routes/Channels.svelte'
+  import Watch from './routes/Watch.svelte'
 
   onMount(checkAuth)
 
@@ -39,11 +40,13 @@
     </button>
     <button class="btn" onclick={logout}>Log out</button>
   </header>
-  {#key router.pathname}
+  {#key router.path}
     {#if is('/')}
       <Feed />
     {:else if is('/channels')}
       <Channels />
+    {:else if is('/watch')}
+      <Watch />
     {:else}
       <div class="page"><h1>Not found</h1><a href="/" class="muted">Back to subscriptions</a></div>
     {/if}

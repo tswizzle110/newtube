@@ -54,6 +54,14 @@ def test_completion_rules_and_resume_point(conn):
     assert conn.execute("SELECT completed FROM video_progress").fetchone()[0] == 1
 
 
+def test_short_videos_are_not_completed_by_the_fixed_10s_tail(conn):
+    # 100 s video: stopping at 85 s is NOT done (tail = min(10, 5% = 5) = 5 s)
+    watch(conn, "s1", 85, [[80, 85]])
+    assert conn.execute("SELECT completed FROM video_progress").fetchone()[0] == 0
+    watch(conn, "s1", 96, [[85, 96]])
+    assert conn.execute("SELECT completed FROM video_progress").fetchone()[0] == 1
+
+
 def test_skipping_to_the_end_counts_as_completed_but_fraction_stays_low(conn):
     watch(conn, "s1", 99, [[0, 5], [95, 99]])
     assert conn.execute("SELECT completed FROM video_progress").fetchone()[0] == 1
