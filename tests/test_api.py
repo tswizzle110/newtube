@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from newtube.app import Context, create_app
+from newtube.auth import Auth
 from newtube.config import Settings
 from newtube.db.connection import connect, migrate
 from newtube.extract.base import ChannelInfo, Chapter, Format, VideoInfo, VideoUnavailable
@@ -73,10 +74,13 @@ def env(tmp_path):
     migrate(conn)
     lim = RateLimiter(0, 0, 100)
     ex = FakeExtractor()
+    auth = Auth(tmp_path / "auth.json")
+    auth.set_password("correct horse")
     ctx = Context(s, conn, lim, OutboundClient(s, lim, transport=httpx.MockTransport(handler)),
-                  ex, VideoService(conn, ex), DiskCache(tmp_path / "img", 10**6),
+                  ex, VideoService(conn, ex), DiskCache(tmp_path / "img", 10**6), auth,
                   run_scheduler=False)
     with TestClient(create_app(ctx)) as client:
+        assert client.post("/api/login", json={"password": "correct horse"}).status_code == 200
         yield client, ctx, ex, seen
 
 

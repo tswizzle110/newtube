@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 
+from .auth import Auth
 from .config import Settings, load_settings
 from .db.connection import connect, migrate
 from .extract.base import Extractor
@@ -32,6 +33,7 @@ class Context:
     extractor: Extractor
     videos: VideoService
     images: DiskCache
+    auth: Auth
     run_scheduler: bool = True
 
 
@@ -46,11 +48,14 @@ def build_context(settings: Settings | None = None) -> Context:
     extractor = YtDlpExtractor(settings, limiter)
     return Context(settings, conn, limiter, OutboundClient(settings, limiter), extractor,
                    VideoService(conn, extractor),
-                   DiskCache(settings.cache_dir / "images", settings.cache_max_bytes))
+                   DiskCache(settings.cache_dir / "images", settings.cache_max_bytes),
+                   Auth(settings.data_dir / "auth.json"))
 
 
 def create_app(ctx: Context | None = None) -> FastAPI:
+    from .api import auth as auth_api
     from .api import media, subscriptions, videos
+    from .security import GuardMiddleware
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -69,6 +74,8 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app = FastAPI(title="newtube", lifespan=lifespan, docs_url=None, redoc_url=None)
     if ctx:  # tests construct the context themselves; make it available without lifespan too
         app.state.ctx = ctx
+    app.add_middleware(GuardMiddleware)
+    app.include_router(auth_api.router)
     app.include_router(media.router)
     app.include_router(videos.router)
     app.include_router(subscriptions.router)
