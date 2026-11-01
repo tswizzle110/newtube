@@ -18,6 +18,9 @@ from ..db.queries import cache
 from ..extract.base import Caption, Chapter, ChannelInfo, Extractor, Format, VideoInfo
 
 INFO_TTL = 4 * 3600
+# Bump when the fields we cache change (e.g. a new Format attribute), so entries cached by older
+# code are ignored instead of being served with missing data for up to INFO_TTL.
+CACHE_VERSION = 2
 
 
 def info_from_dict(d: dict[str, Any]) -> VideoInfo:
@@ -35,7 +38,7 @@ class VideoService:
 
     async def get(self, video_id: str, *, refresh: bool = False,
                   background: bool = False) -> VideoInfo:
-        key = f"video:{video_id}"
+        key = f"video:v{CACHE_VERSION}:{video_id}"
         if not refresh:
             hit = cache.get(self.conn, key)
             if hit:
@@ -52,7 +55,7 @@ class VideoService:
     async def _fetch(self, video_id: str, background: bool) -> VideoInfo:
         info = await self.extractor.video_info(video_id, background=background)
         self.persist(info)
-        cache.put(self.conn, f"video:{video_id}", dataclasses.asdict(info), INFO_TTL)
+        cache.put(self.conn, f"video:v{CACHE_VERSION}:{video_id}", dataclasses.asdict(info), INFO_TTL)
         return info
 
     def persist(self, v: VideoInfo) -> None:

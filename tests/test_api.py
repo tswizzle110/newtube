@@ -163,3 +163,15 @@ def test_subscribe_reports_feed_failure_instead_of_hiding_it(tmp_path):
         r = client.post("/api/subscriptions", json={"ref": "@YouTube"}).json()
         assert r["created"] is True and r["new_videos"] == 0
         assert "HTTP 500" in r["poll_error"]
+
+
+def test_cache_entries_from_older_code_are_ignored(env):
+    """Regression: video info cached before a format change (e.g. before language_preference
+    existed) must not be served; it made the player choose the wrong audio track."""
+    import json, time
+    client, ctx, ex, _ = env
+    stale = {"id": "aaaaaaaaaaa", "title": "STALE", "formats": []}
+    ctx.conn.execute("INSERT INTO meta_cache(key,payload,fetched_at,expires_at) VALUES (?,?,?,?)",
+                     ("video:aaaaaaaaaaa", json.dumps(stale), 1, int(time.time()) + 9999))
+    assert client.get("/api/video/aaaaaaaaaaa").json()["title"] == "Title"
+    assert ex.calls == 1
