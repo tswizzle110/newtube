@@ -33,6 +33,9 @@ class Settings:
     request_jitter: float = 0.6         # extra random 0..jitter seconds
     background_daily_cap: int = 2000    # background-lane requests per day
 
+    # Built frontend (`cd frontend && npm run build`). Default: <repo>/frontend/dist
+    frontend_dir: Path = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
     # JavaScript runtime yt-dlp uses to solve YouTube's challenges.
     # "deno" (default), "node", "bun" or "quickjs". Leave the path empty to find it on PATH.
     js_runtime: str = "deno"

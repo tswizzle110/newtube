@@ -8,8 +8,10 @@ import logging
 import sqlite3
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .auth import Auth
 from .config import Settings, load_settings
@@ -80,4 +82,25 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app.include_router(media.router)
     app.include_router(videos.router)
     app.include_router(subscriptions.router)
+    _mount_frontend(app, (ctx.settings if ctx else load_settings()).frontend_dir)
     return app
+
+
+def _mount_frontend(app: FastAPI, dist: Path) -> None:
+    """Serve the built Svelte app. Unknown non-API paths get index.html (client-side routing)."""
+    dist = Path(dist).resolve()
+    index = dist / "index.html"
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str) -> Response:
+        if path.startswith("api/"):
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        if not index.is_file():
+            return PlainTextResponse(
+                "Frontend not built. Run: cd frontend && npm install && npm run build", status_code=503)
+        candidate = (dist / path).resolve()
+        if path and candidate.is_file() and candidate.is_relative_to(dist):
+            immutable = path.startswith("assets/")   # Vite content-hashes these filenames
+            return FileResponse(candidate, headers={"Cache-Control": (
+                "public, max-age=31536000, immutable" if immutable else "no-cache")})
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
