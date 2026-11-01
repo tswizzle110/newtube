@@ -92,3 +92,35 @@ async def test_scheduler_polls_one_channel_per_tick_and_survives_errors(conn):
     assert await sch.tick() == "polled"          # the broken one: logged, marked, not fatal
     assert await sch.tick() == "idle"            # both now count as checked
     assert conn.execute("SELECT count(*) FROM videos").fetchone()[0] == 2
+
+
+def test_feed_header_id_without_uc_prefix_is_normalised():
+    """Regression: real feeds report the header channel id as 22 chars (no 'UC'); using it
+    directly broke the foreign key on every poll."""
+    f = parse_feed(SAMPLE_FEED)
+    assert f.channel_id == CID and len(f.channel_id) == 24
+
+
+async def test_poll_stores_under_requested_channel_id_even_if_feed_disagrees(conn):
+    subs.subscribe(conn, ChannelInfo(CID, "YouTube"))
+    odd = SAMPLE_FEED.replace(
+        "<yt:channelId>BR8-60-B28hp2BmDPdntcQ</yt:channelId>", "<yt:channelId>SomethingElseEntirely</yt:channelId>")
+    http = OutboundClient(Settings(), RateLimiter(0, 0, 100),
+                          transport=httpx.MockTransport(lambda r: httpx.Response(200, text=odd)))
+    from newtube.jobs.scheduler import poll_channel
+    assert await poll_channel(conn, http, CID) == 2
+    assert conn.execute("SELECT DISTINCT channel_id FROM videos").fetchall()[0][0] == CID
+
+
+async def test_failed_poll_retries_in_ten_minutes_not_hours(conn):
+    subs.subscribe(conn, ChannelInfo(CID, "YouTube"))
+    http = OutboundClient(Settings(), RateLimiter(0, 0, 100),
+                          transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    s = Settings()
+    sch = Scheduler(s, conn, http)
+    assert await sch.tick() == "polled"
+    import time
+    checked = conn.execute("SELECT rss_checked_at FROM channels").fetchone()[0]
+    due_in = checked + s.rss_poll_interval - time.time()
+    assert 590 <= due_in <= 610
+    assert subs.due_for_poll(conn, s.rss_poll_interval, now=int(time.time()) + 700) == [CID]

@@ -41,12 +41,13 @@ async def add_sub(body: SubscribeIn, ctx: Context = Depends(get_ctx)) -> dict[st
     except ExtractionError as e:
         raise HTTPException(400, str(e)) from e
     created = subs.subscribe(ctx.conn, ch)
-    new = 0
+    new, poll_error = 0, None
     try:   # fill the feed right away so the new channel isn't empty until the next poll
         new = await poll_channel(ctx.conn, ctx.http, ch.id, lane=Lane.INTERACTIVE)
-    except Exception:  # noqa: BLE001 - subscription succeeded; the scheduler will retry
-        pass
-    return {"id": ch.id, "title": ch.title, "created": created, "new_videos": new}
+    except Exception as e:  # noqa: BLE001 - subscription itself succeeded; report why the feed is empty
+        poll_error = f"{type(e).__name__}: {e}"
+    return {"id": ch.id, "title": ch.title, "created": created, "new_videos": new,
+            "poll_error": poll_error}
 
 
 @router.delete("/subscriptions/{channel_id}")

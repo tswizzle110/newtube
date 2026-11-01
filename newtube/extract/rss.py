@@ -36,6 +36,13 @@ class Feed:
     entries: list[FeedEntry]
 
 
+def normalize_channel_id(raw: str) -> str:
+    """YouTube's feed header reports the id WITHOUT the 'UC' prefix (22 chars); entries and
+    the rest of the site use the full 24-char form. Always return the full form."""
+    raw = raw.strip()
+    return "UC" + raw if len(raw) == 22 else raw
+
+
 def feed_url(channel_id: str) -> str:
     return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
@@ -69,4 +76,4 @@ def parse_feed(xml_text: str) -> Feed:
             description=e.findtext("media:group/media:description", namespaces=NS),
             view_count=int(views.get("views")) if views is not None and views.get("views") else None,
         ))
-    return Feed(cid, title, entries)
+    return Feed(normalize_channel_id(cid), title, entries)

@@ -11,6 +11,7 @@ import asyncio
 import logging
 import random
 import sqlite3
+import time
 from collections.abc import Awaitable, Callable
 
 from ..config import Settings
@@ -21,6 +22,7 @@ from ..net.http import OutboundClient
 from ..net.ratelimit import DailyCapReached, Lane
 
 log = logging.getLogger("newtube.jobs")
+RETRY_AFTER = 600   # seconds before retrying a channel whose RSS poll failed
 
 
 async def poll_channel(conn: sqlite3.Connection, http: OutboundClient, channel_id: str,
@@ -29,7 +31,9 @@ async def poll_channel(conn: sqlite3.Connection, http: OutboundClient, channel_i
     resp = await http.get(feed_url(channel_id), lane=lane)
     if resp.status_code != 200:
         raise ExtractionError(f"RSS {channel_id}: HTTP {resp.status_code}")
-    return subs.store_feed(conn, parse_feed(resp.text))
+    feed = parse_feed(resp.text)
+    feed.channel_id = channel_id   # trust the channel we asked for, not what the feed reports
+    return subs.store_feed(conn, feed)
 
 
 class Scheduler:
@@ -52,9 +56,9 @@ class Scheduler:
             return "capped"
         except Exception as e:  # noqa: BLE001 - one bad channel must not stop the loop
             log.warning("rss %s failed: %s", cid, e)
-            # Push its next attempt out by a full interval so a broken channel isn't hammered.
-            self.conn.execute("UPDATE channels SET rss_checked_at=strftime('%s','now') WHERE id=?",
-                              (cid,))
+            # Retry in RETRY_AFTER seconds (not a full poll interval), but never hammer a broken channel.
+            self.conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?",
+                              (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
         return "polled"
 
     async def run(self) -> None:

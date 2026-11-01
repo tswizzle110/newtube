@@ -2,7 +2,7 @@ SAMPLE_FEED = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom">
  <link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=UCBR8-60-B28hp2BmDPdntcQ"/>
  <id>yt:channel:BR8-60-B28hp2BmDPdntcQ</id>
- <yt:channelId>UCBR8-60-B28hp2BmDPdntcQ</yt:channelId>
+ <yt:channelId>BR8-60-B28hp2BmDPdntcQ</yt:channelId>   <!-- real feeds: header id has no 'UC' prefix -->
  <title>YouTube</title>
  <published>2005-09-27T20:22:43+00:00</published>
  <entry>

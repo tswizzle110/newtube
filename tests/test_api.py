@@ -153,3 +153,13 @@ def test_subscribe_feed_and_unsubscribe_flow(env):
     assert client.get("/api/subscriptions").json()[0]["handle"] == "@YouTube"
     assert client.delete(f"/api/subscriptions/{CID}").json() == {"removed": True}
     assert client.get("/api/feed").json() == []
+
+
+def test_subscribe_reports_feed_failure_instead_of_hiding_it(tmp_path):
+    def handler(req):
+        return httpx.Response(500) if "videos.xml" in str(req.url) else httpx.Response(404)
+
+    with make_client(tmp_path, handler, FakeExtractor()) as (client, ctx):
+        r = client.post("/api/subscriptions", json={"ref": "@YouTube"}).json()
+        assert r["created"] is True and r["new_videos"] == 0
+        assert "HTTP 500" in r["poll_error"]

@@ -16,6 +16,7 @@
     busy = true; error = ''; note = ''
     try {
       const r = await api.post('/api/subscriptions', { ref })
+      if (r.poll_error) error = `Subscribed, but fetching videos failed: ${r.poll_error}`
       note = r.created ? `Subscribed to ${r.title} (${r.new_videos} videos found).` : `Already subscribed to ${r.title}.`
       ref = ''
       await load()
