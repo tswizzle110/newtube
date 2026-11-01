@@ -84,6 +84,7 @@ def parse_formats(raw: list[dict[str, Any]]) -> list[Format]:
             filesize=f.get("filesize") or f.get("filesize_approx"),
             language=f.get("language"),
             note=f.get("format_note"),
+            language_preference=f.get("language_preference"),
         ))
     return out
 

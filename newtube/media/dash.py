@@ -6,6 +6,7 @@ browser's player (Shaka) never sees a googlevideo address.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
@@ -21,9 +22,54 @@ class Rep:
     ranges: Ranges
 
 
-def select_formats(formats: list[Format]) -> tuple[list[Format], list[Format]]:
-    """Pick MP4 H.264 video-only and AAC audio-only formats (what every browser's MSE accepts).
-    One video format per height (highest bitrate wins). VP9/AV1/WebM is a later addition."""
+@dataclass(frozen=True)
+class AudioTrack:
+    lang: str
+    name: str
+    original: bool
+
+
+def _audio_candidates(formats: list[Format]) -> list[Format]:
+    return [f for f in formats if f.has_audio and not f.has_video and f.ext == "m4a"
+            and (f.acodec or "").startswith("mp4a") and not f.is_drc]
+
+
+def _original_audio(cands: list[Format]) -> list[Format]:
+    """The video's own audio. yt-dlp marks it with the highest language_preference; when a
+    video has a single track (no preferences differ) every candidate is the original."""
+    prefs = {f.language_preference for f in cands if f.language_preference is not None}
+    if len(prefs) > 1:
+        top = max(prefs)
+        return [f for f in cands if f.language_preference == top]
+    return cands
+
+
+def _track_name(f: Format) -> str:
+    first = (f.note or "").split(",")[0]
+    name = re.sub(r"\s*(original\s*)?\(default\)", "", first).strip()
+    return name or f.language or "Unknown"
+
+
+def audio_tracks(formats: list[Format]) -> list[AudioTrack]:
+    """Selectable audio languages. Empty when the video has only one (nothing to choose)."""
+    cands = _audio_candidates(formats)
+    orig_langs = {f.language for f in _original_audio(cands)}
+    seen: dict[str, AudioTrack] = {}
+    for f in cands:
+        lang = f.language or "und"
+        if lang not in seen:
+            seen[lang] = AudioTrack(lang, _track_name(f), f.language in orig_langs)
+    if len(seen) < 2:
+        return []
+    return sorted(seen.values(), key=lambda a: (not a.original, a.name))
+
+
+def select_formats(formats: list[Format], audio_lang: str | None = None
+                   ) -> tuple[list[Format], list[Format]]:
+    """Pick MP4 H.264 video-only formats (one per height, highest bitrate) and exactly ONE audio
+    format: the best AAC stream of the requested language, else of the video's original audio.
+    Offering one audio stream keeps the player from picking a dub and avoids probing dozens of
+    streams. VP9/AV1/WebM is a later addition."""
     best: dict[int, Format] = {}
     for f in formats:
         if (f.has_video and not f.has_audio and f.ext == "mp4" and (f.vcodec or "").startswith("avc1")
@@ -32,9 +78,10 @@ def select_formats(formats: list[Format]) -> tuple[list[Format], list[Format]]:
             if cur is None or (f.tbr or 0) > (cur.tbr or 0):
                 best[f.height] = f
     video = [best[h] for h in sorted(best)]
-    audio = [f for f in formats if f.has_audio and not f.has_video and f.ext == "m4a"
-             and (f.acodec or "").startswith("mp4a")]
-    return video, sorted(audio, key=lambda f: (f.language or "", f.tbr or 0))
+    cands = _audio_candidates(formats)
+    chosen = [f for f in cands if audio_lang and f.language == audio_lang] or _original_audio(cands)
+    audio = [max(chosen, key=lambda f: f.tbr or 0)] if chosen else []
+    return video, audio
 
 
 def _duration(seconds: float) -> str:

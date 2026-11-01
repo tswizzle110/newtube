@@ -96,3 +96,11 @@ def test_parse_channel_info():
     c = parse_channel_info({"channel_id": UC, "channel": "Chan", "uploader_id": "@chan",
                             "thumbnails": [{"id": "avatar_uncropped", "url": "https://yt3.ggpht.com/a"}]})
     assert (c.id, c.title, c.handle, c.avatar_url) == (UC, "Chan", "@chan", "https://yt3.ggpht.com/a")
+
+
+def test_formats_keep_language_preference_for_original_audio_detection():
+    from newtube.extract.ytdlp import parse_formats
+    fm = parse_formats([{"format_id": "140-20", "url": "https://x.googlevideo.com/a", "ext": "m4a",
+                         "vcodec": "none", "acodec": "mp4a.40.2", "protocol": "https", "language": "en-US",
+                         "language_preference": 10, "format_note": "English (US) original (default), medium"}])
+    assert fm[0].language_preference == 10 and fm[0].language == "en-US"

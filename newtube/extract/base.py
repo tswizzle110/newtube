@@ -46,6 +46,7 @@ class Format:
     filesize: int | None = None
     language: str | None = None
     note: str | None = None
+    language_preference: int | None = None   # yt-dlp: 10 = the video's original audio, -1 = a dub
 
     @property
     def has_video(self) -> bool:
@@ -54,6 +55,11 @@ class Format:
     @property
     def has_audio(self) -> bool:
         return bool(self.acodec)
+
+    @property
+    def is_drc(self) -> bool:
+        """Dynamic-range-compressed duplicate of an audio track (louder, flatter). Never auto-picked."""
+        return "drc" in self.format_id.lower() or "DRC" in (self.note or "")
 
     @property
     def is_muxed(self) -> bool:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -134,12 +135,15 @@ async def _ranges_for(ctx: Context, video_id: str, fmt: Format) -> Ranges | None
 
 
 @router.get("/dash/{video_id}.mpd")
-async def dash_manifest(video_id: str, ctx: Context = Depends(get_ctx)) -> Response:
+async def dash_manifest(video_id: str, lang: str | None = None,
+                        ctx: Context = Depends(get_ctx)) -> Response:
     """DASH manifest for adaptive playback (up to 1080p H.264). 404 means: use the muxed fallback."""
     valid_video_id(video_id)
+    if lang is not None and not re.fullmatch(r"[A-Za-z0-9-]{1,16}", lang):
+        raise HTTPException(400, "bad language")
     for attempt in (0, 1):
         info = await ctx.videos.get(video_id, refresh=attempt == 1)
-        video_fmts, audio_fmts = select_formats(info.formats)
+        video_fmts, audio_fmts = select_formats(info.formats, lang)
         results = await asyncio.gather(*(_ranges_for(ctx, video_id, f)
                                          for f in video_fmts + audio_fmts))
         reps = {f.format_id: Rep(f, r) for f, r in zip(video_fmts + audio_fmts, results) if r}

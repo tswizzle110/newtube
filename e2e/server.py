@@ -47,7 +47,12 @@ class Ex:
         else:
             fm = [Format("134", gv("v360"), "mp4", "avc1.4d401e", None, height=360, width=640, fps=25, tbr=800),
                   Format("133", gv("v180"), "mp4", "avc1.4d401e", None, height=180, width=320, fps=25, tbr=250),
-                  Format("140", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64),
+                  Format("140-0", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64, language="en-US",
+                         language_preference=10, note="English (US) original (default), medium"),
+                  Format("140-1", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64, language="es-US",
+                         language_preference=-1, note="Spanish (US), medium"),
+                  Format("140-drc", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64, language="en-US",
+                         language_preference=10, note="English (US) original (default), medium, DRC"),
                   Format("18", gv("mux"), "mp4", "avc1.4d401e", "mp4a.40.2", height=360, width=640, tbr=500)]
         return VideoInfo(vid, "E2E test video", "UC" + "a" * 22, "Test Channel", "A description\nwith lines", 24,
                          1_700_000_000, 1234, None, [], None, False, 0,

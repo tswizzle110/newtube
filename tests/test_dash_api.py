@@ -59,3 +59,32 @@ def test_stale_urls_trigger_one_re_extraction(tmp_path):
 def test_no_dash_formats_gives_404_so_frontend_can_fall_back(env):
     client, *_ = env                                  # fixture video only has muxed itag 18
     assert client.get("/api/dash/aaaaaaaaaaa.mpd").status_code == 404
+
+
+class MultiLangExtractor(DashExtractor):
+    async def video_info(self, video_id, *, background=False):
+        info = await super().video_info(video_id)
+        aud = lambda fid, lang, pref, note: Format(fid, f"https://rr1.googlevideo.com/{fid}?sig=ok", "m4a",
+                                                   None, "mp4a.40.2", tbr=128, language=lang,
+                                                   language_preference=pref, note=note)
+        info.formats = [f for f in info.formats if f.format_id != "140"] + [
+            aud("140-0", "en-US", 10, "English (US) original (default), medium"),
+            aud("140-1", "es-US", -1, "Spanish (US), medium"),
+            aud("140-2", "de-DE", -1, "German (DE), medium"),
+            aud("140-drc", "en-US", 10, "English (US) original (default), medium, DRC")]
+        return info
+
+
+def test_manifest_defaults_to_original_audio_and_probes_only_one_audio_stream(tmp_path):
+    handler, seen = mp4_server(stale_sig="none")
+    with make_client(tmp_path, handler, MultiLangExtractor()) as (client, ctx):
+        mpd = client.get("/api/dash/aaaaaaaaaaa.mpd").text
+        ids = [r.get("id") for r in ET.fromstring(mpd).iter(f"{{{NS}}}Representation")]
+        assert ids == ["137", "140-0"]                       # 1 video + the original-language audio
+        assert len(seen) == 2                                # not one request per dub
+        es = client.get("/api/dash/aaaaaaaaaaa.mpd?lang=es-US").text
+        assert [r.get("id") for r in ET.fromstring(es).iter(f"{{{NS}}}Representation")] == ["137", "140-1"]
+        assert client.get("/api/dash/aaaaaaaaaaa.mpd?lang=../../x").status_code == 400
+        meta = client.get("/api/video/aaaaaaaaaaa").json()
+        assert [(t["lang"], t["original"]) for t in meta["audio_tracks"]][0] == ("en-US", True)
+        assert {t["lang"] for t in meta["audio_tracks"]} == {"en-US", "es-US", "de-DE"}

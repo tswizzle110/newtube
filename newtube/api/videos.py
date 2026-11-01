@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..app import Context
 from ..extract.base import AgeRestricted, BotCheck, ExtractionError, VideoUnavailable
+from ..media.dash import audio_tracks
 from .deps import get_ctx, valid_video_id
 
 router = APIRouter(prefix="/api")
@@ -34,6 +35,8 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
         "duration": v.duration, "published_at": v.published_at, "view_count": v.view_count,
         "is_live": v.is_live, "tags": v.tags,
         "chapters": [{"start": c.start, "title": c.title} for c in v.chapters],
+        "audio_tracks": [{"lang": a.lang, "name": a.name, "original": a.original}
+                         for a in audio_tracks(v.formats)],
         "captions": [{"lang": c.lang, "name": c.name, "auto": c.auto} for c in v.captions],
         "formats": [{"format_id": f.format_id, "height": f.height, "fps": f.fps, "ext": f.ext,
                      "vcodec": f.vcodec, "acodec": f.acodec, "muxed": f.is_muxed,

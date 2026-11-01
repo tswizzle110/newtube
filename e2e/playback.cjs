@@ -55,12 +55,31 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('quality 180p -> decoded width 320', (await state(p)).w === 320, 'w=' + (await state(p)).w);
   await p.hover('.player'); await p.click('button[title=Quality]'); await p.click('.menu button:has-text("Auto")');
 
+  // ---- audio language: default = original, dubs only on request, choice survives a reload
+  const streams = [];
+  p.on('request', r => { const m = r.url().match(/\/api\/stream\/e2eVIDEO001\/(\S+)$/); if (m) streams.push(m[1]); });
+  await p.hover('.player');
+  check('audio menu offered (video has 2 languages)', (await p.locator('button[title="Audio language"]').count()) === 1);
+  await p.click('button[title="Audio language"]');
+  const items = await p.locator('.menu button').allInnerTexts();
+  check('original listed first and labelled', /English.*original/i.test(items[0] ?? ''), JSON.stringify(items));
+  await p.click('.menu button:has-text("Spanish")'); await p.waitForTimeout(2500);
+  check('switching to Spanish fetches the Spanish stream', streams.includes('140-1'), JSON.stringify([...new Set(streams)]));
+  check('video keeps playing after the switch', (await state(p)).t > ct && !(await state(p)).paused);
+  check('choice remembered', (await V(p, () => localStorage.getItem('audioLang'))) === 'es-US');
+  check('DRC copy never used', !streams.includes('140-drc'));
+  await p.hover('.player'); await p.click('button[title="Audio language"]');
+  await p.click('.menu button:has-text("original")'); await p.waitForTimeout(1500);
+  check('back to original', (await V(p, () => localStorage.getItem('audioLang'))) === 'original');
+
   // ---- captions
   await p.hover('.player'); await p.click('button[title^=Captions]'); await p.click('.menu button:has-text("English")');
   await p.waitForTimeout(1500);
   const cap = await V(p, () => { const t = [...document.querySelector('video').textTracks][0]; return t && { mode: t.mode, cues: t.cues?.length }; });
   check('captions load via proxy and show', cap && cap.mode === 'showing' && cap.cues === 2, JSON.stringify(cap));
 
+  // ---- logging + resume (jump to ~40% first: the short test video would otherwise finish and count as watched)
+  await p.keyboard.press('4'); await p.waitForTimeout(1500);
   // ---- logging + resume
   await p.waitForTimeout(500);
   const pos = (await state(p)).t;

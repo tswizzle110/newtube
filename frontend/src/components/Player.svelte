@@ -23,12 +23,14 @@
   let chosenQuality = $state('auto')
   let activeHeight = $state(0)
   let capLang = $state(null)
+  let audioLang = $state(initialAudio()) // 'original' or a language code like 'es-US'
   let hover = $state(null) // { frac, time }
   let scrubbing = $state(false)
   let toast = $state('')
   let help = $state(false)
 
   const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+  const audioTracks = $derived(video.audio_tracks ?? [])
   const chapters = $derived(video.chapters ?? [])
   const total = $derived(dur || video.duration || 0)
   const segments = $derived(
@@ -42,6 +44,34 @@
   let tracker = null
   let hideTimer = null
   let toastTimer = null
+
+  // Videos can carry machine-dubbed audio in ~20 languages. Default is always the original.
+  function initialAudio() {
+    let v = 'original'
+    try { v = localStorage.getItem('audioLang') || 'original' } catch { /* ignore */ }
+    return v !== 'original' && video.audio_tracks?.some((a) => a.lang === v) ? v : 'original'
+  }
+  const manifestUrl = (lang) =>
+    `/api/dash/${video.id}.mpd` + (lang && lang !== 'original' ? `?lang=${encodeURIComponent(lang)}` : '')
+
+  async function setAudio(lang) {
+    menu = null
+    if (lang === audioLang || !shakaPlayer) return
+    audioLang = lang
+    try { localStorage.setItem('audioLang', lang) } catch { /* ignore */ }
+    const pos = el.currentTime, wasPlaying = !el.paused
+    try {
+      await shakaPlayer.load(manifestUrl(lang), pos) // same position, new audio track
+      syncQualities()
+      if (chosenQuality !== 'auto') setQuality(chosenQuality)
+      if (wasPlaying) el.play().catch(() => {})
+      const tr = audioTracks.find((a) => a.lang === lang || (lang === 'original' && a.original))
+      say(`Audio: ${tr?.name ?? lang}`)
+    } catch (e) {
+      say('Could not switch audio')
+      console.warn(e)
+    }
+  }
 
   function loadVolume() {
     try { return Number(localStorage.getItem('volume') ?? 1) } catch { return 1 }
@@ -70,7 +100,7 @@
         })
         shakaPlayer.addEventListener('variantchanged', syncQualities)
         shakaPlayer.addEventListener('adaptation', syncQualities)
-        await shakaPlayer.load(`/api/dash/${video.id}.mpd`, startAt > 5 ? startAt : null)
+        await shakaPlayer.load(manifestUrl(audioLang), startAt > 5 ? startAt : null)
         if (gone) return
         mode = 'dash'
         syncQualities()
@@ -300,6 +330,23 @@
           {/if}
         {/if}
       </div>
+      {#if audioTracks.length > 1 && mode === 'dash'}
+        <div class="menuwrap">
+          <button title="Audio language" onclick={() => (menu = menu === 'audio' ? null : 'audio')}>
+            {audioLang === 'original' ? 'Audio' : audioLang}
+          </button>
+          {#if menu === 'audio'}
+            <ul class="menu">
+              {#each audioTracks as a}
+                {@const key = a.original ? 'original' : a.lang}
+                <li><button class:sel={audioLang === key} onclick={() => setAudio(key)}>
+                  {a.name}{a.original ? ' (original)' : ''}
+                </button></li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
       <div class="menuwrap">
         <button title="Speed (&lt; &gt;)" onclick={() => (menu = menu === 'speed' ? null : 'speed')}>{rate}×</button>
         {#if menu === 'speed'}
