@@ -48,6 +48,26 @@ class FakeExtractor:
         return ChannelInfo(CID, "YouTube", "@YouTube", "https://yt3.ggpht.com/av")
 
 
+import contextlib
+
+
+@contextlib.contextmanager
+def make_client(tmp_path, handler, ex):
+    """A fully wired app (mock network, fake extractor, logged-in client)."""
+    s = Settings(data_dir=tmp_path)
+    conn = connect(tmp_path / "t.db")
+    migrate(conn)
+    lim = RateLimiter(0, 0, 100)
+    auth = Auth(tmp_path / "auth.json")
+    auth.set_password("correct horse")
+    ctx = Context(s, conn, lim, OutboundClient(s, lim, transport=httpx.MockTransport(handler)),
+                  ex, VideoService(conn, ex), DiskCache(tmp_path / "img", 10**6), auth,
+                  run_scheduler=False)
+    with TestClient(create_app(ctx)) as client:
+        assert client.post("/api/login", json={"password": "correct horse"}).status_code == 200
+        yield client, ctx
+
+
 @pytest.fixture
 def env(tmp_path):
     seen = []   # every upstream request, for assertions
@@ -69,18 +89,8 @@ def env(tmp_path):
                 "content-length": "10", "x-secret": "no"})
         return httpx.Response(404)
 
-    s = Settings(data_dir=tmp_path)
-    conn = connect(tmp_path / "t.db")
-    migrate(conn)
-    lim = RateLimiter(0, 0, 100)
     ex = FakeExtractor()
-    auth = Auth(tmp_path / "auth.json")
-    auth.set_password("correct horse")
-    ctx = Context(s, conn, lim, OutboundClient(s, lim, transport=httpx.MockTransport(handler)),
-                  ex, VideoService(conn, ex), DiskCache(tmp_path / "img", 10**6), auth,
-                  run_scheduler=False)
-    with TestClient(create_app(ctx)) as client:
-        assert client.post("/api/login", json={"password": "correct horse"}).status_code == 200
+    with make_client(tmp_path, handler, ex) as (client, ctx):
         yield client, ctx, ex, seen
 
 

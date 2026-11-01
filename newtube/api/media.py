@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from ..app import Context
+from ..db.queries import cache
+from ..extract.base import Format
+from ..media.dash import Rep, build_mpd, select_formats
+from ..media.isobmff import NotDashMp4, Ranges, probe_ranges
 from ..media.ranges import clamp_range
 from .deps import get_ctx, valid_channel_id, valid_video_id
 
@@ -101,3 +107,47 @@ async def stream(video_id: str, format_id: str, request: Request,
     headers = {k: v for k, v in upstream.headers.items() if k.lower() in PASS_HEADERS}
     headers["Cache-Control"] = "private, no-store"
     return StreamingResponse(body(), status_code=upstream.status_code, headers=headers)
+
+
+RANGES_TTL = 7 * 24 * 3600   # byte layout of a stream never changes, unlike its signed URL
+
+
+async def _ranges_for(ctx: Context, video_id: str, fmt: Format) -> Ranges | None:
+    key = f"ranges:{video_id}:{fmt.format_id}"
+    hit = cache.get(ctx.conn, key)
+    if hit:
+        return Ranges(**hit)
+
+    async def fetch(start: int, end: int) -> bytes:
+        async with ctx.http.stream(fmt.url, headers={"Range": f"bytes={start}-{end}"}) as r:
+            if r.status_code not in (200, 206):
+                raise PermissionError(f"HTTP {r.status_code}")
+            return await r.aread()
+
+    try:
+        ranges = await probe_ranges(fetch)
+    except (NotDashMp4, PermissionError):
+        return None
+    cache.put(ctx.conn, key, {"init_end": ranges.init_end, "index_start": ranges.index_start,
+                              "index_end": ranges.index_end}, RANGES_TTL)
+    return ranges
+
+
+@router.get("/dash/{video_id}.mpd")
+async def dash_manifest(video_id: str, ctx: Context = Depends(get_ctx)) -> Response:
+    """DASH manifest for adaptive playback (up to 1080p H.264). 404 means: use the muxed fallback."""
+    valid_video_id(video_id)
+    for attempt in (0, 1):
+        info = await ctx.videos.get(video_id, refresh=attempt == 1)
+        video_fmts, audio_fmts = select_formats(info.formats)
+        results = await asyncio.gather(*(_ranges_for(ctx, video_id, f)
+                                         for f in video_fmts + audio_fmts))
+        reps = {f.format_id: Rep(f, r) for f, r in zip(video_fmts + audio_fmts, results) if r}
+        video = [reps[f.format_id] for f in video_fmts if f.format_id in reps]
+        audio = [reps[f.format_id] for f in audio_fmts if f.format_id in reps]
+        if video and audio:
+            break   # a stale signed URL makes every probe fail; attempt 1 re-extracts once
+    else:
+        raise HTTPException(404, "no DASH-compatible formats")
+    mpd = build_mpd(video_id, info.duration or 0, video, audio)
+    return Response(mpd, media_type="application/dash+xml", headers={"Cache-Control": "private, no-store"})
