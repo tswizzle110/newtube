@@ -1,0 +1,23 @@
+# User service: no root needed, paths are relative to your home directory.
+#   mkdir -p ~/.config/systemd/user && cp deploy/newtube.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now newtube
+#   loginctl enable-linger "$USER"        # keep running after you log out / start at boot
+# Logs:  journalctl --user -u newtube -f
+[Unit]
+Description=newtube (private YouTube client)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/newtube
+# deno must be on PATH for yt-dlp; uv lives in ~/.local/bin
+Environment=PATH=%h/.local/bin:%h/.deno/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/uv run --frozen newtube serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

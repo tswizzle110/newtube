@@ -1,0 +1,10 @@
+# Copy to newtube.toml (git-ignored). Every key can also be set as NEWTUBE_<KEY> in the environment.
+port = 8787
+host = "0.0.0.0"              # "127.0.0.1" = this machine only (e.g. behind Tailscale serve / a proxy)
+data_dir = "data"             # SQLite DB, caches, auth.json
+outbound_proxy = ""           # e.g. "socks5://127.0.0.1:1080": all outbound traffic, incl. yt-dlp
+js_runtime = "deno"           # deno | node | bun | quickjs
+cache_max_bytes = 3221225472  # thumbnail/avatar cache cap (3 GiB)
+min_request_interval = 0.8    # seconds between YouTube requests (plus jitter)
+request_jitter = 0.6
+background_daily_cap = 2000   # background YouTube requests per day (RSS polling now; backfill later)

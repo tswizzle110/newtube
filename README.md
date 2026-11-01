@@ -8,4 +8,4 @@ uv run pytest
 uv run newtube --help
 ```
 
-Status: phase 1 in progress. To run it, see [docs/RUNNING.md](docs/RUNNING.md).
+Status: phase 1 complete (subscriptions, playback, tracking). See [docs/RUNNING.md](docs/RUNNING.md) to run it, [docs/PLAN.md](docs/PLAN.md) for the roadmap.

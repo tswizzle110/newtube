@@ -6,7 +6,7 @@ from newtube.config import load_settings
 def test_defaults(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     s = load_settings({})
-    assert s.port == 8080
+    assert s.port == 8787
     assert s.db_path == Path("data/newtube.db")
 
 

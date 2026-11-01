@@ -20,7 +20,7 @@ class Settings:
     # Where the SQLite DB, caches and secrets live.
     data_dir: Path = Path("data")
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 8787
 
     # Optional outbound proxy (e.g. "socks5://127.0.0.1:1080"). Applied to
     # every outbound request, including yt-dlp. Empty = direct.
