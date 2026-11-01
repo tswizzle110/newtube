@@ -11,7 +11,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  p.on('console', m => { if (m.type() === 'error' && !/status of 404/.test(m.text())) problems.push('console: ' + m.text()); });
+  p.on('console', m => { if (m.type() === 'error' && !/status of (404|409)/.test(m.text())) problems.push('console: ' + m.text()); });
   p.on('response', async r => { if (r.url().endsWith('/api/events')) console.log('EVENTS', r.status(), (r.status()!==200 ? (await r.text()).slice(0,300) + ' | body: ' + (r.request().postData()||'').slice(0,400) : (r.request().postData()||'').match(/"watch":\[[^\]]*\]/)?.[0]?.slice(0,160) ?? '')); });
   p.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL: ' + r.url()); });
 
@@ -98,6 +98,36 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   s = await state(p);
   check('muxed fallback plays when DASH is unavailable', s.t > 1 && s.w === 640, JSON.stringify(s));
 
+  // ---- comments: lazy, sortable, replies capped at the first 10, timestamps seek
+  const commentReqs = [];
+  p.on('request', r => { if (r.url().includes('/api/comments/')) commentReqs.push(new URL(r.url()).pathname + new URL(r.url()).search); });
+  await p.setViewportSize({ width: 1400, height: 600 });      // short window: the comments start below the fold
+  await p.goto(BASE + '/watch?v=e2eVIDEO001'); await p.waitForSelector('.comments');
+  await p.waitForTimeout(1500);
+  check('comments are NOT requested until scrolled into view', commentReqs.length === 0, JSON.stringify(commentReqs));
+  await p.locator('.comments').scrollIntoViewIfNeeded();
+  await p.waitForSelector('li.comment');
+  check('first 20 comments load, with estimate in the header', (await p.locator('li.comment').count()) === 20 && (await p.locator('.comments h2').innerText()).includes('4.3K'));
+  check('pinned comment shows its badge', await p.locator('li.comment').first().locator('.badge[title=Pinned]').count() === 1);
+  await p.locator('li.comment').first().locator('button:has-text("Replies")').click();
+  await p.waitForSelector('.reply');
+  check('replies expand under the comment', (await p.locator('.reply').count()) === 2);
+  check('only the first 10 comments offer replies', (await p.locator('li.comment > .main button:has-text("Replies"), li.comment > .main button:has-text("Hide replies")').count()) === 10);
+  await p.click('.comments button:has-text("Load more")'); await p.waitForFunction(() => document.querySelectorAll('li.comment').length === 40);
+  check('load more adds 20 and keeps opened replies', (await p.locator('.reply').count()) === 2);
+  await p.click('.sorts button:has-text("Newest")'); await p.waitForFunction(() => document.querySelector('li.comment .text')?.innerText.startsWith('new comment 0'));
+  check('sort switches to newest and resets to 20', (await p.locator('li.comment').count()) === 20);
+  await p.locator('li.comment').first().locator('.ts').click(); await p.waitForTimeout(1200);
+  const tt = (await state(p)).t;
+  check('clicking a timestamp in a comment seeks the video', tt >= 9.5 && tt < 14, tt.toFixed(1));
+  check('links in comments open safely in a new tab', (await p.locator('li.comment a[target=_blank][rel*=noreferrer]').count()) >= 1);
+  const bad = await p.evaluate(async () => (await fetch('/api/comments/e2eVIDEO001/replies/Ugx0000011?sort=new')).status);
+  check('replies beyond the first 10 are refused (409)', bad === 409, String(bad));
+  await p.waitForTimeout(5500);
+  const evs2 = await (await ctx.request.get(BASE + '/__events')).json();
+  check('comments_opened was logged once', evs2.filter(e => e.type === 'comments_opened').length >= 1);
+
+  await p.setViewportSize({ width: 1400, height: 900 });
   // ---- search, channel and playlist pages
   await p.goto(BASE + '/'); await p.waitForSelector('header');
   await p.keyboard.press('/');

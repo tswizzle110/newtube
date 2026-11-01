@@ -4,6 +4,7 @@
   import { router, navigate } from '../lib/router.svelte.js'
   import { duration as fmt, ago, views } from '../lib/format.js'
   import Player from '../components/Player.svelte'
+  import Comments from '../components/Comments.svelte'
 
   const id = router.query.get('v')
   const source = router.query.get('src') ?? 'direct'
@@ -82,6 +83,8 @@
       <pre>{video.description}</pre>
       <button class="btn" onclick={() => (expanded = !expanded)}>{expanded ? 'Show less' : 'Show more'}</button>
     </section>
+
+    <Comments videoId={video.id} {player} />
   {/if}
 </div>
 

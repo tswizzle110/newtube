@@ -8,7 +8,7 @@ from newtube.auth import Auth
 from newtube.config import Settings
 from newtube.db.connection import connect, migrate
 from newtube.extract.base import (
-    Caption, ChannelInfo, ChannelSummary, Chapter, Format, PlaylistSummary, VideoInfo, VideoSummary,
+    Caption, ChannelInfo, ChannelSummary, Chapter, Comment, CommentPage, Format, PlaylistSummary, VideoInfo, VideoSummary,
 )
 from newtube.media.diskcache import DiskCache
 from newtube.net.http import OutboundClient
@@ -68,6 +68,17 @@ class Ex:
                          formats=fm, fetched_at=1)
     async def resolve_channel(self, ref, *, background=False):
         return ChannelInfo(ref, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", None, 1200)
+
+    async def comments(self, video_id, sort="top", limit=20, *, replies_for=0, replies_per_thread=10, background=False):
+        out = []
+        for i in range(min(limit, 45)):
+            cid = f"Ugx{i:07d}"
+            text = f"{sort} comment {i}" + (" see 0:10 and https://example.org/page" if i == 0 else "")
+            out.append(Comment(cid, text, f"Author{i}", like_count=2000 - i, time_text="2 days ago",
+                               author_id="UC" + "a" * 22 if i == 0 else None, is_pinned=(i == 0)))
+            if i < replies_for:
+                out += [Comment(f"{cid}.r{j}", f"reply {j} to {i}", "Replier", parent=cid) for j in range(2)]
+        return CommentPage(out, 4321)
 
     async def search(self, query, kind="video", limit=20, *, background=False):
         cid = "UC" + "a" * 22

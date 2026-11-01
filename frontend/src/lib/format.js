@@ -29,3 +29,25 @@ export const subscribers = (n) => (n == null ? '' : subsFmt.format(n) + ' subscr
 
 // Avatars / playlist thumbnails of things we don't have locally go through our image proxy.
 export const img = (u) => (u ? '/api/img?u=' + encodeURIComponent(u) : '')
+
+export const compactNumber = (n) => (n == null ? '' : compact.format(n))
+
+// Split comment text into plain text, clickable timestamps ("1:23" seeks the video) and links.
+export function linkify(text) {
+  const out = []
+  const re = /(https?:\/\/[^\s<>"']+)|\b((?:\d{1,2}:)?\d{1,2}:\d{2})\b/g
+  let last = 0, m
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ t: 'text', v: text.slice(last, m.index) })
+    if (m[1]) {
+      out.push({ t: 'url', v: m[1] })
+    } else {
+      const parts = m[2].split(':').map(Number)
+      const secs = parts.reduce((acc, x) => acc * 60 + x, 0)
+      out.push(parts.at(-1) < 60 ? { t: 'time', v: m[2], s: secs } : { t: 'text', v: m[2] })
+    }
+    last = m.index + m[0].length
+  }
+  if (last < text.length) out.push({ t: 'text', v: text.slice(last) })
+  return out
+}
