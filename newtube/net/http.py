@@ -115,6 +115,12 @@ class OutboundClient:
         await self.limiter.acquire(lane)
         return await self._http.post(url, **kwargs)
 
+    async def get_media(self, url: str, **kwargs: Any) -> httpx.Response:
+        """GET for static media (thumbnails, avatars). Allowlisted, NOT rate limited:
+        a feed page legitimately loads dozens of images at once."""
+        check_url(url)
+        return await self._http.get(url, **kwargs)
+
     @asynccontextmanager
     async def stream(
         self, url: str, *, headers: dict[str, str] | None = None
@@ -123,6 +129,15 @@ class OutboundClient:
         check_url(url)
         async with self._http.stream("GET", url, headers=headers) as resp:
             yield resp
+
+    async def open_stream(
+        self, url: str, *, headers: dict[str, str] | None = None
+    ) -> httpx.Response:
+        """Like ``stream`` but the caller owns the response and MUST ``await resp.aclose()``.
+        Used when the body is handed to a streaming HTTP response."""
+        check_url(url)
+        req = self._http.build_request("GET", url, headers=headers)
+        return await self._http.send(req, stream=True)
 
     async def aclose(self) -> None:
         await self._http.aclose()
