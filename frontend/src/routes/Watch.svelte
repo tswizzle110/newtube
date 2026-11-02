@@ -17,6 +17,14 @@
   let sbData = $state(null)       // SponsorBlock segments for this video
   let sbSettings = $state(null)   // your SponsorBlock settings
 
+  // Theater mode: the player spans the whole width and Up next moves below it. Remembered between visits.
+  let theater = $state(readTheater())
+  function readTheater() { try { return localStorage.getItem('theater') === '1' } catch { return false } }
+  function toggleTheater() {
+    theater = !theater
+    try { localStorage.setItem('theater', theater ? '1' : '0') } catch { /* private mode */ }
+  }
+
   let video = $state(null)
   let error = $state('')
   let player = $state()
@@ -51,16 +59,19 @@
   const advance = () => { if (next) navigate(watchHref(next.id)) }
 </script>
 
-<div class="watch">
+<div class="watch" class:theater>
   {#if error}
     <p class="error">{error}</p>
     <a href="/" class="muted">Back to subscriptions</a>
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}
-    <div class="top">
+    <div class="stage">
     <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list || mylist ? advance : null}
-      sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null} />
+      sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null}
+      {theater} ontheater={toggleTheater} />
+    </div>
+    <div class="details">
     <h1>{video.title}</h1>
     <div class="byline">
       <a class="chan" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
@@ -116,13 +127,17 @@
   /* One column on a narrow window: video and details, then Up next, then comments. With room to spare,
      Up next sits in a column of its own beside the video and the comments. */
   .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 0 24px;
-    grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "related" "comments"; }
-  .top { grid-area: top; min-width: 0; }
+    grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "details" "related" "comments"; }
+  .stage { grid-area: stage; min-width: 0; }
+  .details { grid-area: details; min-width: 0; }
   .related { grid-area: related; margin-top: 24px; min-width: 0; }
   .discussion { grid-area: comments; min-width: 0; }
   @media (min-width: 1100px) {
-    .watch { max-width: 1680px; grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "top related" "comments related"; }
+    .watch { max-width: 1680px; grid-template-columns: minmax(0, 1fr) 380px;
+      grid-template-areas: "stage related" "details related" "comments related"; }
     .related { margin-top: 0; }
+    /* theater: the video takes the full width, the rest sits below it as before */
+    .watch.theater { grid-template-areas: "stage stage" "details related" "comments related"; }
   }
   h1 { font-size: 20px; margin: 16px 0 6px; }
   h2 { font-size: 15px; margin: 0 0 8px; }

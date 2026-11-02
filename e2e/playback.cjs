@@ -393,10 +393,21 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('Up next lists the related videos', (await p.locator('.related .card').count()) === 2 &&
     (await p.locator('.related .card .title').first().innerText()) === 'Related one');
   const box = async (sel) => p.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; }, sel);
-  const vb = await box('.top video'), rb = await box('.related');
+  const vb = await box('.stage video'), rb = await box('.related');
   check('on a wide window Up next is a column beside the video', rb.l >= vb.r - 1 && rb.t < vb.b, JSON.stringify({ vb, rb }));
+  const wideW = vb.r - vb.l;
+  await p.evaluate(() => { try { localStorage.removeItem('theater'); } catch {} });
+  await p.keyboard.press('t'); await p.waitForSelector('.watch.theater');
+  const vbT = await box('.stage video'), rbT = await box('.related');
+  check('t switches to theater mode: a wider video with Up next below it', (vbT.r - vbT.l) > wideW + 100 && rbT.t >= vbT.b - 1, JSON.stringify({ wideW, vbT, rbT }));
+  check('the theater button shows it is on', (await p.locator('.player button.theater[aria-pressed="true"]').count()) === 1);
+  await p.reload(); await p.waitForSelector('.watch.theater');
+  check('theater mode is remembered', (await p.locator('.watch.theater').count()) === 1);
+  await p.locator('.player').hover(); await p.click('.player button.theater');
+  await p.waitForFunction(() => !document.querySelector('.watch.theater'));
+  check('the button switches back to the default view', (await p.locator('.player button.theater[aria-pressed="false"]').count()) === 1);
   await p.setViewportSize({ width: 800, height: 900 }); await p.waitForTimeout(300);
-  const vb2 = await box('.top video'), rb2 = await box('.related');
+  const vb2 = await box('.stage video'), rb2 = await box('.related');
   check('on a narrow window it moves below the video', rb2.t >= vb2.b - 1, JSON.stringify({ vb2, rb2 }));
   await p.setViewportSize({ width: 1400, height: 900 });
   await p.click('.related .card .title >> nth=0'); await p.waitForURL(/v=e2eREL00001/);

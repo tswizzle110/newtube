@@ -7,7 +7,7 @@
 
   // video: metadata from /api/video/<id>.  startAt: resume position (s).  api: bindable handle.
   // sb: { data: {segments, full_labels}, settings, channelId } once SponsorBlock info has loaded.
-  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null, sb = null } = $props()
+  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null, sb = null, theater = false, ontheater = null } = $props()
 
   let box, el
   let paused = $state(true)
@@ -370,7 +370,7 @@
       ' ': toggle, k: toggle, j: () => seekBy(-10), l: () => seekBy(10),
       ArrowLeft: () => seekBy(-5), ArrowRight: () => seekBy(5),
       ArrowUp: () => setVolume(volume + 0.05), ArrowDown: () => setVolume(volume - 0.05),
-      m: toggleMute, f: toggleFullscreen, c: cycleCaptions, '<': () => stepRate(-1), '>': () => stepRate(1),
+      m: toggleMute, f: toggleFullscreen, t: () => ontheater?.(), c: cycleCaptions, '<': () => stepRate(-1), '>': () => stepRate(1),
       '{': () => jumpChapter(-1), '}': () => jumpChapter(1),   // Shift+[ / Shift+]: chapters
       u: undoSkip, '[': markStart, ']': markEnd,
       Enter: () => (sbButton || sbPoiButton) && !e.target.closest('button') && skipNow(),
@@ -480,7 +480,7 @@
         <dt>Space / k</dt><dd>play / pause</dd><dt>← →</dt><dd>seek 5 s</dd><dt>j / l</dt><dd>seek 10 s</dd>
         <dt>↑ ↓</dt><dd>volume</dd><dt>m</dt><dd>mute</dd><dt>f</dt><dd>fullscreen</dd>
         <dt>c</dt><dd>captions</dd><dt>&lt; &gt;</dt><dd>speed</dd><dt>{'{'} {'}'}</dt><dd>previous / next chapter</dd><dt>Enter</dt><dd>skip (when a skip button shows)</dd><dt>u</dt><dd>undo last auto-skip</dd><dt>[ ]</dt><dd>mark a segment's start / end (SponsorBlock, if enabled)</dd>
-        <dt>0–9</dt><dd>jump to 0–90%</dd><dt>?</dt><dd>this help</dd>
+        <dt>t</dt><dd>theater mode</dd><dt>0–9</dt><dd>jump to 0–90%</dd><dt>?</dt><dd>this help</dd>
       </dl>
     </div>
   {/if}
@@ -575,6 +575,10 @@
         {/if}
       </div>
       <button title="Keyboard shortcuts (?)" onclick={() => (help = !help)}>?</button>
+      {#if ontheater}
+        <button class="theater" class:on={theater} aria-pressed={theater} title={theater ? 'Default view (t)' : 'Theater mode (t)'}
+                onclick={ontheater}>▭</button>
+      {/if}
       <button title="Fullscreen (f)" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
     </div>
   </div>
