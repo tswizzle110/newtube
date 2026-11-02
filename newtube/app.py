@@ -75,7 +75,7 @@ def create_app(ctx: Context | None = None) -> FastAPI:
         app.state.ctx = c
         task = None
         if c.run_scheduler:
-            task = asyncio.create_task(Scheduler(c.settings, c.conn, c.http).run())
+            task = asyncio.create_task(Scheduler(c.settings, c.conn, c.http, extractor=c.extractor).run())
         try:
             yield
         finally:

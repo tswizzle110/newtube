@@ -60,24 +60,34 @@ class RateLimiter:
     async def acquire(self, lane: Lane = Lane.INTERACTIVE) -> None:
         """Wait until a request may be sent. Raises DailyCapReached for background."""
         if lane is Lane.BACKGROUND:
-            if self.remaining_today() <= 0:
-                raise DailyCapReached(f"background cap of {self.daily_cap}/day reached")
-            # Let any interactive request go first.
-            while self._interactive_waiting:
-                await self._sleep(0.05)
-        else:
-            self._interactive_waiting += 1
+            await self._acquire_background()
+            return
+        self._interactive_waiting += 1
         try:
             async with self._lock:
                 wait = self._next_ok - self._clock()
                 if wait > 0:
                     await self._sleep(wait)
                 self._next_ok = self._clock() + self.min_interval + self._rand() * self.jitter
-                if lane is Lane.BACKGROUND:
-                    # Re-check: the cap may have been consumed while waiting.
-                    if self.remaining_today() <= 0:
-                        raise DailyCapReached(f"background cap of {self.daily_cap}/day reached")
-                    self._counts[self._today()] += 1
         finally:
-            if lane is Lane.INTERACTIVE:
-                self._interactive_waiting -= 1
+            self._interactive_waiting -= 1
+
+    async def _acquire_background(self) -> None:
+        """Background requests wait OUTSIDE the lock, in short steps, and only claim a slot when
+        nothing interactive is waiting. So a click is never queued behind background work (the worst
+        case is the slot of a request that was already sent)."""
+        while True:
+            if self.remaining_today() <= 0:
+                raise DailyCapReached(f"background cap of {self.daily_cap}/day reached")
+            if self._interactive_waiting:
+                await self._sleep(0.05)
+                continue
+            async with self._lock:
+                if self._interactive_waiting:     # one arrived while we queued for the lock
+                    continue
+                wait = self._next_ok - self._clock()
+                if wait <= 0 and self.remaining_today() > 0:
+                    self._next_ok = self._clock() + self.min_interval + self._rand() * self.jitter
+                    self._counts[self._today()] += 1
+                    return
+            await self._sleep(min(max(wait, 0.01), 0.05))

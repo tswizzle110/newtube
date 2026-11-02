@@ -6,7 +6,7 @@ import sqlite3
 import time
 
 from .events import log_event
-from ...extract.base import ChannelInfo
+from ...extract.base import ChannelInfo, VideoSummary
 from ...extract.rss import Feed
 
 
@@ -69,6 +69,42 @@ def store_feed(conn: sqlite3.Connection, feed: Feed) -> int:
         conn.execute("ROLLBACK")
         raise
     return new
+
+
+def store_discovered(conn: sqlite3.Connection, channel_id: str, videos: list[VideoSummary],
+                     now: int | None = None) -> int:
+    """Record videos found on a channel's page when RSS is unavailable. Returns how many NEW,
+    feed-visible videos that produced.
+
+    The page lists newest first but has no upload dates. So:
+    * if we already know videos of this channel, anything unseen is genuinely new: date it by when
+      we first saw it (``now - position`` keeps their order) and it joins the feed;
+    * if we know nothing about the channel yet, the list is just its backlog: remember the ids (so
+      they are not mistaken for new uploads later) but leave them undated, which keeps them out of
+      the chronological feed. Opening one fills in its real date."""
+    now = now if now is not None else int(time.time())
+    had_history = conn.execute("SELECT 1 FROM videos WHERE channel_id=? LIMIT 1",
+                               (channel_id,)).fetchone() is not None
+    new_visible = 0
+    conn.execute("BEGIN")
+    try:
+        for position, v in enumerate(videos):
+            if conn.execute("SELECT 1 FROM videos WHERE id=?", (v.id,)).fetchone():
+                conn.execute("UPDATE videos SET duration=COALESCE(duration, ?) WHERE id=?",
+                             (v.duration, v.id))
+                continue
+            published = now - position if had_history else None
+            conn.execute(
+                "INSERT INTO videos(id, channel_id, title, published_at, duration, view_count,"
+                " first_seen_at) VALUES (?,?,?,?,?,?,?)",
+                (v.id, channel_id, v.title, published, v.duration, v.view_count, now))
+            new_visible += published is not None
+        conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?", (now, channel_id))
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return new_visible
 
 
 def due_for_poll(conn: sqlite3.Connection, interval: int, now: int | None = None) -> list[str]:
