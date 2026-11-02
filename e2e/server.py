@@ -128,9 +128,17 @@ class Ex:
         vids = [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24) for k in "ABC"]
         return (ChannelInfo(channel_id, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", "A test channel", 1200), vids[:limit])
 
-    async def channel_uploads(self, channel_id, limit=500, *, background=False):  # the uploads playlist: with views
+    async def channel_uploads(self, channel_id, limit=10_000, progress=None, *, background=False):
+        """The uploads playlist, newest first, with views: 3 real videos then 127 fillers, read slowly in 5 pages."""
+        import asyncio
         views = {"A": 100, "B": 5000, "C": 300}
-        return [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24, views[k]) for k in "ABC"], 3
+        vids = [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24, views[k]) for k in "ABC"]
+        vids += [VideoSummary(f"fil{i:08d}", f"Filler {i:03d}", channel_id, "E2E Channel", 24, 1 + i % 50) for i in range(127)]
+        for page in range(1, 6):
+            await asyncio.sleep(0.35)
+            if progress:
+                progress(min(page * 26, 130), 130)
+        return vids, 130
 
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         cid = "UC" + "a" * 22

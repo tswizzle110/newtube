@@ -36,7 +36,7 @@ from .base import (
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9._-]{3,}$")
-MAX_UPLOADS = 500      # the most uploads we scan to sort a channel (5 pages of ~100)
+MAX_UPLOADS = 10_000   # the most uploads we read to sort a channel (~100 pages of ~100)
 PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{13,64}$")
 
 # YouTube's `sp` search-filter parameter (type = video / channel / playlist).
@@ -279,6 +279,43 @@ class _Session:
                         ydl.params.pop(k, None)
 
 
+class _ScanSession(_Session):
+    """Reads a long playlist page by page, reporting progress. A session of its own, so a scan that
+    takes a minute never holds up anything else."""
+
+    def scan(self, url: str, extra: dict[str, Any], limit: int,
+             progress: Callable[[int, int | None], None] | None) -> dict[str, Any]:
+        with self._lock:
+            if self._ydl is None:
+                self._ydl = yt_dlp.YoutubeDL(self._make_opts())
+            ydl = self._ydl
+            saved = {k: ydl.params[k] for k in extra if k in ydl.params}
+            ydl.params.update(extra)
+            entries: list[dict[str, Any]] = []
+            try:
+                # process=False: `entries` is a generator that fetches the NEXT page only when we
+                # ask for more, so we can count as we go and stop at the limit.
+                info = ydl.extract_info(url, download=False, process=False)
+                total = info.get("playlist_count")
+                source = info.get("entries") or []
+                for e in source:
+                    if isinstance(e, dict):
+                        entries.append(e)
+                        if progress:
+                            progress(len(entries), total)
+                        if len(entries) >= limit:
+                            break
+                if hasattr(source, "close"):
+                    source.close()
+                return {"entries": entries, "playlist_count": total}
+            finally:
+                for k in extra:
+                    if k in saved:
+                        ydl.params[k] = saved[k]
+                    else:
+                        ydl.params.pop(k, None)
+
+
 # ------------------------------------------------------------ implementation
 
 
@@ -288,6 +325,7 @@ class YtDlpExtractor:
         self._limiter = limiter
         # Separate sessions so a slow background job can never block something you clicked.
         self._sessions = {False: _Session(self._base_opts), True: _Session(self._base_opts)}
+        self._scan_session = _ScanSession(self._base_opts)
 
     def _base_opts(self) -> dict[str, Any]:
         s = self._settings
@@ -349,29 +387,36 @@ class YtDlpExtractor:
         return await self._extract(f"https://www.youtube.com/channel/{channel_id}/videos",
                                    self._flat(max(1, min(limit, 150))), background)
 
-    async def raw_uploads(self, channel_id: str, limit: int = 500, *,
+    async def channel_videos(self, channel_id: str, limit: int = 30, *,
+                             background: bool = False) -> list[VideoSummary]:
+        info = await self.raw_channel_videos(channel_id, limit, background=background)
+        return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+
+    async def raw_uploads(self, channel_id: str, limit: int = MAX_UPLOADS,
+                          progress: Callable[[int, int | None], None] | None = None, *,
                           background: bool = False) -> dict[str, Any]:
-        """The channel's "uploads" playlist (id = UU + the channel id minus its UC). Read in pages of
-        ~100, so its requests are paced like comments are."""
+        """The channel's "uploads" playlist (id = UU + the channel id minus its UC), read page by page
+        (~100 videos each). Its requests are paced; ``progress(done, total_or_None)`` is called as pages
+        arrive, from a worker thread."""
         if not CHANNEL_ID_RE.match(channel_id):
             raise ExtractionError("bad channel request")
-        extra = {**self._flat(max(1, min(limit, MAX_UPLOADS))),
-                 "sleep_interval_requests": self._settings.min_request_interval}
-        return await self._extract(f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}", extra, background)
+        await self._limiter.acquire(Lane.BACKGROUND if background else Lane.INTERACTIVE)
+        url = f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}"
+        extra = {"extract_flat": "in_playlist", "sleep_interval_requests": self._settings.min_request_interval}
+        try:
+            return await asyncio.to_thread(self._scan_session.scan, url, extra, max(1, min(limit, MAX_UPLOADS)), progress)
+        except yt_dlp.utils.DownloadError as e:
+            raise classify_error(str(e)) from e
 
-    async def channel_uploads(self, channel_id: str, limit: int = 500, *,
+    async def channel_uploads(self, channel_id: str, limit: int = MAX_UPLOADS,
+                              progress: Callable[[int, int | None], None] | None = None, *,
                               background: bool = False) -> tuple[list[VideoSummary], int | None]:
-        info = await self.raw_uploads(channel_id, limit, background=background)
+        info = await self.raw_uploads(channel_id, limit, progress, background=background)
         videos = [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
         for v in videos:
             v.channel_id = v.channel_id or channel_id
         total = info.get("playlist_count")
         return videos, int(total) if isinstance(total, (int, float)) else None
-
-    async def channel_videos(self, channel_id: str, limit: int = 30, *,
-                             background: bool = False) -> list[VideoSummary]:
-        info = await self.raw_channel_videos(channel_id, limit, background=background)
-        return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
 
     async def raw_playlist(self, playlist_id: str, limit: int = 100, *,
                            background: bool = False) -> dict[str, Any]:

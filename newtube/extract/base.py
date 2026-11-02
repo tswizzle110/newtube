@@ -7,6 +7,7 @@ swapped in by implementing the same ``Extractor`` protocol.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -197,11 +198,13 @@ class Extractor(Protocol):
         """Channel header + newest uploads from ONE request (the Videos tab: no view counts)."""
         ...
 
-    async def channel_uploads(self, channel_id: str, limit: int = 500, *,
+    async def channel_uploads(self, channel_id: str, limit: int = 10_000,
+                              progress: Callable[[int, int | None], None] | None = None, *,
                               background: bool = False) -> tuple[list[VideoSummary], int | None]:
         """Up to ``limit`` of the channel's uploads, newest first, WITH view counts (from its
         "uploads" playlist), plus the channel's total video count if known. This is what Popular
-        and Oldest are built from: YouTube ignores sort parameters on the Videos tab."""
+        and Oldest are built from: YouTube ignores sort parameters on the Videos tab. It can take
+        a minute for a big channel, so ``progress(done, total_or_None)`` reports as pages arrive."""
         ...
 
     async def playlist_page(self, playlist_id: str, limit: int = 100, *,

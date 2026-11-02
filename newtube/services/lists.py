@@ -7,21 +7,25 @@ cached lists never go stale on that.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import sqlite3
+import time
+from dataclasses import dataclass
 from typing import Any
 
 from ..db.queries import cache
 from ..extract.base import (
-    ChannelInfo, ChannelSummary, Extractor, PlaylistSummary, SearchItem, VideoSummary,
+    ChannelInfo, ChannelSummary, ExtractionError, Extractor, PlaylistSummary, SearchItem, VideoSummary,
 )
 
 CACHE_VERSION = 1
 TTL_SEARCH = 3600
 TTL_CHANNEL = 900
 TTL_PLAYLIST = 1800
-SCAN_LIMIT = 500      # uploads read to sort a channel; larger channels get a partial Popular and no Oldest
+SCAN_LIMIT = 10_000   # uploads read to sort a channel (about 100 requests); beyond that Popular is partial and Oldest unavailable
+UPLOADS_TTL = 24 * 3600   # a scanned list is reused for a day (the oldest videos never change)
 
 _KIND = {VideoSummary: "video", ChannelSummary: "channel", PlaylistSummary: "playlist"}
 
@@ -56,9 +60,21 @@ def enrich_videos(conn: sqlite3.Connection, items: list[dict[str, Any]]) -> list
     return items
 
 
+@dataclass
+class _Scan:
+    """One channel's uploads being read in the background."""
+    done: int = 0
+    total: int | None = None
+    error: str | None = None
+    finished: bool = False
+    task: asyncio.Task[None] | None = None
+
+
 class ListService:
     def __init__(self, conn: sqlite3.Connection, extractor: Extractor) -> None:
         self.conn, self.extractor = conn, extractor
+        self._scans: dict[str, _Scan] = {}
+        self._scan_gate = asyncio.Semaphore(1)       # one long scan at a time: never a pile of them
 
     def _cached(self, key: str) -> Any | None:
         return cache.get(self.conn, f"list:v{CACHE_VERSION}:{key}")
@@ -84,52 +100,87 @@ class ListService:
             self._store(key, header, TTL_CHANNEL * 4)
         return header
 
-    async def _uploads(self, channel_id: str) -> dict[str, Any]:
-        key = f"uploads:{channel_id}"
-        up = self._cached(key)
-        if up is None:
-            videos, total = await self.extractor.channel_uploads(channel_id, SCAN_LIMIT)
-            up = {"videos": [to_dict(v) for v in videos], "total": total}
-            self._store(key, up, TTL_SEARCH)
-        return up
+    def _uploads_cached(self, channel_id: str) -> dict[str, Any] | None:
+        return self._cached(f"uploads2:{channel_id}")
 
-    async def channel(self, channel_id: str, limit: int = 30, sort: str = "newest") -> dict[str, Any]:
-        """``newest`` comes straight from the Videos tab. ``popular`` and ``oldest`` are made from the
-        channel's uploads list (read once, cached) because YouTube ignores sort options on the tab and
-        its entries have no view counts; that list has them. Sorting happens here, so switching sort or
-        loading more costs no further requests."""
-        extra: dict[str, Any] = {}
+    def _start_scan(self, channel_id: str) -> _Scan:
+        scan = _Scan()
+
+        def progress(done: int, total: int | None = None) -> None:     # called from yt-dlp's worker thread
+            scan.done = done
+            scan.total = total or scan.total
+
+        async def run() -> None:
+            try:
+                async with self._scan_gate:
+                    videos, total = await self.extractor.channel_uploads(channel_id, SCAN_LIMIT, progress)
+                truncated = len(videos) >= SCAN_LIMIT and (total is None or total > len(videos))
+                self._store(f"uploads2:{channel_id}", {
+                    "videos": [to_dict(v) for v in videos], "total": total, "truncated": truncated,
+                    "fetched_at": int(time.time())}, UPLOADS_TTL)
+                self._scans.pop(channel_id, None)
+            except Exception as e:  # noqa: BLE001 - reported to the next request, then forgotten
+                scan.error = str(e) or type(e).__name__
+            finally:
+                scan.finished = True
+
+        scan.task = asyncio.create_task(run())
+        self._scans[channel_id] = scan
+        return scan
+
+    async def channel(self, channel_id: str, limit: int = 30, sort: str = "newest", offset: int = 0,
+                      refresh: bool = False) -> dict[str, Any]:
+        """``newest`` comes from the Videos tab (at most 150 deep, no view counts).
+
+        ``popular`` and ``oldest`` need the channel's WHOLE upload list, because YouTube only pages
+        forwards (the oldest videos are at the very end) and ignores sort options on the Videos tab.
+        That list (the "uploads" playlist: it has view counts) is read ONCE in the background, with
+        progress, and cached for a day; after that sorting and paging are served from the cache and
+        cost no requests. While a scan runs the reply has ``scanning`` instead of videos."""
+        subscribed = self.conn.execute("SELECT 1 FROM subscriptions WHERE channel_id=?",
+                                       (channel_id,)).fetchone() is not None
         if sort == "newest":
-            key = f"channel:{channel_id}:{limit}"
+            want = min(offset + limit, 150)
+            key = f"channel:{channel_id}:{want}"
             page = self._cached(key)
             if page is None:
-                info, videos = await self.extractor.channel_page(channel_id, limit)
+                info, videos = await self.extractor.channel_page(channel_id, want)
                 page = {"channel": dataclasses.asdict(info), "videos": [to_dict(v) for v in videos]}
                 self._store(key, page, TTL_CHANNEL)
                 self._store(f"channel_header:{channel_id}", page["channel"], TTL_CHANNEL * 4)
-            header, videos_out = page["channel"], page["videos"]
-            extra["has_more"] = len(videos_out) >= limit
+            out = enrich_videos(self.conn, [dict(v) for v in page["videos"][offset:offset + limit]])
+            return {"channel": page["channel"], "videos": out, "sort": sort, "subscribed": subscribed,
+                    "has_more": len(page["videos"]) >= want and want < 150}
+
+        up = self._uploads_cached(channel_id)
+        scan = self._scans.get(channel_id)
+        if refresh and scan is None:
+            up = None                                    # "Rescan": ignore the cached list
+        if up is None:
+            if scan is not None and scan.finished and scan.error:
+                del self._scans[channel_id]              # report the failure once; the next try starts afresh
+                raise ExtractionError(scan.error)
+            if scan is None:
+                scan = self._start_scan(channel_id)
+            return {"channel": await self._header(channel_id), "videos": [], "sort": sort, "subscribed": subscribed,
+                    "scanning": {"done": scan.done, "total": scan.total}, "has_more": False}
+
+        videos_all, total, truncated = list(up["videos"]), up["total"], up["truncated"]
+        extra: dict[str, Any] = {}
+        if sort == "popular":
+            videos_all.sort(key=lambda v: v.get("view_count") or -1, reverse=True)   # stable: ties stay newest-first
+            if truncated:
+                extra["notice"] = f"Most viewed among the newest {len(videos_all)} of {total or 'many'} videos."
+        elif truncated:
+            videos_all = []
+            extra["unavailable"] = (f"Oldest needs this channel's whole upload list, and it has "
+                                    f"{total or 'more than ' + str(SCAN_LIMIT)} videos (the limit is {SCAN_LIMIT}).")
         else:
-            up = await self._uploads(channel_id)
-            header = await self._header(channel_id)
-            videos_out, total, scanned = list(up["videos"]), up["total"], len(up["videos"])
-            partial = (total is not None and total > scanned) or (total is None and scanned >= SCAN_LIMIT)
-            if sort == "popular":
-                videos_out.sort(key=lambda v: v.get("view_count") or -1, reverse=True)   # stable: ties stay newest-first
-                if partial:
-                    extra["notice"] = f"Most viewed among the newest {scanned} of {total or 'many'} videos."
-            elif partial:
-                videos_out = []
-                extra["unavailable"] = (f"Oldest needs the channel's whole upload list, and this channel has "
-                                        f"{total or 'more than ' + str(SCAN_LIMIT)} videos (the limit is {SCAN_LIMIT}).")
-            else:
-                videos_out.reverse()
-            extra["has_more"] = len(videos_out) > limit
-            videos_out = videos_out[:limit]
-        videos_out = enrich_videos(self.conn, [dict(v) for v in videos_out])
-        return {"channel": header, "videos": videos_out, "sort": sort, **extra,
-                "subscribed": self.conn.execute("SELECT 1 FROM subscriptions WHERE channel_id=?",
-                                                (channel_id,)).fetchone() is not None}
+            videos_all.reverse()
+        out = enrich_videos(self.conn, [dict(v) for v in videos_all[offset:offset + limit]])
+        return {"channel": await self._header(channel_id), "videos": out, "sort": sort, "subscribed": subscribed,
+                "has_more": offset + limit < len(videos_all), "total_videos": len(up["videos"]),
+                "fetched_at": up["fetched_at"], **extra}
 
     async def playlist(self, playlist_id: str, limit: int = 100) -> dict[str, Any]:
         key = f"playlist:{playlist_id}:{limit}"

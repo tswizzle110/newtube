@@ -15,7 +15,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from ..config import Settings
-from ..db.queries import subscriptions as subs
+from ..db.queries import cache, subscriptions as subs
 from ..extract.base import ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
@@ -55,6 +55,7 @@ class Scheduler:
         self._sleep, self._rand, self._clock = sleep, rand, clock
         self._rss_failures = 0
         self._rss_skip_until = 0.0
+        self._last_purge = 0.0
 
     async def _poll_rss(self, cid: str) -> int:
         try:
@@ -101,8 +102,16 @@ class Scheduler:
                               (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
         return "polled"
 
+    def housekeeping(self) -> int:
+        """Delete expired cache rows (uploads lists can be megabytes): at most once an hour."""
+        if self._clock() - self._last_purge < 3600:
+            return 0
+        self._last_purge = self._clock()
+        return cache.purge_expired(self.conn)
+
     async def run(self) -> None:
         while True:
+            self.housekeeping()
             result = await self.tick()
             # Busy: a few seconds (jittered) between channels. Idle/capped: check back in a bit.
             base = 5.0 if result == "polled" else 300.0

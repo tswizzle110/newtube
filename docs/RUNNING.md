@@ -69,10 +69,13 @@ systemctl --user restart newtube
 
 - **Sidebar:** the navigation is on the left. Click **Subscriptions** to see your feed and open your
   channel list underneath it (the arrow ▸ opens/closes the list without leaving the page). Click a channel
-  to open its page, where you can sort by **Newest / Popular / Oldest**. Popular and Oldest are built from the
-  channel's uploads list (up to 500 videos, read once and cached), because YouTube ignores sort options on the
-  Videos tab: Popular is "most viewed among the newest 500", and Oldest is only offered for channels with
-  500 videos or fewer (the page says so when it isn't).
+  to open its page, where you can sort by **Newest / Popular / Oldest**. YouTube ignores sort options on a
+  channel's Videos tab and only pages forwards, so Popular and Oldest read the channel's **whole upload list
+  once** (about 100 videos per request, paced; a 3,000-video channel takes roughly 30 seconds, with a progress
+  bar; you can leave the page and it carries on). The list is then remembered for a day, so sorting, paging
+  (60 at a time, loaded as you scroll) and switching between Popular and Oldest are instant and exact. Only
+  channels above 10,000 videos are limited (Popular becomes "most viewed among the newest 10,000", Oldest is
+  unavailable). "Rescan" at the bottom of the list reads it again.
   The ☰ button hides the sidebar; `/` brings it back and focuses the search box.
 - **Quality:** the quality button offers every resolution the video has, up to 2160p (4K). Above 1080p
   YouTube only serves VP9/AV1, which need more computer power than H.264: **Settings → Playback** lets you

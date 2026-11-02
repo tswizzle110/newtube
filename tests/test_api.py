@@ -7,7 +7,7 @@ from newtube.auth import Auth
 from newtube.config import Settings
 from newtube.db.connection import connect, migrate
 from newtube.extract.base import (
-    ChannelInfo, Comment, CommentPage, ChannelSummary, Chapter, Format, PlaylistSummary, VideoInfo, VideoSummary, VideoUnavailable,
+    ChannelInfo, Comment, CommentPage, ExtractionError, ChannelSummary, Chapter, Format, PlaylistSummary, VideoInfo, VideoSummary, VideoUnavailable,
 )
 from newtube.media.diskcache import DiskCache
 from newtube.net.http import OutboundClient
@@ -80,12 +80,25 @@ class FakeExtractor:
         vids = [VideoSummary(VID, "Upload one", channel_id, "YouTube", 607), VideoSummary("bbbbbbbbbbb", "Upload two", channel_id, "YouTube", 60)]
         return (ChannelInfo(channel_id, "YouTube", "@YouTube", "https://yt3.ggpht.com/av", "official", 46600000), vids[:limit])
 
-    async def channel_uploads(self, channel_id, limit=500, *, background=False):
-        """The uploads playlist: newest first, WITH view counts (shape of the real playlist entries)."""
+    async def channel_uploads(self, channel_id, limit=10_000, progress=None, *, background=False):
+        """The uploads playlist: newest first, WITH view counts. Slow on demand, to test the progress flow."""
+        import asyncio
         self.upload_calls = getattr(self, "upload_calls", 0) + 1
-        views = [10, 500, 30, 500, None]
-        vids = [VideoSummary(f"vid{i:08d}", f"Video {i}", channel_id, "YouTube", 60 + i, v) for i, v in enumerate(views)]
-        return vids, getattr(self, "uploads_total", 5)
+        self.scan_running = getattr(self, "scan_running", 0) + 1
+        self.max_scans = max(getattr(self, "max_scans", 0), self.scan_running)
+        try:
+            n = getattr(self, "upload_count", 5)
+            if progress:
+                progress(min(2, n), getattr(self, "uploads_total", n))
+            await asyncio.sleep(getattr(self, "scan_delay", 0))
+            if getattr(self, "scan_error", None):
+                raise ExtractionError(self.scan_error)
+            first = [10, 500, 30, 500, None]
+            views = [first[i] if i < 5 else 1 + i % 40 for i in range(n)]
+            vids = [VideoSummary(f"vid{i:08d}", f"Video {i}", channel_id, "YouTube", 60 + i, v) for i, v in enumerate(views)]
+            return vids, getattr(self, "uploads_total", n)
+        finally:
+            self.scan_running -= 1
 
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         self.list_calls += 1
@@ -408,67 +421,131 @@ def test_comments_require_login_and_surface_extractor_failures(env):
 
 
 
-# ---- channel sorting: Popular / Oldest are built from the uploads list ------------------------------
+# ---- channel sorting: Popular / Oldest are built from the channel's whole upload list ---------------
+
+import time as _time
+
 
 def titles(r):
     return [v["title"] for v in r["videos"]]
 
 
-def test_popular_ranks_by_views_and_oldest_reverses_from_ONE_fetch(env):
+def sorted_page(client, cid, **params):
+    """Ask for a sorted page and wait while the background scan reads the uploads."""
+    q = "&".join(f"{k}={v}" for k, v in params.items())
+    deadline = _time.time() + 10
+    while True:
+        r = client.get(f"/api/channel/{cid}?{q}")
+        if r.status_code != 200 or "scanning" not in r.json():
+            return r
+        assert _time.time() < deadline, "scan never finished"
+        _time.sleep(0.05)
+
+
+def test_first_sorted_request_answers_at_once_with_progress_then_serves_from_cache(env):
     client, ctx, ex, _ = env
+    ex.scan_delay = 0.4
+    first = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert first["videos"] == [] and "scanning" in first                              # did not wait for the scan
+    assert first["channel"]["title"] == "YouTube"
+    _time.sleep(0.15)                                                                 # the next poll shows progress
+    assert client.get(f"/api/channel/{CID}?sort=oldest").json()["scanning"] == {"done": 2, "total": 5}
+    other = client.get(f"/api/channel/{CID}?sort=popular").json()                     # same scan is shared
+    assert "scanning" in other and ex.upload_calls == 1
+    done = sorted_page(client, CID, sort="oldest").json()
+    assert titles(done) == ["Video 4", "Video 3", "Video 2", "Video 1", "Video 0"] and "scanning" not in done
+    assert ex.upload_calls == 1 and done["total_videos"] == 5 and done["fetched_at"] > 0
+
+
+def test_popular_ranks_by_views_and_ties_stay_newest_first(env):
+    client, ctx, ex, _ = env
+    pop = sorted_page(client, CID, sort="popular").json()
+    assert titles(pop) == ["Video 1", "Video 3", "Video 2", "Video 0", "Video 4"]     # 500, 500, 30, 10, unknown last
+    assert pop["videos"][0]["view_count"] == 500 and "notice" not in pop
     new = client.get(f"/api/channel/{CID}").json()
-    pop = client.get(f"/api/channel/{CID}?sort=popular").json()
-    old = client.get(f"/api/channel/{CID}?sort=oldest").json()
-    assert titles(new) == ["Upload one", "Upload two"]                       # newest: the Videos tab
-    assert titles(pop) == ["Video 1", "Video 3", "Video 2", "Video 0", "Video 4"]   # 500, 500 (stable), 30, 10, unknown last
-    assert titles(old) == ["Video 4", "Video 3", "Video 2", "Video 1", "Video 0"]
-    assert (new["sort"], pop["sort"], old["sort"]) == ("newest", "popular", "oldest")
-    assert ex.upload_calls == 1                                              # both sorts share one scan
-    assert pop["channel"]["title"] == "YouTube" and ex.channel_calls == [30]  # header came with the newest page
-    assert "notice" not in pop and "unavailable" not in old and pop["videos"][0]["view_count"] == 500
+    assert titles(new) == ["Upload one", "Upload two"]                                # newest still uses the Videos tab
 
 
-def test_switching_sort_or_loading_more_costs_no_further_requests(env):
+def test_oldest_is_exact_for_a_big_channel_and_paging_never_repeats_or_skips(env):
     client, ctx, ex, _ = env
-    first = client.get(f"/api/channel/{CID}?sort=popular&limit=2").json()
-    assert titles(first) == ["Video 1", "Video 3"] and first["has_more"] is True
-    more = client.get(f"/api/channel/{CID}?sort=popular&limit=5").json()
-    assert len(more["videos"]) == 5 and more["has_more"] is False
-    client.get(f"/api/channel/{CID}?sort=oldest")
+    ex.upload_count = 130
+    seen = []
+    for offset in (0, 60, 120):
+        page = sorted_page(client, CID, sort="oldest", offset=offset, limit=60).json()
+        seen += [v["id"] for v in page["videos"]]
+        assert page["has_more"] is (offset < 120)
+    assert len(seen) == 130 and len(set(seen)) == 130
+    assert seen[0] == "vid00000129" and seen[-1] == "vid00000000"                     # oldest first, all the way back
+    assert ex.upload_calls == 1                                                       # paging cost nothing more
+
+
+def test_a_big_channel_scan_is_cached_so_switching_sort_costs_nothing(env):
+    client, ctx, ex, _ = env
+    ex.upload_count = 130
+    sorted_page(client, CID, sort="oldest")
+    for sort in ("popular", "oldest", "popular"):
+        assert "scanning" not in client.get(f"/api/channel/{CID}?sort={sort}").json()
     assert ex.upload_calls == 1
 
 
-def test_a_sorted_page_without_the_newest_page_fetches_the_header_once(env):
-    client, ctx, ex, _ = env
-    r = client.get(f"/api/channel/{CID}?sort=popular").json()
-    assert r["channel"]["title"] == "YouTube" and ex.channel_calls == [1]
-    client.get(f"/api/channel/{CID}?sort=oldest")
-    assert ex.channel_calls == [1]
-
-
-def test_big_channels_get_an_honest_partial_popular_and_no_oldest(env):
+def test_beyond_the_scan_limit_popular_is_partial_and_oldest_is_unavailable(env, monkeypatch):
+    from newtube.services import lists
+    monkeypatch.setattr(lists, "SCAN_LIMIT", 5)
     client, ctx, ex, _ = env
     ex.uploads_total = 3214
-    pop = client.get(f"/api/channel/{CID}?sort=popular").json()
+    pop = sorted_page(client, CID, sort="popular").json()
     assert len(pop["videos"]) == 5 and "newest 5 of 3214" in pop["notice"]
     old = client.get(f"/api/channel/{CID}?sort=oldest").json()
     assert old["videos"] == [] and "3214 videos" in old["unavailable"]
 
 
-def test_unknown_total_with_a_full_scan_also_counts_as_partial(env, monkeypatch):
-    from newtube.services import lists
-    monkeypatch.setattr(lists, "SCAN_LIMIT", 5)
+def test_rescan_forces_a_fresh_read_of_the_uploads(env):
     client, ctx, ex, _ = env
-    ex.uploads_total = None
-    assert "notice" in client.get(f"/api/channel/{CID}?sort=popular").json()
-    assert "unavailable" in client.get(f"/api/channel/{CID}?sort=oldest").json()
+    sorted_page(client, CID, sort="oldest")
+    assert ex.upload_calls == 1
+    ex.upload_count = 7
+    assert "scanning" in client.get(f"/api/channel/{CID}?sort=oldest&refresh=true").json()   # refresh only on the FIRST request
+    r = sorted_page(client, CID, sort="oldest").json()                                      # ...then just poll
+    assert ex.upload_calls == 2 and len(r["videos"]) == 7
 
+
+def test_a_failed_scan_is_reported_once_and_the_next_attempt_starts_fresh(env):
+    client, ctx, ex, _ = env
+    ex.scan_error = "Sign in to confirm you're not a bot"
+    deadline = _time.time() + 10
+    while True:
+        r = client.get(f"/api/channel/{CID}?sort=oldest")
+        if r.status_code != 200:
+            break
+        assert _time.time() < deadline
+        _time.sleep(0.05)
+    assert r.status_code == 502 and "not a bot" in r.json()["detail"]
+    ex.scan_error = None
+    again = sorted_page(client, CID, sort="oldest")
+    assert again.status_code == 200 and ex.upload_calls == 2
+
+
+def test_only_one_scan_runs_at_a_time(env):
+    client, ctx, ex, _ = env
+    ex.scan_delay = 0.3
+    other = "UC" + "z" * 22
+    client.get(f"/api/channel/{CID}?sort=oldest"); client.get(f"/api/channel/{other}?sort=oldest")
+    sorted_page(client, CID, sort="oldest"); sorted_page(client, other, sort="oldest")
+    assert ex.upload_calls == 2 and ex.max_scans == 1
+
+
+def test_newest_pages_by_offset_and_reports_whether_more_exist(env):
+    client, ctx, ex, _ = env
+    r = client.get(f"/api/channel/{CID}?offset=1&limit=1").json()
+    assert titles(r) == ["Upload two"] and ex.channel_calls == [2]                    # fetched 2 deep, sliced
+    assert client.get(f"/api/channel/{CID}?limit=30").json()["has_more"] is False     # the list ended before 30
 
 def test_channel_sort_and_limit_are_validated(env):
     client, *_ = env
     assert client.get(f"/api/channel/{CID}?sort=best").status_code == 400
     assert client.get(f"/api/channel/{CID}?limit=0").status_code == 422
     assert client.get(f"/api/channel/{CID}?limit=501").status_code == 422
+    assert client.get(f"/api/channel/{CID}?offset=-1").status_code == 422
 
 
 def test_newest_limit_is_part_of_its_cache_key(env):

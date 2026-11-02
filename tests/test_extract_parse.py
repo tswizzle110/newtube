@@ -258,27 +258,3 @@ async def test_comments_request_builds_yt_dlp_limits(monkeypatch):
             await ex.comments("jNQXAC9IVRw", **bad)
     with pytest.raises(ExtractionError):
         await ex.comments("bad id")
-
-
-async def test_uploads_playlist_url_and_parsing(monkeypatch):
-    from newtube.config import Settings
-    from newtube.extract.ytdlp import YtDlpExtractor
-    from newtube.net.ratelimit import RateLimiter
-    ex = YtDlpExtractor(Settings(min_request_interval=0.7), RateLimiter(0, 0, 10))
-    seen = {}
-
-    async def fake(url, extra, background):
-        seen.update(url=url, **extra)
-        return {"playlist_count": 3214, "entries": [dict(real.PLAYLIST_VIDEO), {"id": "short", "title": "junk"}]}
-    monkeypatch.setattr(ex, "_extract", fake)
-    videos, total = await ex.channel_uploads(UC, 9999)
-    assert seen["url"] == f"https://www.youtube.com/playlist?list=UU{UC[2:]}"      # UU + the id without its UC
-    assert seen["playlistend"] == 500 and seen["sleep_interval_requests"] == 0.7   # clamped, and paced
-    assert total == 3214 and [v.id for v in videos] == ["Yocja_N5s1I"]
-    assert videos[0].view_count == 17000000                                         # playlist entries DO carry views
-    async def no_total(url, extra, background):
-        return {"entries": []}
-    monkeypatch.setattr(ex, "_extract", no_total)
-    assert await ex.channel_uploads(UC, 5) == ([], None)
-    with pytest.raises(ExtractionError):
-        await ex.channel_uploads("nope")

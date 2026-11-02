@@ -168,3 +168,19 @@ async def test_background_still_makes_progress_when_nothing_interactive_is_waiti
         await rl.acquire(Lane.BACKGROUND)
     assert 0.07 <= time.monotonic() - t0 < 0.4
     assert rl.used_today() == 5
+
+
+async def test_housekeeping_removes_expired_cache_rows_but_at_most_once_an_hour(conn):
+    """Scanned uploads lists can be megabytes; expired rows must not pile up in the database."""
+    from newtube.db.queries import cache
+    clock = [10_000.0]
+    sch, _, _ = make(conn, 404, None, clock=lambda: clock[0])
+    cache.put(conn, "old", {"x": 1}, ttl=10, now=100)               # expired long ago
+    cache.put(conn, "fresh", {"x": 1}, ttl=10**9)
+    assert sch.housekeeping() == 1
+    assert {r["key"] for r in conn.execute("SELECT key FROM meta_cache")} == {"fresh"}
+    cache.put(conn, "old2", {"x": 1}, ttl=10, now=100)
+    clock[0] += 600
+    assert sch.housekeeping() == 0 and conn.execute("SELECT count(*) FROM meta_cache").fetchone()[0] == 2   # too soon
+    clock[0] += 3600
+    assert sch.housekeeping() == 1

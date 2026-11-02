@@ -331,14 +331,36 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('clicking a channel opens its page, highlighted in the list', p.url().includes('/channel/UC') && (await p.locator('ul.subs a.active').count()) === 1);
   const titles = async () => (await p.locator('.grid .card .title').allInnerTexts()).join(',');
   check('default order is newest first', (await titles()) === 'Upload A,Upload B,Upload C' && (await p.locator('.sorts a.on').innerText()) === 'Newest');
-  await p.click('.sorts a:has-text("Popular")'); await p.waitForSelector('.sorts a.on:has-text("Popular")');
-  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload B');
-  check('Popular ranks by view count (5000, 300, 100) and the URL records it', (await titles()) === 'Upload B,Upload C,Upload A' && p.url().includes('sort=popular'));
+  const allTitles = async () => await p.locator('.grid .card .title').allInnerTexts();
+  const cards = () => p.locator('.grid .card').count();
+  const toBottom = async (n) => {            // scroll down until n videos are loaded (the page loads more by itself)
+    await p.waitForFunction((n) => { window.scrollTo(0, document.body.scrollHeight); return document.querySelectorAll('.grid .card').length >= n; }, n, { timeout: 20000, polling: 150 });
+  };
+  await p.click('.sorts a:has-text("Popular")');
+  await p.waitForSelector('.scan', { timeout: 5000 });
+  const sawProgress = await p.waitForFunction(() => /of 130 videos/.test(document.querySelector('.scan')?.innerText ?? ''), null, { timeout: 6000 }).then(() => true).catch(() => false);
+  const scanText = await p.locator('.scan').innerText().catch(() => '(finished)');
+  check('the first Popular click shows scan progress ("N of 130") instead of freezing', sawProgress, scanText.slice(0, 60).replace(/\n/g, ' '));
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload B', null, { timeout: 15000 });
+  check('Popular ranks the WHOLE channel by views (5000, 300, 100, ...) and the URL records it', (await titles()).startsWith('Upload B,Upload C,Upload A') && p.url().includes('sort=popular'));
+  check('...and starts with one page of 60', (await cards()) === 60);
+  await toBottom(130);
+  check('scrolling loads the rest automatically, with no repeats', (await cards()) === 130 && new Set(await allTitles()).size === 130);
+  check('the list says how many it ranked and offers a rescan', (await p.locator('.small:has-text("130 videos")').count()) === 1 && (await p.locator('.small button:has-text("Rescan")').count()) === 1);
+
   await p.click('.sorts a:has-text("Oldest")');
-  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload C' && document.querySelectorAll('.grid .card .title')[1]?.innerText === 'Upload B');
-  check('Oldest re-orders them again', (await titles()) === 'Upload C,Upload B,Upload A' && p.url().includes('sort=oldest'));
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Filler 126', null, { timeout: 8000 });
+  check('Oldest needs no second scan: it appears instantly, oldest first', (await p.locator('.scan').count()) === 0 && (await cards()) === 60 && p.url().includes('sort=oldest'));
+  await toBottom(130);
+  const oldest = await allTitles();
+  check('Oldest goes all the way back to the very first uploads', oldest.length === 130 && oldest.slice(-3).join(',') === 'Upload C,Upload B,Upload A' && new Set(oldest).size === 130);
   await p.reload(); await p.waitForSelector('.sorts a.on:has-text("Oldest")');
-  check('a reload keeps the chosen sort', (await titles()) === 'Upload C,Upload B,Upload A');
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Filler 126', null, { timeout: 8000 });
+  check('a reload keeps the chosen sort (and the remembered list)', (await p.locator('.scan').count()) === 0);
+  await p.click('.small button:has-text("Rescan")');
+  await p.waitForSelector('.scan', { timeout: 5000 });
+  check('Rescan reads the uploads again', (await p.locator('.scan').count()) === 1);
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Filler 126', null, { timeout: 15000 });
   await p.click('.sorts a:has-text("Newest")');
   await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload A');
   await p.click('.head button');                                       // unsubscribe from the channel page

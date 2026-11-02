@@ -288,13 +288,17 @@ class SelfTest:
         """Popular/Oldest are built from the channel's uploads list. Does it exist, and do its entries carry
         the view counts we rank by?"""
         t0 = time.monotonic()
-        raw = await self.extractor.raw_uploads(TEST_CHANNEL_ID, 200)  # type: ignore[attr-defined]
+        updates: list[int] = []
+        raw = await self.extractor.raw_uploads(  # type: ignore[attr-defined]
+            TEST_CHANNEL_ID, 300, lambda done, total: updates.append(done))
         self._dump("channel_uploads", {"entries": raw.get("entries", [])[:40], "playlist_count": raw.get("playlist_count")})
         from .extract.ytdlp import parse_entries
         vids = [i for i in parse_entries(raw) if isinstance(i, VideoSummary)]
         took = time.monotonic() - t0
-        if len(vids) < 20:
+        if len(vids) < 50:
             raise RuntimeError(f"the uploads list returned only {len(vids)} videos")
+        if not updates or updates[-1] != len(raw.get("entries", [])):
+            raise RuntimeError("progress reporting didn't follow the pages (the scan UI would look frozen)")
         with_views = [v for v in vids if v.view_count]
         if len(with_views) < 0.8 * len(vids):
             raise RuntimeError(f"only {len(with_views)}/{len(vids)} entries carry a view count, so Popular can't be ranked")
@@ -302,7 +306,8 @@ class SelfTest:
         if top.id == vids[0].id:
             raise RuntimeError("the most viewed video is also the newest: suspicious, ranking can't be told apart")
         return (f"{len(vids)} uploads in {took:.1f}s (channel total: {raw.get('playlist_count')}); {len(with_views)} with view "
-                f"counts; most viewed '{top.title[:30]}' ({top.view_count:,})")
+                f"counts; most viewed '{top.title[:30]}' ({top.view_count:,}). A full scan costs about "
+                f"{took / max(len(vids), 1) * 1000:.0f}s per 1000 videos")
 
     async def playlist_videos(self) -> str:
         if not self.playlist_id:
