@@ -58,12 +58,13 @@ def store_feed(conn: sqlite3.Connection, feed: Feed) -> int:
                 "INSERT INTO videos(id, channel_id, title, description, published_at,"
                 " view_count, thumbnail_url, first_seen_at) VALUES (?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET view_count=excluded.view_count,"
-                "  title=excluded.title",
+                "  title=excluded.title,"
+                "  published_at=COALESCE(published_at, excluded.published_at)",
                 (e.video_id, feed.channel_id, e.title, e.description, e.published_at,
                  e.view_count, e.thumbnail_url, now),
             )
             new += is_new
-        conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?", (now, feed.channel_id))
+        conn.execute("UPDATE channels SET rss_checked_at=?, feed_seeded=1 WHERE id=?", (now, feed.channel_id))
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -77,14 +78,14 @@ def store_discovered(conn: sqlite3.Connection, channel_id: str, videos: list[Vid
     feed-visible videos that produced.
 
     The page lists newest first but has no upload dates. So:
-    * if we already know videos of this channel, anything unseen is genuinely new: date it by when
+    * if this channel's uploads were already read once (``feed_seeded``), anything unseen is genuinely new: date it by when
       we first saw it (``now - position`` keeps their order) and it joins the feed;
     * if we know nothing about the channel yet, the list is just its backlog: remember the ids (so
       they are not mistaken for new uploads later) but leave them undated, which keeps them out of
       the chronological feed. Opening one fills in its real date."""
     now = now if now is not None else int(time.time())
-    had_history = conn.execute("SELECT 1 FROM videos WHERE channel_id=? LIMIT 1",
-                               (channel_id,)).fetchone() is not None
+    row = conn.execute("SELECT feed_seeded FROM channels WHERE id=?", (channel_id,)).fetchone()
+    had_history = bool(row and row["feed_seeded"])
     new_visible = 0
     conn.execute("BEGIN")
     try:
@@ -99,7 +100,7 @@ def store_discovered(conn: sqlite3.Connection, channel_id: str, videos: list[Vid
                 " first_seen_at) VALUES (?,?,?,?,?,?,?)",
                 (v.id, channel_id, v.title, published, v.duration, v.view_count, now))
             new_visible += published is not None
-        conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?", (now, channel_id))
+        conn.execute("UPDATE channels SET rss_checked_at=?, feed_seeded=1 WHERE id=?", (now, channel_id))
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")

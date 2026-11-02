@@ -34,6 +34,7 @@ def conn(tmp_path):
 def test_new_videos_of_a_known_channel_join_the_feed_newest_first(conn):
     subs.subscribe(conn, ChannelInfo(CH, "Chan"))
     conn.execute("INSERT INTO videos(id,channel_id,title,published_at,first_seen_at) VALUES ('old00000001',?,'old',100,1)", (CH,))
+    conn.execute("UPDATE channels SET feed_seeded=1 WHERE id=?", (CH,))          # its uploads were read once before
     n = subs.store_discovered(conn, CH, vids("new00000001", "new00000002", "old00000001"), now=10_000)
     assert n == 2
     feed = [r["id"] for r in subs.get_feed(conn)]
@@ -92,6 +93,7 @@ async def test_rss_404_falls_back_to_the_channel_page_in_the_background_lane(con
     ex = FakeExtractor(vids("new00000001"))
     sch, requests, [cid] = make(conn, 404, ex)
     conn.execute("INSERT INTO videos(id,channel_id,title,published_at,first_seen_at) VALUES ('old00000001',?,'o',1,1)", (cid,))
+    conn.execute("UPDATE channels SET feed_seeded=1 WHERE id=?", (cid,))
     assert await sch.tick() == "polled"
     assert ex.calls == [(cid, 15, True)]                                  # background=True
     assert [r["id"] for r in subs.get_feed(conn)][0] == "new00000001"
@@ -184,3 +186,27 @@ async def test_housekeeping_removes_expired_cache_rows_but_at_most_once_an_hour(
     assert sch.housekeeping() == 0 and conn.execute("SELECT count(*) FROM meta_cache").fetchone()[0] == 2   # too soon
     clock[0] += 3600
     assert sch.housekeeping() == 1
+
+
+def test_imported_history_does_not_make_the_whole_backlog_look_new(conn):
+    """Regression for the Takeout import: watch history creates (undated) video rows for a channel. That must
+    not count as 'we know this channel's uploads', or its newest 15 uploads would flood the feed as new."""
+    subs.subscribe(conn, ChannelInfo(CH, "Chan"))
+    for i in range(3):          # what an import leaves behind: rows without a date, channel never polled
+        conn.execute("INSERT INTO videos(id,channel_id,title,first_seen_at) VALUES (?,?,'',1)", (f"hist000000{i}", CH))
+    assert subs.store_discovered(conn, CH, vids(*[f"page{i:07d}" for i in range(15)]), now=10_000) == 0
+    assert subs.get_feed(conn) == []                                 # nothing presented as new
+    assert conn.execute("SELECT feed_seeded FROM channels WHERE id=?", (CH,)).fetchone()[0] == 1
+    assert subs.store_discovered(conn, CH, vids("fresh000001", *[f"page{i:07d}" for i in range(15)]), now=20_000) == 1
+    assert [r["id"] for r in subs.get_feed(conn)] == ["fresh000001"]   # ...but a genuinely new one is
+
+
+def test_rss_can_date_a_video_that_history_import_left_undated(conn):
+    from newtube.extract.rss import Feed, FeedEntry
+    subs.subscribe(conn, ChannelInfo(CH, "Chan"))
+    conn.execute("INSERT INTO videos(id,channel_id,title,first_seen_at) VALUES ('watched0001',?,'',1)", (CH,))
+    feed = Feed(CH, "Chan", [FeedEntry("watched0001", "A title", 1_700_000_000, None, None, 5)])
+    subs.store_feed(conn, feed)
+    r = conn.execute("SELECT title, published_at FROM videos WHERE id='watched0001'").fetchone()
+    assert (r["title"], r["published_at"]) == ("A title", 1_700_000_000)
+    assert conn.execute("SELECT feed_seeded FROM channels WHERE id=?", (CH,)).fetchone()[0] == 1
