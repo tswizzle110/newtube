@@ -1,0 +1,148 @@
+"""Related videos: fetched from YouTube's Mix for a video, stored locally, served to the watch page and the recommender.
+
+Two ways a list gets fetched:
+* you open a video (interactive lane, once per ``TTL``), shown as "Up next";
+* a slow background job fetches the lists of videos you like most, within ``related_daily_cap`` per 24 hours
+  (counted from the event log), so the recommender can suggest videos from channels you have never opened.
+Failures are remembered for an hour so a flaky answer is not asked for again on every page view."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import sqlite3
+import time
+from typing import Any
+
+from ..db.queries.events import log_event
+from ..db.queries.seen import SEEN_SQL
+from ..extract.base import BotCheck, ExtractionError, Extractor, VideoSummary
+from ..net.ratelimit import DailyCapReached
+from ..recommend.baseline import DAY, interest_rows
+
+log = logging.getLogger("newtube.related")
+TTL = 3 * DAY
+FAILURE_RETRY = 3600
+LIMIT = 25
+
+
+class RelatedService:
+    def __init__(self, conn: sqlite3.Connection, extractor: Extractor) -> None:
+        self.conn, self.extractor = conn, extractor
+        self._inflight: dict[str, asyncio.Task[int]] = {}
+
+    # ---- reading --------------------------------------------------------------------------------
+    def fresh(self, video_id: str, now: int | None = None) -> bool:
+        now = now if now is not None else int(time.time())
+        row = self.conn.execute("SELECT fetched_at, count FROM related_fetched WHERE video_id=?", (video_id,)).fetchone()
+        if not row:
+            return False
+        return now - row["fetched_at"] < (TTL if row["count"] else FAILURE_RETRY)
+
+    def cards(self, video_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            f"SELECT r.related_id AS id, v.title, v.channel_id, COALESCE(c.title, '') AS channel_title, v.published_at,"
+            f" v.duration, v.view_count, p.position AS resume_position, p.completed AS completed, {SEEN_SQL} AS seen"
+            f" FROM related_videos r JOIN videos v ON v.id = r.related_id AND v.title <> ''"
+            f" LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN video_progress p ON p.video_id = r.related_id"
+            f" WHERE r.video_id = ? ORDER BY r.rank LIMIT ?", (video_id, limit)).fetchall()
+        return [{**dict(r), "completed": bool(r["completed"]), "seen": bool(r["seen"])} for r in rows]
+
+    async def for_video(self, video_id: str, limit: int = 20, *, background: bool = False) -> list[dict[str, Any]]:
+        """The related list for a video, fetching it first if it is missing or stale. Never raises for a failed
+        fetch: the page just shows no suggestions."""
+        if not self.fresh(video_id):
+            try:
+                await self.fetch(video_id, background=background)
+            except (DailyCapReached, BotCheck, ExtractionError) as e:
+                log.info("related %s: %s", video_id, e)
+        return self.cards(video_id, limit)
+
+    # ---- fetching -------------------------------------------------------------------------------
+    async def fetch(self, video_id: str, *, background: bool = False) -> int:
+        """Fetch and store the list (several callers at once share one request). Returns how many were stored."""
+        task = self._inflight.get(video_id)
+        if task is None:
+            task = asyncio.create_task(self._fetch(video_id, background))
+            self._inflight[video_id] = task
+            task.add_done_callback(lambda _t: self._inflight.pop(video_id, None))
+        return await task
+
+    async def _fetch(self, video_id: str, background: bool) -> int:
+        now = int(time.time())
+        try:
+            found = await self.extractor.related(video_id, LIMIT, background=background)
+        except DailyCapReached:
+            raise
+        except Exception:
+            self.conn.execute("INSERT INTO related_fetched(video_id, fetched_at, count) VALUES (?,?,0)"
+                              " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=0", (video_id, now))
+            raise
+        return self.store(video_id, found, now)
+
+    def store(self, video_id: str, found: list[VideoSummary], now: int | None = None) -> int:
+        now = now if now is not None else int(time.time())
+        c = self.conn
+        c.execute("BEGIN")
+        try:
+            c.execute("DELETE FROM related_videos WHERE video_id=?", (video_id,))
+            for rank, v in enumerate(found, start=1):
+                channel = v.channel_id if v.channel_id and v.channel_id.startswith("UC") else None
+                if channel:
+                    c.execute("INSERT OR IGNORE INTO channels(id, title, created_at) VALUES (?,?,?)",
+                              (channel, v.channel_title or channel, now))
+                c.execute("INSERT OR IGNORE INTO videos(id, channel_id, title, duration, view_count, first_seen_at)"
+                          " VALUES (?,?,?,?,?,?)", (v.id, channel, v.title, v.duration, v.view_count, now))
+                # a video we only knew by id (from an import) learns its title and channel here
+                c.execute("UPDATE videos SET title = CASE WHEN title = '' THEN ? ELSE title END,"
+                          " channel_id = COALESCE(channel_id, ?), duration = COALESCE(duration, ?),"
+                          " view_count = COALESCE(view_count, ?) WHERE id = ?",
+                          (v.title, channel, v.duration, v.view_count, v.id))
+                c.execute("INSERT INTO related_videos(video_id, related_id, rank) VALUES (?,?,?)", (video_id, v.id, rank))
+            c.execute("INSERT INTO related_fetched(video_id, fetched_at, count) VALUES (?,?,?)"
+                      " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=excluded.count",
+                      (video_id, now, len(found)))
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+        return len(found)
+
+    # ---- the slow background job ----------------------------------------------------------------
+    def used_last_day(self, now: int | None = None) -> int:
+        now = now if now is not None else int(time.time())
+        return self.conn.execute("SELECT count(*) FROM events WHERE type='related_fetch' AND ts > ?", (now - DAY,)).fetchone()[0]
+
+    def next_seed(self, now: int) -> str | None:
+        """The video whose related list is most worth having: most interesting to you, not fetched recently."""
+        score: dict[str, float] = {}
+        for vid, _ch, weight, ts in interest_rows(self.conn, now):
+            age_days = max(0.0, (now - ts) / DAY)
+            score[vid] = score.get(vid, 0.0) + weight * 0.5 ** (age_days / 90)
+        for vid, _ in sorted(score.items(), key=lambda kv: -kv[1]):
+            if not self.fresh(vid, now):
+                return vid
+        return None
+
+    async def expand_step(self, daily_cap: int, now: int | None = None) -> str:
+        """Fetch one related list for the recommender. 'fetched', 'idle', 'capped' or 'failed'."""
+        now = now if now is not None else int(time.time())
+        if daily_cap <= 0:
+            return "idle"
+        if self.used_last_day(now) >= daily_cap:
+            return "capped"
+        seed = self.next_seed(now)
+        if seed is None:
+            return "idle"
+        log_event(self.conn, "related_fetch", video_id=seed, ts=now)         # counted BEFORE asking, so a crash still counts
+        try:
+            await self.fetch(seed, background=True)
+        except DailyCapReached:
+            return "capped"
+        except BotCheck:
+            log.warning("YouTube asked for a bot check; related lookups paused for this cycle")
+            return "capped"
+        except Exception as e:  # noqa: BLE001
+            log.info("related %s failed: %s", seed, e)
+            return "failed"
+        return "fetched"

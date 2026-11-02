@@ -139,6 +139,22 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## Up next (related videos)
+
+Beside the video you are watching (below it on a narrow window) is **Up next**: videos related to it, taken from
+YouTube's own "Mix" for that video. The list is requested a moment after the video starts so it never delays
+playback, kept in your database for 3 days, and a failed lookup just shows nothing (it is retried after an hour).
+
+The same lists feed **For you**. A slow background job fetches the related list of the videos you like most
+(liked, watched often and recently, on your Watch later) so that videos from channels you do **not** subscribe to
+can be recommended, with the reason "Related to videos you have watched". It makes at most `related_daily_cap`
+lookups per 24 hours (default 40; 0 turns it off), one a minute at most, only when nothing else is waiting, and
+never when YouTube has asked for a bot check. This is extra traffic to YouTube from your IP (one request per
+lookup, to `www.youtube.com`, the same kind of request as opening a playlist), so it is yours to turn down.
+
+`uv run newtube selftest` has a new **related** check; if it fails, send me the output (and
+`selftest --dump DIR` output) so the parser can be fixed against real data.
+
 ## History
 
 **History** (sidebar, Library) lists every video you watched, newest first and grouped by day: your imported

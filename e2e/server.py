@@ -77,6 +77,11 @@ PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001
 
 
 class Ex:
+    async def related(self, vid, limit=25, *, background=False):
+        cid = "UC" + "r" * 22
+        return [VideoSummary("e2eREL00001", "Related one", cid, "Rel Channel", 30, 1500),
+                VideoSummary("e2eREL00002", "Related two", cid, "Rel Channel", 45, 900)][:limit]
+
     async def video_info(self, vid, *, background=False):
         gv = lambda n: f"https://rr1.googlevideo.com/{n}?sig=x"
         if vid == "e2eVP9VID01":      # offers H.264 up to 1080p and VP9 "2160p"/"1440p" (stand-in files)

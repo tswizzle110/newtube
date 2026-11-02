@@ -5,7 +5,7 @@
 
   // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
   // why: {score, reasons[{label, points}]} for recommended cards; ondismiss(type): 'not_interested' | 'dont_recommend_channel'
-  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '', onup = null, ondown = null } = $props()
+  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '', onup = null, ondown = null, compact = false } = $props()
   let showWhy = $state(false)
   const href = $derived(`/watch?v=${video.id}&src=${surface}${extra}`)
 
@@ -25,7 +25,7 @@
   }
 </script>
 
-<article class="card" use:impression={{ videoId: video.id, surface, position, requestId }}>
+<article class="card" class:compact use:impression={{ videoId: video.id, surface, position, requestId }}>
   <a class="thumb" {href} onclick={open} tabindex="-1" aria-hidden="true">
     {#if !imgFailed}
       <img src={`/api/thumb/${video.id}/mqdefault`} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
@@ -75,6 +75,11 @@
 
 <style>
   .card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  /* a small row (thumbnail left, text right), for the Up next column */
+  .card.compact { flex-direction: row; gap: 10px; align-items: flex-start; }
+  .compact .thumb { width: 168px; flex: none; }
+  .compact .title { font-size: 14px; -webkit-line-clamp: 2; }
+  .compact .meta { flex: 1; }
   .thumb { position: relative; display: block; aspect-ratio: 16 / 9; background: var(--bg-elev);
     border-radius: var(--radius); overflow: hidden; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }

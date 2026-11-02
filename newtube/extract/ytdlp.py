@@ -441,6 +441,18 @@ class YtDlpExtractor:
         info = await self.raw_playlist(playlist_id, limit, background=background)
         return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
 
+    async def raw_related(self, video_id: str, limit: int = 25, *, background: bool = False) -> dict[str, Any]:
+        """YouTube's auto-generated Mix for a video ("RD<id>"): a playlist of videos related to it, which yt-dlp
+        reads like any other playlist (one request, no formats)."""
+        if not VIDEO_ID_RE.match(video_id):
+            raise ExtractionError(f"bad video id: {video_id!r}")
+        return await self._extract(f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}",
+                                   self._flat(max(1, min(limit + 1, 50))), background)   # +1: the video itself comes first
+
+    async def related(self, video_id: str, limit: int = 25, *, background: bool = False) -> list[VideoSummary]:
+        info = await self.raw_related(video_id, limit, background=background)
+        return [v for v in parse_entries(info) if isinstance(v, VideoSummary) and v.id != video_id][:limit]
+
     async def channel_page(self, channel_id: str, limit: int = 30, *,
                            background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
         info = await self.raw_channel_videos(channel_id, limit, background=background)

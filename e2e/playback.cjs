@@ -368,6 +368,20 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('unsubscribing removes the channel from the sidebar straight away', (await p.locator('ul.subs li a').count()) === 0);
   await p.click('.head button'); await p.waitForFunction(() => document.querySelectorAll('ul.subs li a').length === 1);
   check('subscribing adds it back', (await p.locator('ul.subs li a .name').innerText()) === 'E2E Channel');
+  // ---- Up next: related videos beside the player (or under it on a narrow window)
+  await p.goto(BASE + '/watch?v=e2eVIDEO001'); await p.waitForSelector('.related .card', { timeout: 15000 });
+  check('Up next lists the related videos', (await p.locator('.related .card').count()) === 2 &&
+    (await p.locator('.related .card .title').first().innerText()) === 'Related one');
+  const box = async (sel) => p.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; }, sel);
+  const vb = await box('.top video'), rb = await box('.related');
+  check('on a wide window Up next is a column beside the video', rb.l >= vb.r - 1 && rb.t < vb.b, JSON.stringify({ vb, rb }));
+  await p.setViewportSize({ width: 800, height: 900 }); await p.waitForTimeout(300);
+  const vb2 = await box('.top video'), rb2 = await box('.related');
+  check('on a narrow window it moves below the video', rb2.t >= vb2.b - 1, JSON.stringify({ vb2, rb2 }));
+  await p.setViewportSize({ width: 1400, height: 900 });
+  await p.click('.related .card .title >> nth=0'); await p.waitForURL(/v=e2eREL00001/);
+  check('clicking one plays it and records where you came from', p.url().includes('src=related'));
+
   // ---- Like / Watch later, and the lists they build
   await p.goto(BASE + '/watch?v=e2eMUXED001'); await p.waitForSelector('.byline .actions');
   check('the video page has Like and Watch later, both off to start with',
@@ -455,20 +469,23 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   // ---- For you: recommendations, with a visible reason for each and a way to say no
   await ctx.request.get(BASE + '/__seed_recommendable');
   await p.goto(BASE + '/for-you'); await p.waitForSelector('.grid .card');
-  check('For you is a tab next to Subscriptions and lists recommended videos',
-    (await p.locator('nav.tabs a.active').innerText()) === 'For you' && (await p.locator('.grid .card').count()) === 2 &&
-    (await p.locator('.grid .card .title').first().innerText()) === 'Recommended 1');
-  await p.click('.grid .card .act:has-text("Why this?")');
+  const card = (title) => p.locator('.grid .card', { has: p.locator(`a.title[title="${title}"]`) });
+  const recTitles = async () => p.locator('.grid .card a.title').evaluateAll((as) => as.map((a) => a.title));
+  const recFirst = await recTitles();
+  check('For you is a tab next to Subscriptions and lists recommended videos (the two seeded ones among them)',
+    (await p.locator('nav.tabs a.active').innerText()) === 'For you' && recFirst.includes('Recommended 1') && recFirst.includes('Recommended 2'), JSON.stringify(recFirst));
+  await card('Recommended 1').locator('.act:has-text("Why this?")').click();
   const why = await p.locator('.why li').allInnerTexts();
   check('"Why this?" lists each reason with its points, then the total', why.length >= 3 && why.some(t => /subscribe/.test(t)) &&
     why.slice(0, -1).every(t => /[+-]\d+\.\d\d/.test(t)) && why.at(-1).startsWith('Score'), JSON.stringify(why));
-  await p.click('.grid .card .act:has-text("Not interested")');
-  await p.waitForFunction(() => document.querySelectorAll('.grid .card').length === 1);
+  await card('Recommended 1').locator('.act:has-text("Not interested")').click();
+  await p.waitForFunction(() => ![...document.querySelectorAll('.grid .card a.title')].some((a) => a.title === 'Recommended 1'));
   await p.waitForTimeout(6000);                                  // tracker batches for 5 s
   const recEvts = await (await ctx.request.get(BASE + '/__events')).json();
   check('Not interested removes the card and is logged for the recommender', recEvts.some(e => e.type === 'not_interested' && e.video_id === 'recVIDEO001'));
   await p.reload(); await p.waitForSelector('.grid .card');
-  check('...and the video stays gone after a reload', (await p.locator('.grid .card .title').allInnerTexts()).join() === 'Recommended 2');
+  const recAfter = await recTitles();
+  check('...and the video stays gone after a reload (the other one is still there)', !recAfter.includes('Recommended 1') && recAfter.includes('Recommended 2'), JSON.stringify(recAfter));
   await p.screenshot({ path: require('os').tmpdir() + '/newtube-foryou.png' });
   await p.goto(BASE + '/'); await p.waitForSelector('nav.tabs');
   check('the Subscriptions tab is still the home page', (await p.locator('nav.tabs a.active').innerText()) === 'Subscriptions');

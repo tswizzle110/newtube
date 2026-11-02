@@ -193,6 +193,10 @@ class Extractor(Protocol):
     async def playlist(self, playlist_id: str, limit: int = 100, *,
                        background: bool = False) -> list[VideoSummary]: ...
 
+    async def related(self, video_id: str, limit: int = 25, *, background: bool = False) -> list[VideoSummary]:
+        """Videos YouTube considers related (its Mix for this video), closest first, without the video itself."""
+        ...
+
     async def channel_page(self, channel_id: str, limit: int = 30, *,
                            background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
         """Channel header + newest uploads from ONE request (the Videos tab: no view counts)."""

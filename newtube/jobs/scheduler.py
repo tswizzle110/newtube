@@ -21,6 +21,7 @@ from ..extract.base import ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
 from ..net.ratelimit import DailyCapReached, Lane
+from ..services.related import RelatedService
 from ..ml.embedder import ModelNotInstalled, load_embedder
 from ..ml.store import embed_pending_async
 from ..net import audit
@@ -61,6 +62,7 @@ class Scheduler:
         self._rss_failures = 0
         self._rss_skip_until = 0.0
         self._last_purge = 0.0
+        self.related = RelatedService(conn, extractor) if extractor is not None else None
         self._embedder = None
         self._embed_off = False
         self.backfiller = (Backfiller(conn, extractor, settings.backfill_daily_cap)
@@ -150,6 +152,9 @@ class Scheduler:
                 result = await self.backfiller.step()
             if result in ("idle", "capped", "paused") and await self.embed_step() == "embedded":
                 result = "embedded"            # (the backfill having nothing to do leaves time for this)
+            if result in ("idle", "capped", "paused") and self.related is not None:
+                if await self.related.expand_step(self.settings.related_daily_cap) == "fetched":
+                    result = "fetched"         # ...and so does this: one related list a minute, within its budget
             # Busy: a few seconds (jittered) between channels. Backfill: about a minute between videos,
             # so the daily budget is spread over hours. Idle/capped: check back in a bit.
             base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0, "embedded": 3.0}.get(result, 300.0)

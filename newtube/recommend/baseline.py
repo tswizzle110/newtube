@@ -10,11 +10,13 @@ offline evaluation (phase 4). So it is deliberately simple and every number is e
     subscribed         the channel is one you subscribe to
     saved              the video is in your Watch later
     resume             you started it in newtube and did not finish
+    related            YouTube lists it as related to videos you like (it may be from a channel you do not subscribe to)
     taste_similarity   how close its subject is to what you watch (needs embeddings; see ml/)
     shown_unclicked    NEGATIVE: this was shown to you repeatedly and you never clicked it
 
-Candidates are videos already in the database: recent uploads of subscribed channels, and your Watch-later
-items. (Finding videos from channels you do not subscribe to needs related-video lookups: a later phase.)
+Candidates are videos already in the database: recent uploads of subscribed channels, your Watch-later items, and
+videos YouTube lists as related to the ones you like (fetched in the background; see services/related.py), which
+is how videos from channels you do not subscribe to get in.
 
 Never recommended: videos you finished, videos you watched before (unless you stopped partway in newtube),
 anything you marked "not interested", and channels you marked "don't recommend".
@@ -48,6 +50,9 @@ class Weights:
     subscribed: float = 1.0
     saved: float = 1.2
     resume: float = 0.8
+    related: float = 1.5                   # near videos you like, via YouTube's related lists (see services/related.py)
+    related_seeds: int = 60                # how many of your most-liked videos' related lists are consulted
+    related_full_at: float = 1.5           # this much support = the full related bonus
     taste_similarity: float = 2.0          # needs embeddings; see newtube/ml
     taste_floor: float = 0.15              # cosine similarity at or below this counts as 'not similar'
     taste_span: float = 0.6                # ...and floor + span counts as 'very similar'
@@ -145,7 +150,7 @@ def _blocked(conn: sqlite3.Connection) -> tuple[set[str], set[str]]:
     return videos, channels
 
 
-_CANDIDATES = """
+_SELECT = """
 SELECT v.id, v.title, v.channel_id, COALESCE(c.title, '') AS channel_title, v.published_at, v.duration,
        v.view_count, p.position AS resume_position, p.completed AS completed,
        (s.channel_id IS NOT NULL) AS subscribed,
@@ -157,10 +162,44 @@ LEFT JOIN channels c ON c.id = v.channel_id
 LEFT JOIN subscriptions s ON s.channel_id = v.channel_id
 LEFT JOIN video_progress p ON p.video_id = v.id
 WHERE v.title <> ''
+"""
+
+# Recent uploads of your subscriptions, and what you saved for later.
+_CANDIDATES = _SELECT + """
   AND ((s.channel_id IS NOT NULL AND v.from_import = 0 AND v.published_at >= ?)
        OR EXISTS (SELECT 1 FROM playlist_items i JOIN playlists pl ON pl.id = i.playlist_id
                   WHERE i.video_id = v.id AND pl.kind = 'watch_later'))
 """
+
+
+def related_support(conn: sqlite3.Connection, now: int, w: Weights) -> dict[str, float]:
+    """Videos that YouTube lists as related to the videos you like most, as 0..1: stronger when the seed is one of
+    your favourites and when the video sits near the top of its related list."""
+    decay = math.log(2) / (w.affinity_half_life_days * DAY)
+    seeds: dict[str, float] = defaultdict(float)
+    for vid, _channel, weight, ts in interest_rows(conn, now):
+        seeds[vid] += weight * math.exp(-decay * max(0, now - ts))
+    top = sorted(seeds.items(), key=lambda kv: -kv[1])[: w.related_seeds]
+    if not top:
+        return {}
+    best = top[0][1]
+    support: dict[str, float] = defaultdict(float)
+    for i in range(0, len(top), 400):
+        chunk = top[i:i + 400]
+        weight_of = dict(chunk)
+        marks = ",".join("?" * len(chunk))
+        for r in conn.execute(f"SELECT video_id, related_id, rank FROM related_videos WHERE video_id IN ({marks})",
+                              [vid for vid, _ in chunk]):
+            support[r["related_id"]] += (weight_of[r["video_id"]] / best) / (1 + (r["rank"] - 1) / 5)
+    return {vid: min(1.0, s / w.related_full_at) for vid, s in support.items()}
+
+
+def _rows_by_id(conn: sqlite3.Connection, ids: list[str]) -> list[sqlite3.Row]:
+    out: list[sqlite3.Row] = []
+    for i in range(0, len(ids), 400):
+        chunk = ids[i:i + 400]
+        out += conn.execute(_SELECT + f" AND v.id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
+    return out
 
 
 def _age_text(seconds: float) -> str:
@@ -184,6 +223,9 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
     hidden_videos, hidden_channels = _blocked(conn)
 
     rows = conn.execute(_CANDIDATES, (now - w.window_days * DAY,)).fetchall()
+    support = related_support(conn, now, w)
+    have = {r["id"] for r in rows}
+    rows += _rows_by_id(conn, [vid for vid in support if vid not in have])    # videos near ones you like, from anywhere
     similar = taste([r["id"] for r in rows]) if taste and rows else {}
     scored: list[Recommendation] = []
     for r in rows:
@@ -209,6 +251,7 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
         term(w.subscribed, 1.0 if r["subscribed"] else 0.0, "From a channel you subscribe to")
         term(w.saved, 1.0 if r["saved"] else 0.0, "In your Watch later")
         term(w.resume, 1.0 if resumable else 0.0, "You started this and did not finish")
+        term(w.related, support.get(r["id"], 0.0), "Related to videos you have watched")
         if r["id"] in similar:
             term(w.taste_similarity, min(1.0, max(0.0, (similar[r["id"]] - w.taste_floor) / w.taste_span)),
                  "Similar to videos you have watched")

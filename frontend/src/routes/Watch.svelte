@@ -7,6 +7,7 @@
   import Comments from '../components/Comments.svelte'
   import SponsorBlockPanel from '../components/SponsorBlockPanel.svelte'
   import ListButtons from '../components/ListButtons.svelte'
+  import RelatedList from '../components/RelatedList.svelte'
 
   const id = router.query.get('v')
   const source = router.query.get('src') ?? 'direct'
@@ -57,6 +58,7 @@
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}
+    <div class="top">
     <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list || mylist ? advance : null}
       sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null} />
     <h1>{video.title}</h1>
@@ -104,12 +106,24 @@
       <button class="btn" onclick={() => (expanded = !expanded)}>{expanded ? 'Show less' : 'Show more'}</button>
     </section>
 
-    <Comments videoId={video.id} {player} />
+    </div>
+    <aside class="related"><RelatedList videoId={video.id} /></aside>
+    <div class="discussion"><Comments videoId={video.id} {player} /></div>
   {/if}
 </div>
 
 <style>
-  .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; }
+  /* One column on a narrow window: video and details, then Up next, then comments. With room to spare,
+     Up next sits in a column of its own beside the video and the comments. */
+  .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 0 24px;
+    grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "related" "comments"; }
+  .top { grid-area: top; min-width: 0; }
+  .related { grid-area: related; margin-top: 24px; min-width: 0; }
+  .discussion { grid-area: comments; min-width: 0; }
+  @media (min-width: 1100px) {
+    .watch { max-width: 1680px; grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "top related" "comments related"; }
+    .related { margin-top: 0; }
+  }
   h1 { font-size: 20px; margin: 16px 0 6px; }
   h2 { font-size: 15px; margin: 0 0 8px; }
   .byline { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }

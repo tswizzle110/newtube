@@ -320,6 +320,18 @@ class SelfTest:
             raise RuntimeError(f"no videos parsed from {len(raw.get('entries') or [])} raw entries")
         return f"{self.playlist_id[:14]}...: {len(vids)} videos; first '{vids[0].title[:40]}'"
 
+    async def related(self) -> str:
+        """YouTube's Mix for a video, read as a playlist: the source of "Up next" and of recommendation candidates."""
+        from .extract.ytdlp import parse_entries
+        raw = await self.extractor.raw_related(TEST_VIDEO, 15)  # type: ignore[attr-defined]
+        self._dump("related", raw)
+        vids = [v for v in parse_entries(raw) if isinstance(v, VideoSummary) and v.id != TEST_VIDEO]
+        if len(vids) < 3:
+            raise RuntimeError(f"only {len(vids)} related videos parsed from {len(raw.get('entries') or [])} raw entries")
+        named = sum(bool(v.channel_id) for v in vids)
+        return (f"{len(vids)} related videos ({named} with a channel id); first '{vids[0].title[:40]}' "
+                f"by {vids[0].channel_title}")
+
     async def comments_top(self) -> str:
         from .extract.ytdlp import parse_comments
         raw = await self.extractor.raw_comments(TEST_VIDEO, "top", 10)  # type: ignore[attr-defined]
@@ -372,7 +384,7 @@ class SelfTest:
             ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("video_hd", self.video_hd), ("thumbnail", self.thumbnail),
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
-            ("channel_videos", self.channel_videos), ("channel_sort", self.channel_sort), ("playlist", self.playlist_videos),
+            ("channel_videos", self.channel_videos), ("channel_sort", self.channel_sort), ("playlist", self.playlist_videos), ("related", self.related),
             ("comments_top", self.comments_top), ("comment_replies", self.comment_replies),
             ("sponsorblock", self.sponsorblock),
         ]:

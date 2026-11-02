@@ -22,6 +22,7 @@ from .media.diskcache import DiskCache
 from .net.http import OutboundClient
 from .net.ratelimit import RateLimiter
 from .services.comments import CommentService
+from .services.related import RelatedService
 from .sponsorblock.contribute import Contributor
 from .sponsorblock.provider import SponsorBlockApi
 from .sponsorblock.service import SponsorBlockService
@@ -47,8 +48,11 @@ class Context:
     sponsorblock: SponsorBlockService | None = None
     sb_contrib: Contributor | None = None
     sb_limiter: RateLimiter | None = None
+    related: RelatedService | None = None
 
     def __post_init__(self) -> None:
+        if self.related is None:
+            self.related = RelatedService(self.conn, self.extractor)
         if self.lists is None:
             self.lists = ListService(self.conn, self.extractor)
         if self.comments is None:
@@ -78,7 +82,7 @@ def build_context(settings: Settings | None = None) -> Context:
 
 def create_app(ctx: Context | None = None) -> FastAPI:
     from .api import auth as auth_api
-    from .api import comments, events, history, lists, media, mylists, playback, recommendations, sponsorblock, subscriptions, videos
+    from .api import comments, events, history, lists, media, mylists, playback, recommendations, related, sponsorblock, subscriptions, videos
     from .security import GuardMiddleware
 
     @contextlib.asynccontextmanager
@@ -114,6 +118,7 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app.include_router(recommendations.router)
     app.include_router(mylists.router)
     app.include_router(history.router)
+    app.include_router(related.router)
     _mount_frontend(app, (ctx.settings if ctx else load_settings()).frontend_dir)
     return app
 
