@@ -160,7 +160,8 @@ def test_the_taste_vector_is_reused_until_your_history_changes(conn, monkeypatch
     monkeypatch.setattr(taste, "taste_vector", lambda *a, **k: calls.append(1) or real(*a, **k))
     taste.scorer(conn, EMB.name, NOW); taste.scorer(conn, EMB.name, NOW)
     assert len(calls) == 1
-    conn.execute("INSERT INTO events(ts,type,video_id) VALUES (?,?,?)", (NOW, "import_like", "cat00000001"))
+    conn.execute("INSERT INTO playlist_items(playlist_id, video_id, added_at, position)"
+                 " SELECT id, 'cat00000001', ?, 1 FROM playlists WHERE kind='liked'", (NOW,))
     taste.scorer(conn, EMB.name, NOW)
     assert len(calls) == 2
 

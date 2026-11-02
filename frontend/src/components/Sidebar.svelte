@@ -1,13 +1,15 @@
 <script>
   import { tick } from 'svelte'
   import { router, navigate } from '../lib/router.svelte.js'
-  import { nav, subs, setCollapsed, setSubsOpen } from '../lib/nav.svelte.js'
+  import { nav, subs, mylists, setCollapsed, setSubsOpen } from '../lib/nav.svelte.js'
 
   let { theme, ontheme, onlogout } = $props()
   let searchEl = $state()
   let q = $state(new URLSearchParams(location.search).get('q') ?? '')
 
   const is = (p) => router.pathname === p
+  const activeList = $derived(router.pathname.startsWith('/list/') ? router.pathname.split('/')[2] : null)
+  const listRef = (l) => (l.kind === 'user' ? String(l.id) : l.kind)
   const activeChannel = $derived(router.pathname.startsWith('/channel/') ? router.pathname.split('/')[2] : null)
 
   // Expose to App: `/` focuses the search box, opening the sidebar first if it is hidden.
@@ -70,6 +72,13 @@
       </ul>
     {/if}
 
+    <div class="lib">Library</div>
+    {#each mylists.list as l (l.id)}
+      <a class="item" class:active={activeList === listRef(l)} href={`/list/${listRef(l)}`}>
+        <span class="lname">{l.name}</span>{#if l.count}<span class="count muted">{l.count.toLocaleString()}</span>{/if}
+      </a>
+    {/each}
+
     <a class="item" class:active={is('/channels')} href="/channels">Manage channels</a>
     <a class="item" class:active={is('/settings')} href="/settings">Settings</a>
   </nav>
@@ -94,6 +103,9 @@
   .row.active, .item.active { background: var(--bg-hover); color: var(--text); }
   .label { flex: 1; padding: 8px 12px; }
   .item { padding: 8px 12px; }
+  .lib { padding: 10px 12px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+  .lname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .count { font-size: 12px; margin-left: 8px; }
   .chev { background: none; border: 0; color: inherit; padding: 8px 12px; }
   .subs { list-style: none; margin: 2px 0 6px; padding: 0; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; max-height: 55vh; }
   .subs a { display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 14px; border-radius: 8px; color: var(--text-dim); }

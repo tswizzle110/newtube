@@ -368,6 +368,37 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('unsubscribing removes the channel from the sidebar straight away', (await p.locator('ul.subs li a').count()) === 0);
   await p.click('.head button'); await p.waitForFunction(() => document.querySelectorAll('ul.subs li a').length === 1);
   check('subscribing adds it back', (await p.locator('ul.subs li a .name').innerText()) === 'E2E Channel');
+  // ---- Like / Watch later, and the lists they build
+  await p.goto(BASE + '/watch?v=e2eMUXED001'); await p.waitForSelector('.byline .actions');
+  check('the video page has Like and Watch later, both off to start with',
+    (await p.locator('.byline button[aria-pressed="false"]').count()) === 2);
+  await p.click('.byline button:has-text("Like")');
+  await p.waitForSelector('.byline button[aria-pressed="true"]:has-text("Liked")');
+  await p.click('.byline button:has-text("Watch later")');
+  await p.waitForSelector('.byline button[aria-pressed="true"]:has-text("In Watch later")');
+  await p.reload(); await p.waitForSelector('.byline .actions');
+  check('...and they stay on after a reload', (await p.locator('.byline button[aria-pressed="true"]').count()) === 2);
+  check('the sidebar Library shows the lists with their counts',
+    (await p.locator('aside.side a:has-text("Liked videos") .count').innerText()) === '1' &&
+    (await p.locator('aside.side a:has-text("Watch later") .count').innerText()) === '1');
+  await p.click('aside.side a:has-text("Liked videos")'); await p.waitForSelector('.grid .card');
+  check('Liked videos lists it, with a Remove action', (await p.locator('.grid .card').count()) === 1 &&
+    (await p.locator('h1').innerText()) === 'Liked videos' && (await p.locator('.card .act:has-text("Remove")').count()) === 1);
+  await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
+  check('Play all plays from the list (and shows it under the video)', p.url().includes('mylist=liked') && (await p.locator('.plist h2').innerText()).startsWith('Liked videos'));
+  await p.goto(BASE + '/list/liked'); await p.waitForSelector('.grid .card');
+  await p.click('.card .act:has-text("Remove")');
+  await p.waitForFunction(() => !document.querySelector('.grid .card'));
+  check('removing takes it off the list, the count and the video page',
+    (await p.locator('p:has-text("Nothing here yet")').count()) === 1 && (await p.locator('aside.side a:has-text("Liked videos") .count').count()) === 0);
+  await p.goto(BASE + '/watch?v=e2eMUXED001'); await p.waitForSelector('.byline .actions');
+  check('...the video page agrees', (await p.locator('.byline button[aria-pressed="true"]').count()) === 1);
+  await p.click('.byline button:has-text("In Watch later")');
+  await p.waitForSelector('.byline button[aria-pressed="false"]:has-text("Watch later")');
+  check('toggling Watch later off works from the video page too', (await p.locator('.byline button[aria-pressed="true"]').count()) === 0);
+  await p.goto(BASE + '/list/nope'); await p.waitForSelector('.error');
+  check('an unknown list says so instead of breaking', (await p.locator('.error').innerText()).includes('no such list'));
+
   // ---- For you: recommendations, with a visible reason for each and a way to say no
   await ctx.request.get(BASE + '/__seed_recommendable');
   await p.goto(BASE + '/for-you'); await p.waitForSelector('.grid .card');

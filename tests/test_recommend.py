@@ -30,6 +30,12 @@ def event(conn, typ, vid=None, ts=NOW - DAY, channel=None):
     conn.execute("INSERT INTO events(ts,type,video_id,channel_id) VALUES (?,?,?,?)", (ts, typ, vid, channel))
 
 
+def on_list(conn, kind, vid, added_at=NOW - DAY):
+    """Put a video on your Liked / Watch later list (what imports and the buttons do)."""
+    conn.execute("INSERT INTO playlist_items(playlist_id, video_id, added_at, position)"
+                 " SELECT id, ?, ?, 1 FROM playlists WHERE kind=?", (vid, added_at, kind))
+
+
 def ids(conn, **kw):
     return [r.video["id"] for r in recommend(conn, now=NOW, **kw)]
 
@@ -64,14 +70,14 @@ def test_a_channel_you_watch_a_lot_outranks_a_fresher_one_you_never_watch(conn):
 
 def test_watch_later_items_are_candidates_even_from_unsubscribed_channels(conn):
     video(conn, "saved000000c", C, age_days=400, from_import=1)
-    event(conn, "import_watch_later", "saved000000c")
+    on_list(conn, "watch_later", "saved000000c")
     r = recommend(conn, now=NOW)
     assert [x.video["id"] for x in r] == ["saved000000c"] and any(x.label == "In your Watch later" for x in r[0].reasons)
 
 
 def test_saved_videos_not_yet_filled_in_by_the_backfill_are_left_out_not_shown_blank(conn):
     video(conn, "saved000000c", None, title="", from_import=1)
-    event(conn, "import_watch_later", "saved000000c")
+    on_list(conn, "watch_later", "saved000000c")
     assert ids(conn) == []
 
 
@@ -129,7 +135,7 @@ def test_interest_fades_with_time(conn):
 def test_likes_count_for_more_than_plain_watches_and_real_playback_for_more_than_opening(conn):
     for v, ch in (("liked000000a", A), ("opened00000b", B), ("played00000c", C)):
         video(conn, v, ch, from_import=1)
-    event(conn, "import_like", "liked000000a"); event(conn, "import_watch", "opened00000b")
+    on_list(conn, "liked", "liked000000a"); event(conn, "import_watch", "opened00000b")
     conn.execute("INSERT INTO watch_sessions(id,video_id,started_at,max_position,duration) VALUES ('s','played00000c',?,95,100)", (NOW - DAY,))
     i = channel_interest(conn, NOW, 180)
     assert i[A] > i[B] and i[C] > i[B]
@@ -185,3 +191,19 @@ def test_ages_read_naturally(conn):
     from newtube.recommend.baseline import _age_text
     assert _age_text(60) == "less than an hour ago" and _age_text(3700) == "1 hour ago"
     assert _age_text(5 * 3600) == "5 hours ago" and _age_text(3 * DAY) == "3 days ago"
+
+
+def test_taking_a_video_off_watch_later_stops_it_being_recommended_and_stops_counting(conn):
+    video(conn, "saved000000c", C, age_days=400, from_import=1)
+    on_list(conn, "watch_later", "saved000000c")
+    assert ids(conn) == ["saved000000c"]
+    conn.execute("DELETE FROM playlist_items")
+    assert ids(conn) == [] and channel_interest(conn, NOW, 180) == {}
+
+
+def test_a_like_counts_for_as_long_as_it_stays_and_an_undated_one_counts_as_old(conn):
+    video(conn, "newlike0000a", A, from_import=1); video(conn, "oldlike0000b", B, from_import=1)
+    on_list(conn, "liked", "newlike0000a", added_at=NOW - DAY)
+    on_list(conn, "liked", "oldlike0000b", added_at=0)          # a Takeout like with no date
+    i = channel_interest(conn, NOW, 180)
+    assert i[A] == 1.0 and 0 < i[B] < 0.1

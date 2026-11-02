@@ -27,3 +27,14 @@ export async function loadSubs() {
     subs.loaded = true
   } catch { /* the sidebar just keeps what it had */ }
 }
+
+// Your own lists (Liked videos, Watch later, playlists you made) as shown in the sidebar.
+export const mylists = $state({ list: [], loaded: false })
+
+/** (Re)load your lists and their counts; call after anything that adds to or removes from one. */
+export async function loadLists() {
+  try {
+    mylists.list = await api.get('/api/mylists')
+    mylists.loaded = true
+  } catch { /* keep what we had */ }
+}

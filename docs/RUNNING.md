@@ -139,6 +139,17 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## Your lists: Like, Watch later
+
+Under every video are **Like** and **Watch later** buttons. They put the video on your own **Liked videos** or
+**Watch later** list (the *Library* section of the sidebar; each list shows its count). Everything is stored only
+in your database: nothing is sent to YouTube, and your YouTube account is not touched.
+
+- Your imported likes and Watch later items from the Takeout are already on these lists.
+- **Play all** on a list plays it in order and moves on by itself when a video ends.
+- The recommender uses them: liked videos raise the channels and subjects you like for as long as they stay on
+  the list (remove one and it stops counting), and Watch later items are recommended until you watch or remove them.
+
 ## "For you" (recommendations)
 
 The **For you** tab next to Subscriptions ranks videos from your subscriptions (last 45 days) and your Watch

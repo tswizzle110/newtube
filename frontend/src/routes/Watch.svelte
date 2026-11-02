@@ -6,10 +6,12 @@
   import Player from '../components/Player.svelte'
   import Comments from '../components/Comments.svelte'
   import SponsorBlockPanel from '../components/SponsorBlockPanel.svelte'
+  import ListButtons from '../components/ListButtons.svelte'
 
   const id = router.query.get('v')
   const source = router.query.get('src') ?? 'direct'
-  const list = router.query.get('list')   // present when playing from a playlist
+  const list = router.query.get('list')   // present when playing from a YouTube playlist
+  const mylist = router.query.get('mylist') // ...or from one of your own lists (Liked videos, Watch later, playlists you made)
   let pl = $state(null)
   let sbData = $state(null)       // SponsorBlock segments for this video
   let sbSettings = $state(null)   // your SponsorBlock settings
@@ -31,6 +33,7 @@
     import('shaka-player/dist/shaka-player.dash.js').catch(() => {})
     fetch(`/api/dash/${id}.mpd`, { priority: 'low' }).catch(() => {})
     if (list) api.get(`/api/playlist/${list}`).then((p) => (pl = p)).catch(() => {})
+    if (mylist) api.get(`/api/mylists/${mylist}?limit=200`).then((p) => (pl = { playlist: { title: p.list.name }, videos: p.videos.map((v) => ({ ...v, title: v.title || v.id })) })).catch(() => {})
     api.get(`/api/video/${id}`).then((v) => {
       video = v
       document.title = `${v.title} · newtube`
@@ -42,7 +45,7 @@
   const current = $derived(video?.chapters?.findLastIndex((c) => c.start <= t) ?? -1)
   const at = $derived(pl ? pl.videos.findIndex((v) => v.id === id) : -1)
   const next = $derived(at >= 0 ? pl.videos[at + 1] : null)
-  const watchHref = (vid) => `/watch?v=${vid}&src=playlist&list=${list}`
+  const watchHref = (vid) => (mylist ? `/watch?v=${vid}&src=playlist&mylist=${mylist}` : `/watch?v=${vid}&src=playlist&list=${list}`)
   // Playlist autoplay: when this video ends, go to the next one.
   const advance = () => { if (next) navigate(watchHref(next.id)) }
 </script>
@@ -54,12 +57,14 @@
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}
-    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list ? advance : null}
+    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list || mylist ? advance : null}
       sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null} />
     <h1>{video.title}</h1>
     <div class="byline">
       <a class="chan" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
       <span class="muted">{[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}</span>
+      <span class="spacer"></span>
+      <ListButtons videoId={video.id} liked={video.liked} watchLater={video.watch_later} />
     </div>
 
     <SponsorBlockPanel data={sbData} settings={sbSettings} channelId={video.channel_id}
@@ -107,7 +112,8 @@
   .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; }
   h1 { font-size: 20px; margin: 16px 0 6px; }
   h2 { font-size: 15px; margin: 0 0 8px; }
-  .byline { display: flex; gap: 14px; align-items: baseline; margin-bottom: 18px; }
+  .byline { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .spacer { flex: 1; }
   .chan { font-weight: 600; }
   section { margin-top: 18px; }
   .chapters { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

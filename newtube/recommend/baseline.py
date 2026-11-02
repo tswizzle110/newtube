@@ -60,9 +60,10 @@ class Weights:
 
 
 # How much one event says about interest in the video's channel. Imported history only says "opened".
-EVENT_INTEREST = {
-    "import_watch": 0.35, "import_like": 1.0, "like": 1.0, "import_watch_later": 0.3, "import_playlist_add": 0.4,
-}
+# (Likes and Watch later are read from your lists instead: see ``interest_rows``.)
+EVENT_INTEREST = {"import_watch": 0.35, "import_playlist_add": 0.4}
+LIST_INTEREST = {"liked": 1.0, "watch_later": 0.3}
+UNDATED_AGE_DAYS = 730           # a Takeout entry with no date counts as about two years old
 
 
 @dataclass
@@ -84,25 +85,37 @@ class Recommendation:
 
 # ---------------------------------------------------------------------------- signals
 
+def interest_rows(conn: sqlite3.Connection, now: int) -> list[tuple[str, str | None, float, int]]:
+    """Everything that says you are interested in a video: (video_id, channel_id, weight, when).
+
+    Imported history ("opened") counts a little; real playback counts by how much you watched; and a video
+    that is on your Liked or Watch later list counts for as long as it stays there (take it off and it stops)."""
+    rows: list[tuple[str, str | None, float, int]] = []
+    marks = ",".join("?" * len(EVENT_INTEREST))
+    for r in conn.execute(
+            f"SELECT e.video_id, e.type, e.ts, COALESCE(e.channel_id, v.channel_id) AS ch FROM events e"
+            f" LEFT JOIN videos v ON v.id = e.video_id WHERE e.video_id IS NOT NULL AND e.type IN ({marks})",
+            tuple(EVENT_INTEREST)):
+        rows.append((r["video_id"], r["ch"], EVENT_INTEREST[r["type"]], r["ts"]))
+    for r in conn.execute("SELECT w.video_id, w.started_at AS ts, w.max_position AS pos, w.duration AS dur,"
+                          " v.channel_id AS ch FROM watch_sessions w LEFT JOIN videos v ON v.id = w.video_id"):
+        fraction = min(1.0, r["pos"] / r["dur"]) if r["dur"] else 0.5
+        rows.append((r["video_id"], r["ch"], 0.2 + 0.8 * fraction, r["ts"]))
+    for r in conn.execute("SELECT i.video_id, i.added_at, p.kind, v.channel_id AS ch FROM playlist_items i"
+                          " JOIN playlists p ON p.id = i.playlist_id LEFT JOIN videos v ON v.id = i.video_id"
+                          " WHERE p.kind IN ('liked', 'watch_later')"):
+        rows.append((r["video_id"], r["ch"], LIST_INTEREST[r["kind"]],
+                     r["added_at"] or now - UNDATED_AGE_DAYS * DAY))
+    return rows
+
+
 def channel_interest(conn: sqlite3.Connection, now: int, half_life_days: float) -> dict[str, float]:
     """Time-decayed sum of interest per channel, scaled so the most-watched channel is 1.0."""
     decay = math.log(2) / (half_life_days * DAY)
     total: dict[str, float] = defaultdict(float)
-
-    def add(channel: str | None, weight: float, ts: int) -> None:
+    for _vid, channel, weight, ts in interest_rows(conn, now):
         if channel and weight > 0:
             total[channel] += weight * math.exp(-decay * max(0, now - ts))
-
-    marks = ",".join("?" * len(EVENT_INTEREST))
-    for r in conn.execute(
-            f"SELECT e.type, e.ts, COALESCE(e.channel_id, v.channel_id) AS ch FROM events e"
-            f" LEFT JOIN videos v ON v.id = e.video_id WHERE e.type IN ({marks})", tuple(EVENT_INTEREST)):
-        add(r["ch"], EVENT_INTEREST[r["type"]], r["ts"])
-    # Real playback in newtube says much more than "opened": weight by how much was actually watched.
-    for r in conn.execute("SELECT w.started_at AS ts, w.max_position AS pos, w.duration AS dur, v.channel_id AS ch"
-                          " FROM watch_sessions w JOIN videos v ON v.id = w.video_id"):
-        fraction = min(1.0, r["pos"] / r["dur"]) if r["dur"] else 0.5
-        add(r["ch"], 0.2 + 0.8 * fraction, r["ts"])
     if not total:
         return {}
     top = max(total.values())
@@ -132,7 +145,8 @@ _CANDIDATES = """
 SELECT v.id, v.title, v.channel_id, COALESCE(c.title, '') AS channel_title, v.published_at, v.duration,
        v.view_count, p.position AS resume_position, p.completed AS completed,
        (s.channel_id IS NOT NULL) AS subscribed,
-       EXISTS (SELECT 1 FROM events e WHERE e.video_id = v.id AND e.type = 'import_watch_later') AS saved,
+       EXISTS (SELECT 1 FROM playlist_items i JOIN playlists pl ON pl.id = i.playlist_id
+               WHERE i.video_id = v.id AND pl.kind = 'watch_later') AS saved,
        (EXISTS (SELECT 1 FROM watch_sessions w WHERE w.video_id = v.id)
         OR EXISTS (SELECT 1 FROM events e WHERE e.video_id = v.id AND e.type = 'import_watch')) AS watched_before
 FROM videos v
@@ -141,7 +155,8 @@ LEFT JOIN subscriptions s ON s.channel_id = v.channel_id
 LEFT JOIN video_progress p ON p.video_id = v.id
 WHERE v.title <> ''
   AND ((s.channel_id IS NOT NULL AND v.from_import = 0 AND v.published_at >= ?)
-       OR EXISTS (SELECT 1 FROM events e WHERE e.video_id = v.id AND e.type = 'import_watch_later'))
+       OR EXISTS (SELECT 1 FROM playlist_items i JOIN playlists pl ON pl.id = i.playlist_id
+                  WHERE i.video_id = v.id AND pl.kind = 'watch_later'))
 """
 
 

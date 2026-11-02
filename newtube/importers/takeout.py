@@ -221,9 +221,10 @@ class DbSink:
         self._videos: dict[str, tuple[str | None, str]] = {}
         self._events: list[tuple[int, str, str | None, str | None, str]] = []
         self._subs: dict[str, str] = {}
+        self._list_items: list[tuple[str, str, int]] = []      # (liked | watch_later, video id, added at)
         # every number is present even when it is 0, so "nothing new" is reported rather than omitted
         self.stats: Counter = Counter(channels_new=0, videos_new=0, events_new=0, events_seen=0,
-                                      subscriptions_new=0, subscriptions_seen=0)
+                                      subscriptions_new=0, subscriptions_seen=0, list_items_new=0)
 
     def _changes(self, sql: str, rows: list[tuple[Any, ...]]) -> int:
         before = self.conn.total_changes
@@ -269,10 +270,18 @@ class DbSink:
         kind = {"likes": "import_like", "watch_later": "import_watch_later"}.get(category, "import_playlist_add")
         payload = WATCH_PAYLOAD if category != "other" else json.dumps({"playlist": name, "src": "takeout"}, sort_keys=True)
         self._events.append((ts or 0, kind, video_id, None, payload))     # 0 = "time unknown", stable for de-duplication
+        if category in ("likes", "watch_later"):
+            self._list_items.append((category.replace("likes", "liked"), video_id, ts or 0))
         self._maybe_flush()
 
     def finish(self) -> None:
         self._flush()
+        # Likes and Watch later also go onto your lists (what the app shows and the recommender reads).
+        for kind, vid, added in self._list_items:
+            self.stats["list_items_new"] += self.conn.execute(
+                "INSERT OR IGNORE INTO playlist_items(playlist_id, video_id, added_at, position)"
+                " SELECT p.id, ?, ?, COALESCE((SELECT MAX(position) FROM playlist_items WHERE playlist_id = p.id), 0) + 1"
+                " FROM playlists p WHERE p.kind = ?", (vid, added, kind)).rowcount
         for cid, title in self._subs.items():
             self.stats["channels_new"] += self.conn.execute(
                 "INSERT OR IGNORE INTO channels(id, title, created_at) VALUES (?,?,?)", (cid, title, self.now)).rowcount
@@ -351,5 +360,6 @@ def format_report(rep: Report, *, wrote: bool | None = None) -> str:
         L.append(f"{verb}: {d.get('events_new', 0):,} new events of {d.get('events_seen', 0):,} "
                  f"({d.get('events_seen', 0) - d.get('events_new', 0):,} were already there), "
                  f"{d.get('videos_new', 0):,} new videos, {d.get('channels_new', 0):,} new channels, "
-                 f"{d.get('subscriptions_new', 0):,} new subscriptions ({d.get('subscriptions_seen', 0):,} in the file)")
+                 f"{d.get('subscriptions_new', 0):,} new subscriptions ({d.get('subscriptions_seen', 0):,} in the file), "
+                 f"{d.get('list_items_new', 0):,} new entries on your Liked / Watch later lists")
     return "\n".join(L)

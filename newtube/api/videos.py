@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..app import Context
 from ..extract.base import AgeRestricted, BotCheck, ExtractionError, VideoUnavailable
+from ..db.queries import mylists
 from ..media.dash import audio_tracks
 from .deps import get_ctx, valid_video_id
 
@@ -29,6 +30,7 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
         raise HTTPException(502, str(e)) from e
     prog = ctx.conn.execute("SELECT position, completed FROM video_progress WHERE video_id=?",
                             (video_id,)).fetchone()
+    lists_state = mylists.membership(ctx.conn, video_id)
     return {
         "id": v.id, "title": v.title, "description": v.description,
         "channel_id": v.channel_id, "channel_title": v.channel_title,
@@ -42,4 +44,5 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
                      "vcodec": f.vcodec, "acodec": f.acodec, "muxed": f.is_muxed,
                      "tbr": f.tbr} for f in v.formats],
         "resume_position": prog["position"] if prog and not prog["completed"] else 0,
+        **{k: lists_state[k] for k in ("liked", "watch_later")},
     }

@@ -2,10 +2,11 @@
   import { onMount, tick } from 'svelte'
   import { router, interceptLinks } from './lib/router.svelte.js'
   import { auth, checkAuth, logout } from './lib/auth.svelte.js'
-  import { nav, setCollapsed, loadSubs } from './lib/nav.svelte.js'
+  import { nav, setCollapsed, loadSubs, loadLists } from './lib/nav.svelte.js'
   import Login from './routes/Login.svelte'
   import Feed from './routes/Feed.svelte'
   import ForYou from './routes/ForYou.svelte'
+  import MyList from './routes/MyList.svelte'
   import Channels from './routes/Channels.svelte'
   import Watch from './routes/Watch.svelte'
   import Search from './routes/Search.svelte'
@@ -17,7 +18,7 @@
   let sidebar = $state()
 
   onMount(checkAuth)
-  $effect(() => { if (auth.loggedIn) loadSubs() })   // the sidebar's channel list
+  $effect(() => { if (auth.loggedIn) { loadSubs(); loadLists() } })   // the sidebar's channel list and your lists
 
   let theme = $state(readTheme())
   function readTheme() {
@@ -59,6 +60,8 @@
           <Feed />
         {:else if is('/for-you')}
           <ForYou />
+        {:else if router.pathname.startsWith('/list/')}
+          <MyList />
         {:else if is('/channels')}
           <Channels />
         {:else if is('/watch')}

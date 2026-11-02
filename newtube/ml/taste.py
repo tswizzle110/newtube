@@ -12,7 +12,7 @@ import sqlite3
 import time
 from collections import defaultdict
 
-from ..recommend.baseline import DAY, EVENT_INTEREST
+from ..recommend.baseline import DAY, interest_rows
 from .embedder import normalize
 from .store import dot, load_vectors
 
@@ -21,13 +21,8 @@ def taste_vector(conn: sqlite3.Connection, model: str, now: int, half_life_days:
     """Weighted mean of the embeddings of videos you showed interest in, or None when there is nothing to go on."""
     decay = math.log(2) / (half_life_days * DAY)
     weight: dict[str, float] = defaultdict(float)
-    marks = ",".join("?" * len(EVENT_INTEREST))
-    for r in conn.execute(f"SELECT video_id, type, ts FROM events WHERE video_id IS NOT NULL AND type IN ({marks})",
-                          tuple(EVENT_INTEREST)):
-        weight[r["video_id"]] += EVENT_INTEREST[r["type"]] * math.exp(-decay * max(0, now - r["ts"]))
-    for r in conn.execute("SELECT video_id, started_at AS ts, max_position AS pos, duration AS dur FROM watch_sessions"):
-        fraction = min(1.0, r["pos"] / r["dur"]) if r["dur"] else 0.5
-        weight[r["video_id"]] += (0.2 + 0.8 * fraction) * math.exp(-decay * max(0, now - r["ts"]))
+    for vid, _channel, w, ts in interest_rows(conn, now):
+        weight[vid] += w * math.exp(-decay * max(0, now - ts))
     if not weight:
         return None
     vectors = load_vectors(conn, model, list(weight))
@@ -51,7 +46,8 @@ def scorer(conn: sqlite3.Connection, model: str, now: int):
     The taste vector is reused for 10 minutes unless your history or the embeddings changed."""
     state = (conn.execute("SELECT count(*), COALESCE(max(id), 0) FROM events").fetchone()[:],
              conn.execute("SELECT count(*) FROM video_embeddings WHERE model=?", (model,)).fetchone()[0],
-             conn.execute("SELECT count(*) FROM watch_sessions").fetchone()[0])
+             conn.execute("SELECT count(*) FROM watch_sessions").fetchone()[0],
+             conn.execute("SELECT count(*), COALESCE(sum(added_at), 0) FROM playlist_items").fetchone()[:])
     key = (id(conn), model, state)
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < CACHE_SECONDS:

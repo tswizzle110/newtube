@@ -688,3 +688,29 @@ def test_recommendations_endpoint_returns_cards_with_reasons(env):
     assert card["id"] == VID and card["channel_title"] == "Chan" and card["completed"] is False
     assert card["why"]["score"] > 0 and {x["label"] for x in card["why"]["reasons"]} >= {"From a channel you subscribe to"}
     assert not [q for q in seen if "youtube" in str(q.url)]          # computed locally: nothing was asked of YouTube
+
+
+# ---- your lists (Liked / Watch later) over the API ---------------------------------------------------------
+
+def test_like_and_watch_later_through_the_api(env):
+    client, ctx, ex, seen = env
+    assert client.get(f"/api/video/{VID}").json()["liked"] is False
+    r = client.post("/api/mylists/liked/items", json={"video_id": VID})
+    assert r.status_code == 200 and r.json() == {"added": True, "liked": True, "watch_later": False, "playlists": []}
+    assert client.post("/api/mylists/liked/items", json={"video_id": VID}).json()["added"] is False
+    client.post("/api/mylists/watch_later/items", json={"video_id": VID})
+    v = client.get(f"/api/video/{VID}").json()
+    assert v["liked"] is True and v["watch_later"] is True
+    page = client.get("/api/mylists/liked").json()
+    assert page["list"]["count"] == 1 and page["videos"][0]["id"] == VID and page["videos"][0]["title"] == v["title"]
+    assert client.get(f"/api/mylists/for-video/{VID}").json()["liked"] is True
+    assert client.delete(f"/api/mylists/liked/items/{VID}").json() == {"removed": True, "liked": False, "watch_later": True, "playlists": []}
+    assert [x["name"] for x in client.get("/api/mylists").json()] == ["Liked videos", "Watch later"]
+
+
+def test_lists_api_rejects_bad_input(env):
+    client, ctx, ex, seen = env
+    assert client.get("/api/mylists/nope").status_code == 404
+    assert client.post("/api/mylists/liked/items", json={"video_id": "short"}).status_code == 400
+    assert client.post("/api/mylists/999/items", json={"video_id": VID}).status_code == 404
+    assert client.delete("/api/mylists/liked/items/not-an-id").status_code == 400
