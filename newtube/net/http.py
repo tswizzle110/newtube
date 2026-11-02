@@ -55,12 +55,18 @@ def absolute_url(url: str | None) -> str | None:
     return url
 
 
+def host_allowed(host: str) -> bool:
+    """True for an allowlisted domain or any subdomain of one ("notyoutube.com" is not a subdomain)."""
+    host = host.lower().rstrip(".")
+    return any(host == s or host.endswith("." + s) for s in ALLOWED_HOST_SUFFIXES)
+
+
 def check_url(url: str) -> None:
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
     if parts.scheme != "https":
         raise HostNotAllowed(f"only https is allowed: {url}")
-    if not any(host == s or host.endswith("." + s) for s in ALLOWED_HOST_SUFFIXES):
+    if not host_allowed(host):
         raise HostNotAllowed(f"host not on allowlist: {host}")
 
 

@@ -21,6 +21,7 @@ from ..extract.base import ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
 from ..net.ratelimit import DailyCapReached, Lane
+from ..net import audit
 from .backfill import Backfiller
 
 log = logging.getLogger("newtube.jobs")
@@ -106,6 +107,11 @@ class Scheduler:
                               (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
         return "polled"
 
+    def flush_audit(self) -> None:
+        a = audit.active()
+        if a is not None:
+            a.flush(self.conn)
+
     def housekeeping(self) -> int:
         """Delete expired cache rows (uploads lists can be megabytes): at most once an hour."""
         if self._clock() - self._last_purge < 3600:
@@ -116,6 +122,7 @@ class Scheduler:
     async def run(self) -> None:
         while True:
             self.housekeeping()
+            self.flush_audit()
             result = await self.tick()
             if result == "idle" and self.backfiller is not None:
                 result = await self.backfiller.step()

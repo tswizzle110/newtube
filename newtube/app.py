@@ -93,6 +93,9 @@ def create_app(ctx: Context | None = None) -> FastAPI:
         finally:
             if task:
                 task.cancel()
+            from .net import audit
+            if audit.active():
+                audit.active().flush(c.conn)
             await c.http.aclose()
 
     app = FastAPI(title="newtube", lifespan=lifespan, docs_url=None, redoc_url=None)

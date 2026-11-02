@@ -41,6 +41,11 @@ class Settings:
     # Takeout backfill: videos whose details are fetched per rolling 24 hours (0 = never). See jobs/backfill.py.
     backfill_daily_cap: int = 300
 
+    # Watch every outside connection this server makes (`newtube privacy-check --log` shows them).
+    # "record" (default): note everything, block nothing. "enforce": refuse anything off the allowlist,
+    # including yt-dlp's own connections. "off". Run privacy-check first, then consider "enforce".
+    egress_mode: str = "record"
+
     # Database snapshots (`newtube backup`): where they go ("" = <data_dir>/backups) and how many to keep.
     backup_dir: str = ""
     backup_keep: int = 14
@@ -102,6 +107,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         env_key = f"NEWTUBE_{name.upper()}"
         if env_key in env:
             setattr(s, name, _coerce(env[env_key], typ))
+    if s.egress_mode not in ("record", "enforce", "off"):
+        raise ValueError(f"egress_mode must be \"record\", \"enforce\" or \"off\", not {s.egress_mode!r}")
     s.ip_version = str(s.ip_version)
     if s.ip_version not in ("auto", "4", "6"):
         raise ValueError(f"ip_version must be \"auto\", \"4\" or \"6\", not {s.ip_version!r}")

@@ -10,5 +10,6 @@ min_request_interval = 0.8    # seconds between YouTube requests (plus jitter)
 request_jitter = 0.6
 background_daily_cap = 2000   # background YouTube requests per day (RSS polling now; backfill later)
 backfill_daily_cap = 300      # imported (Takeout) videos whose details are fetched per 24 h; 0 = off
+egress_mode = "record"        # "record" (note every outside host), "enforce" (block off-allowlist), "off"
 backup_dir = ""               # where `newtube backup` writes ("" = data/backups)
 backup_keep = 14              # how many copies to keep

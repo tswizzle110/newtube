@@ -273,11 +273,47 @@ speed limits playback quality. To undo: remove the `outbound_proxy` line and res
 - With `outbound_proxy` set, all of that traffic leaves through the proxy (see above).
 - The server only contacts youtube.com, googlevideo.com, ytimg.com, ggpht.com,
   googleusercontent.com and sponsor.ajay.app (SponsorBlock).
+- Every outside connection the server makes (including yt-dlp's) is recorded; see "Checking it yourself" below.
 - Watch history, impressions and other signals live only in `data/newtube.db`.
 - SponsorBlock: looking up segments sends only a 4-character hash prefix (the server can't tell which
   video). Submitting a segment or voting does reveal the video, so it is **off by default** (Settings).
   Its random anonymous ID is stored in the local database and is never sent to your browser. The
   optional "viewed" pings the official extension sends on every skip are not implemented.
+
+## Checking it yourself: `privacy-check`
+
+Our own HTTP client refuses hosts that are not on the allowlist, but yt-dlp does its own networking. So the server
+also watches its **own sockets**: every DNS lookup and every outside connection made by any Python code in the
+server, yt-dlp included, is noted. (Connections to this machine and private networks are ignored. yt-dlp's
+JavaScript solver, Deno, runs with `--no-remote` and no network permission, and the server starts no other
+programs.)
+
+**Test it now.** This runs the selftest's real requests (video info, streams, search, channels, comments,
+SponsorBlock, thumbnails) with the watcher on, then lists every host contacted:
+
+```bash
+cd ~/newtube && uv run newtube privacy-check
+```
+
+Expected: only `*.youtube.com`, `*.googlevideo.com`, `*.ytimg.com`, `*.ggpht.com`/`googleusercontent.com` and
+`sponsor.ajay.app`, ending in "every one on the allowlist". Anything else is listed as **NOT ON THE ALLOWLIST** and
+the command exits with status 1. If that happens, send me the output: it means yt-dlp wants a host we have not
+approved, and we decide together whether to allow it or stop it.
+
+**See what the running server has done** (the table is kept in `data/newtube.db`, with first/last times):
+
+```bash
+uv run newtube privacy-check --log
+```
+
+**Then lock it.** Once you are happy with the list, set `egress_mode = "enforce"` in `newtube.toml` and restart.
+From then on, a DNS lookup or connection to anything off the allowlist is **refused** (the name is checked before
+the lookup, so no DNS query is even sent), and the refusal is logged and shown in `--log`. The cost: if YouTube
+one day needs a new host, that feature fails until you add the host (`ALLOWED_HOST_SUFFIXES` in
+`newtube/net/http.py`) — the log tells you which. `egress_mode = "off"` disables the watcher.
+
+With `outbound_proxy` set, every connection goes to the proxy, so the real destinations are not visible to this
+check; audit the proxy (e.g. gluetun's firewall/logs) instead.
 
 ## Tests
 

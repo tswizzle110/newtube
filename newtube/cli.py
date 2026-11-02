@@ -35,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     bk.add_argument("--dir", metavar="DIR", help="where to put it (default: backup_dir in newtube.toml, else data/backups)")
     bk.add_argument("--keep", type=int, metavar="N", help="how many copies to keep (default: backup_keep, 14)")
     bk.add_argument("--list", action="store_true", help="list the copies instead of making one")
+    pc = sub.add_parser("privacy-check", help="show every outside host this server contacts (and prove nothing else is)")
+    pc.add_argument("--log", action="store_true",
+                    help="show what the running server has contacted so far, instead of testing now")
     sub.add_parser("migrate", help="apply database migrations")
     return p
 
@@ -54,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
         return _passwd()
     if args.command == "takeout":
         return _takeout(args)
+    if args.command == "privacy-check":
+        return _privacy_check(args)
     if args.command == "backup":
         return _backup(args)
     if args.command == "backfill":
@@ -63,6 +68,47 @@ def main(argv: list[str] | None = None) -> int:
 
         return migrate_cli()
     return 2
+
+
+def _privacy_check(args: argparse.Namespace) -> int:
+    from .config import load_settings
+    from .net import audit
+
+    s = load_settings()
+    if args.log:
+        from .db.connection import connect, migrate
+
+        conn = connect(s.db_path)
+        migrate(conn)
+        entries = audit.load_entries(conn)
+        if not entries:
+            print("Nothing recorded yet. The running server records every outside connection (egress_mode is "
+                  f"{s.egress_mode!r}); use it for a while, then run this again.")
+            return 0
+        print(audit.format_report(entries, with_dates=True))
+        return 1 if audit.violations(entries) else 0
+
+    # Active check: do what selftest does (real requests to YouTube, SponsorBlock, thumbnails, streams...) with
+    # the audit watching every socket, and report who was contacted.
+    from .selftest import run
+
+    a = audit.install(audit.EgressAudit("record", (_proxy_host(s),) if s.outbound_proxy else ()))
+    code = run(dump_dir=None)
+    entries = a.snapshot()
+    print("\n== Outside connections made during that test ==\n")
+    print(audit.format_report(entries))
+    if s.outbound_proxy:
+        print("\nNote: outbound_proxy is set, so every connection goes to the proxy and the real destinations are"
+              " not visible from here.")
+    print("\nThis covers all of this server's Python code, including yt-dlp. yt-dlp's JavaScript solver (Deno) runs"
+          " with --no-remote and no network permission, and nothing else is started.")
+    return 1 if audit.violations(entries) else code
+
+
+def _proxy_host(s) -> str:
+    from urllib.parse import urlsplit
+
+    return urlsplit(s.outbound_proxy).hostname or ""
 
 
 def _backup(args: argparse.Namespace) -> int:
