@@ -128,12 +128,18 @@ class Ex:
         vids = [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24) for k in "ABC"]
         return (ChannelInfo(channel_id, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", "A test channel", 1200), vids[:limit])
 
+    def uploads_list(self, channel_id):
+        views = {"A": 100, "B": 5000, "C": 300}
+        vids = [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24, views[k]) for k in "ABC"]
+        return vids + [VideoSummary(f"fil{i:08d}", f"Filler {i:03d}", channel_id, "E2E Channel", 24, 1 + i % 50) for i in range(127)]
+
+    async def recent_uploads(self, channel_id, limit=100, *, background=False):
+        return self.uploads_list(channel_id)[:limit]
+
     async def channel_uploads(self, channel_id, limit=10_000, progress=None, *, background=False):
         """The uploads playlist, newest first, with views: 3 real videos then 127 fillers, read slowly in 5 pages."""
         import asyncio
-        views = {"A": 100, "B": 5000, "C": 300}
-        vids = [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24, views[k]) for k in "ABC"]
-        vids += [VideoSummary(f"fil{i:08d}", f"Filler {i:03d}", channel_id, "E2E Channel", 24, 1 + i % 50) for i in range(127)]
+        vids = self.uploads_list(channel_id)
         for page in range(1, 6):
             await asyncio.sleep(0.35)
             if progress:

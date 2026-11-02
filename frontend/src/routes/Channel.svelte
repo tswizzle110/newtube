@@ -23,7 +23,8 @@
   let scanning = $state(null)      // { done, total } while the channel's uploads are being read
   let notice = $state('')
   let unavailable = $state('')
-  let meta = $state(null)          // { total_videos, fetched_at } for sorted lists
+  let meta = $state(null)          // { total, at, checked } for sorted lists
+  let refreshing = $state(false)   // the list is being re-read in the background (you keep seeing the old one)
   let timer = null
   let sentinel = $state()
 
@@ -46,7 +47,8 @@
       videos = first ? r.videos : [...videos, ...r.videos.filter((v) => !known.has(v.id))]
       hasMore = r.has_more
       notice = r.notice ?? ''; unavailable = r.unavailable ?? ''
-      meta = r.total_videos ? { total: r.total_videos, at: r.fetched_at } : null
+      meta = r.total_videos ? { total: r.total_videos, at: r.fetched_at, checked: r.checked_at } : null
+      refreshing = !!r.refreshing
     } catch (e) {
       error = e.message
     }
@@ -149,8 +151,9 @@
     {#if notice}<p class="muted small">{notice}</p>{/if}
     {#if meta}
       <p class="muted small">
-        {sort === 'oldest' ? 'All' : 'Ranked over'} {meta.total.toLocaleString()} videos · list read {ago(meta.at)} ·
+        {sort === 'oldest' ? 'All' : 'Ranked over'} {meta.total.toLocaleString()} videos · saved {ago(meta.at)}{meta.checked ? ` · checked for new uploads ${ago(meta.checked)}` : ''} ·
         <button class="link" onclick={rescan}>Rescan</button>
+        {#if refreshing}<span> · refreshing the list in the background…</span>{/if}
       </p>
     {/if}
   {/if}

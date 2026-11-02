@@ -72,10 +72,13 @@ systemctl --user restart newtube
   to open its page, where you can sort by **Newest / Popular / Oldest**. YouTube ignores sort options on a
   channel's Videos tab and only pages forwards, so Popular and Oldest read the channel's **whole upload list
   once** (about 100 videos per request, paced; a 3,000-video channel takes roughly 30 seconds, with a progress
-  bar; you can leave the page and it carries on). The list is then remembered for a day, so sorting, paging
-  (60 at a time, loaded as you scroll) and switching between Popular and Oldest are instant and exact. Only
-  channels above 10,000 videos are limited (Popular becomes "most viewed among the newest 10,000", Oldest is
-  unavailable). "Rescan" at the bottom of the list reads it again.
+  bar; you can leave the page and it carries on). The list is then **kept** in the database (about 170 bytes per
+  video: 3,000 videos is ~0.5 MB), so sorting, paging (60 at a time, loaded as you scroll) and switching
+  between Popular and Oldest are instant and exact. Opening a channel after a few hours reads just its newest
+  page (one request) to add new uploads, and every 30 days the full list is re-read in the background
+  (that refreshes the view counts Popular uses). Only channels above 10,000 videos are limited (Popular
+  becomes "most viewed among the newest 10,000", Oldest is unavailable). "Rescan" at the bottom of the list
+  re-reads it on demand.
   The ☰ button hides the sidebar; `/` brings it back and focuses the search box.
 - **Quality:** the quality button offers every resolution the video has, up to 2160p (4K). Above 1080p
   YouTube only serves VP9/AV1, which need more computer power than H.264: **Settings → Playback** lets you

@@ -392,6 +392,17 @@ class YtDlpExtractor:
         info = await self.raw_channel_videos(channel_id, limit, background=background)
         return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
 
+    async def recent_uploads(self, channel_id: str, limit: int = 100, *,
+                             background: bool = False) -> list[VideoSummary]:
+        if not CHANNEL_ID_RE.match(channel_id):
+            raise ExtractionError("bad channel request")
+        info = await self._extract(f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}",
+                                   self._flat(max(1, min(limit, 100))), background)
+        videos = [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+        for v in videos:
+            v.channel_id = v.channel_id or channel_id
+        return videos
+
     async def raw_uploads(self, channel_id: str, limit: int = MAX_UPLOADS,
                           progress: Callable[[int, int | None], None] | None = None, *,
                           background: bool = False) -> dict[str, Any]:

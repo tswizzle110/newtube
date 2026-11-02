@@ -80,23 +80,36 @@ class FakeExtractor:
         vids = [VideoSummary(VID, "Upload one", channel_id, "YouTube", 607), VideoSummary("bbbbbbbbbbb", "Upload two", channel_id, "YouTube", 60)]
         return (ChannelInfo(channel_id, "YouTube", "@YouTube", "https://yt3.ggpht.com/av", "official", 46600000), vids[:limit])
 
+    def uploads_list(self, channel_id):
+        """The channel's uploads, newest first: any `new_uploads` on top of 5+ synthetic older ones."""
+        n = getattr(self, "upload_count", 5)
+        first = [10, 500, 30, 500, None]
+        views = [first[i] if i < 5 else 1 + i % 40 for i in range(n)]
+        base = [VideoSummary(f"vid{i:08d}", f"Video {i}", channel_id, "YouTube", 60 + i, v) for i, v in enumerate(views)]
+        gone = getattr(self, "removed_ids", set())
+        return [v for v in list(getattr(self, "new_uploads", [])) + base if v.id not in gone]
+
+    async def recent_uploads(self, channel_id, limit=100, *, background=False):
+        """One page of the newest uploads (what a cheap top-up reads)."""
+        self.recent_calls = getattr(self, "recent_calls", 0) + 1
+        if getattr(self, "recent_error", None):
+            raise ExtractionError(self.recent_error)
+        return self.uploads_list(channel_id)[:limit]
+
     async def channel_uploads(self, channel_id, limit=10_000, progress=None, *, background=False):
-        """The uploads playlist: newest first, WITH view counts. Slow on demand, to test the progress flow."""
+        """The whole uploads playlist, with view counts. Slow on demand, to test the progress flow."""
         import asyncio
         self.upload_calls = getattr(self, "upload_calls", 0) + 1
         self.scan_running = getattr(self, "scan_running", 0) + 1
         self.max_scans = max(getattr(self, "max_scans", 0), self.scan_running)
         try:
-            n = getattr(self, "upload_count", 5)
+            vids = self.uploads_list(channel_id)
             if progress:
-                progress(min(2, n), getattr(self, "uploads_total", n))
+                progress(min(2, len(vids)), getattr(self, "uploads_total", len(vids)))
             await asyncio.sleep(getattr(self, "scan_delay", 0))
             if getattr(self, "scan_error", None):
                 raise ExtractionError(self.scan_error)
-            first = [10, 500, 30, 500, None]
-            views = [first[i] if i < 5 else 1 + i % 40 for i in range(n)]
-            vids = [VideoSummary(f"vid{i:08d}", f"Video {i}", channel_id, "YouTube", 60 + i, v) for i, v in enumerate(views)]
-            return vids, getattr(self, "uploads_total", n)
+            return vids, getattr(self, "uploads_total", len(vids))
         finally:
             self.scan_running -= 1
 
@@ -553,3 +566,110 @@ def test_newest_limit_is_part_of_its_cache_key(env):
     assert len(client.get(f"/api/channel/{CID}?limit=1").json()["videos"]) == 1
     assert len(client.get(f"/api/channel/{CID}?limit=30").json()["videos"]) == 2
     assert ex.channel_calls == [1, 30]
+
+
+# ---- the stored upload list: kept, topped up cheaply, refreshed monthly --------------------------------
+
+def wait_scans(client, ctx, cid=CID):
+    deadline = _time.time() + 10
+    while ctx.lists._scans.get(cid) is not None and not ctx.lists._scans[cid].finished:
+        assert _time.time() < deadline
+        _time.sleep(0.02)
+    _time.sleep(0.05)
+
+
+def test_the_scan_is_kept_in_the_database_and_survives_a_restart(env):
+    from newtube.services.lists import ListService
+    client, ctx, ex, _ = env
+    ex.upload_count = 40
+    sorted_page(client, CID, sort="oldest")
+    assert ctx.conn.execute("SELECT count(*) FROM channel_uploads WHERE channel_id=?", (CID,)).fetchone()[0] == 40
+    ctx.lists = ListService(ctx.conn, ex)                       # a "restarted" server: nothing cached in memory
+    r = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert "scanning" not in r and len(r["videos"]) == 30
+    assert ex.upload_calls == 1                                  # no second scan after the restart
+
+
+def test_opening_a_channel_after_a_while_adds_new_uploads_with_one_request(env):
+    client, ctx, ex, _ = env
+    sorted_page(client, CID, sort="popular")
+    ex.new_uploads = [VideoSummary("new00000001", "Brand new", CID, "YouTube", 99, 1000)]
+    ctx.conn.execute("UPDATE channel_scans SET topped_up_at=0")
+    pop = client.get(f"/api/channel/{CID}?sort=popular").json()
+    assert titles(pop)[0] == "Brand new" and pop["total_videos"] == 6      # picked up, ranked by its views
+    old = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert titles(old)[-1] == "Brand new"                                  # ...and it is the NEWEST, so last in Oldest
+    assert ex.recent_calls == 1 and ex.upload_calls == 1                   # one cheap read, no rescan
+    client.get(f"/api/channel/{CID}?sort=popular")
+    assert ex.recent_calls == 1                                            # not again within hours
+
+
+def test_several_top_ups_keep_newest_first_ordering(env):
+    client, ctx, ex, _ = env
+    ex.uploads_total = 5
+    sorted_page(client, CID, sort="oldest")
+    for n in (1, 2):
+        ex.new_uploads = [VideoSummary(f"new{n:08d}", f"New {n}", CID, "YouTube", 9, 7)] + getattr(ex, "new_uploads", [])
+        ctx.conn.execute("UPDATE channel_scans SET topped_up_at=0")
+        client.get(f"/api/channel/{CID}?sort=oldest")
+    old = titles(client.get(f"/api/channel/{CID}?sort=oldest").json())
+    assert old[-2:] == ["New 1", "New 2"]                                  # New 2 is the newest of all
+
+
+def test_a_failed_top_up_serves_the_stored_list_and_tries_again_next_time(env):
+    client, ctx, ex, _ = env
+    sorted_page(client, CID, sort="oldest")
+    ctx.conn.execute("UPDATE channel_scans SET topped_up_at=0")
+    ex.recent_error = "network down"
+    r = client.get(f"/api/channel/{CID}?sort=oldest")
+    assert r.status_code == 200 and len(r.json()["videos"]) == 5
+    assert ctx.conn.execute("SELECT topped_up_at FROM channel_scans").fetchone()[0] == 0   # not marked as done
+    ex.recent_error = None
+    client.get(f"/api/channel/{CID}?sort=oldest")
+    assert ctx.conn.execute("SELECT topped_up_at FROM channel_scans").fetchone()[0] > 0
+
+
+def test_a_whole_page_of_unseen_uploads_triggers_a_background_rescan_while_the_old_list_is_served(env):
+    client, ctx, ex, _ = env
+    ex.scan_delay = 0.2
+    sorted_page(client, CID, sort="oldest")
+    ex.new_uploads = [VideoSummary(f"gap{i:08d}", f"Gap {i}", CID, "YouTube", 9, 1) for i in range(120)]
+    ctx.conn.execute("UPDATE channel_scans SET topped_up_at=0")
+    r = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert r["refreshing"] is True and len(r["videos"]) == 5 and "scanning" not in r       # the old list, meanwhile
+    wait_scans(client, ctx)
+    r2 = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert r2["refreshing"] is False and r2["total_videos"] == 125 and ex.upload_calls == 2
+
+
+def test_the_list_is_re_read_in_the_background_after_30_days(env):
+    client, ctx, ex, _ = env
+    sorted_page(client, CID, sort="oldest")
+    ctx.conn.execute("UPDATE channel_scans SET scanned_at=?", (int(_time.time()) - 31 * 86400,))
+    ex.upload_count = 8
+    r = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert r["refreshing"] is True and len(r["videos"]) == 5                               # no waiting
+    wait_scans(client, ctx)
+    r2 = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert r2["total_videos"] == 8 and r2["refreshing"] is False and ex.upload_calls == 2
+    assert r2["fetched_at"] > _time.time() - 60
+
+
+def test_a_full_rescan_drops_videos_that_were_deleted(env):
+    client, ctx, ex, _ = env
+    sorted_page(client, CID, sort="oldest")
+    ex.removed_ids = {"vid00000002"}
+    assert "scanning" in client.get(f"/api/channel/{CID}?sort=oldest&refresh=true").json()   # explicit: shows progress
+    r = sorted_page(client, CID, sort="oldest").json()
+    assert "Video 2" not in titles(r) and r["total_videos"] == 4
+
+
+def test_a_failed_background_refresh_does_not_take_the_stored_list_away(env):
+    client, ctx, ex, _ = env
+    sorted_page(client, CID, sort="oldest")
+    ctx.conn.execute("UPDATE channel_scans SET scanned_at=0")
+    ex.scan_error = "boom"
+    client.get(f"/api/channel/{CID}?sort=oldest")
+    wait_scans(client, ctx)
+    r = client.get(f"/api/channel/{CID}?sort=oldest")
+    assert r.status_code == 200 and len(r.json()["videos"]) == 5                           # the error is logged, not shown

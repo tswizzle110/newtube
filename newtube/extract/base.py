@@ -198,6 +198,12 @@ class Extractor(Protocol):
         """Channel header + newest uploads from ONE request (the Videos tab: no view counts)."""
         ...
 
+    async def recent_uploads(self, channel_id: str, limit: int = 100, *,
+                             background: bool = False) -> list[VideoSummary]:
+        """The newest ``limit`` uploads (one page, ~1 request), with view counts. Used to top up a stored
+        upload list without re-reading it."""
+        ...
+
     async def channel_uploads(self, channel_id: str, limit: int = 10_000,
                               progress: Callable[[int, int | None], None] | None = None, *,
                               background: bool = False) -> tuple[list[VideoSummary], int | None]:
