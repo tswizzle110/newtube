@@ -73,6 +73,9 @@ def store_feed(conn: sqlite3.Connection, feed: Feed) -> int:
     return new
 
 
+MAX_PLAUSIBLE_NEW = 8
+
+
 def store_discovered(conn: sqlite3.Connection, channel_id: str, videos: list[VideoSummary],
                      now: int | None = None) -> int:
     """Record videos found on a channel's page when RSS is unavailable. Returns how many NEW,
@@ -88,6 +91,12 @@ def store_discovered(conn: sqlite3.Connection, channel_id: str, videos: list[Vid
     row = conn.execute("SELECT feed_seeded FROM channels WHERE id=?", (channel_id,)).fetchone()
     had_history = bool(row and row["feed_seeded"])
     new_visible = 0
+    # A channel cannot upload this many videos between two polls hours apart. If that many are unseen, we are
+    # looking at an old backlog we never stored (a first read, or a long gap): date none of it "now".
+    unseen = sum(1 for v in videos
+                 if not conn.execute("SELECT 1 FROM videos WHERE id=?", (v.id,)).fetchone())
+    if unseen >= MAX_PLAUSIBLE_NEW:
+        had_history = False
     conn.execute("BEGIN")
     try:
         for position, v in enumerate(videos):

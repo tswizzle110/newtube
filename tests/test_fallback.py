@@ -210,3 +210,43 @@ def test_rss_can_date_a_video_that_history_import_left_undated(conn):
     r = conn.execute("SELECT title, published_at FROM videos WHERE id='watched0001'").fetchone()
     assert (r["title"], r["published_at"]) == ("A title", 1_700_000_000)
     assert conn.execute("SELECT feed_seeded FROM channels WHERE id=?", (CH,)).fetchone()[0] == 1
+
+
+# ---- never invent "uploaded just now" ---------------------------------------------------------------
+
+def test_a_page_full_of_unseen_videos_is_a_backlog_not_a_burst_of_new_uploads(conn):
+    subs.subscribe(conn, ChannelInfo(CH, "Chan"))
+    conn.execute("UPDATE channels SET feed_seeded=1 WHERE id=?", (CH,))
+    page = vids(*[f"vid{i:08d}" for i in range(15)])
+    assert subs.store_discovered(conn, CH, page, now=10_000) == 0
+    assert subs.get_feed(conn) == []                                      # none of them is dated "now"
+    assert conn.execute("SELECT count(*) FROM videos WHERE published_at IS NOT NULL").fetchone()[0] == 0
+
+
+def test_a_few_unseen_videos_are_still_real_new_uploads(conn):
+    subs.subscribe(conn, ChannelInfo(CH, "Chan"))
+    conn.execute("UPDATE channels SET feed_seeded=1 WHERE id=?", (CH,))
+    assert subs.store_discovered(conn, CH, vids("new00000001", "new00000002"), now=10_000) == 2
+
+
+def test_migration_005_removes_invented_dates_and_keeps_real_ones(tmp_path):
+    from newtube.db import connection
+    c = connect(tmp_path / "old.db")
+    files = sorted(connection.MIGRATIONS_DIR.glob("*.sql"))
+    for m in files:
+        if m.name.startswith("005"):
+            break
+        c.executescript(m.read_text())
+    c.execute("INSERT INTO channels(id,title,created_at,rss_checked_at,feed_seeded) VALUES (?, 'C', 1, 500, 1)", (CH,))
+    c.execute("INSERT INTO channels(id,title,created_at,feed_seeded) VALUES ('UCnever', 'N', 1, 1)")
+    rows = [("invented0001", 10_000 - 3, 10_000, None),     # dated 3 s before it was first seen: invented
+            ("realrss00001", 5_000, 10_000, None),          # a real date from a feed
+            ("opened000001", 10_000 - 2, 10_000, 9_999)]    # opened: its date is real whatever it looks like
+    for vid, pub, seen, detail in rows:
+        c.execute("INSERT INTO videos(id,channel_id,title,published_at,first_seen_at,detail_fetched_at) VALUES (?,?,?,?,?,?)",
+                  (vid, CH, vid, pub, seen, detail))
+    c.executescript(next(m for m in files if m.name.startswith("005")).read_text())
+    pub = dict(c.execute("SELECT id, published_at FROM videos").fetchall())
+    assert pub == {"invented0001": None, "realrss00001": 5_000, "opened000001": 9_998}
+    assert c.execute("SELECT rss_checked_at FROM channels WHERE id=?", (CH,)).fetchone()[0] is None   # poll it again soon
+    assert c.execute("SELECT feed_seeded FROM channels WHERE id='UCnever'").fetchone()[0] == 0        # never really read
