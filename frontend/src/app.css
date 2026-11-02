@@ -27,4 +27,6 @@ button { cursor: pointer; }
 .muted { color: var(--text-dim); }
 .error { color: var(--danger); }
 .page { max-width: 1680px; margin: 0 auto; padding: 20px 24px 60px; }
+@media (max-width: 699px) { .page { padding: 56px 12px 60px; } }
+button, .btn, select, input { touch-action: manipulation; }
 h1 { font-size: 20px; margin: 0 0 16px; }

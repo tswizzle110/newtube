@@ -136,11 +136,16 @@
     grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "details" "related" "comments"; }
   .stage { grid-area: stage; min-width: 0; position: relative; }
   /* the mini-player: just the video, with a small title bar on hover */
+  @media (max-width: 699px) {
+    .watch { padding: calc(52px + env(safe-area-inset-top)) 0 60px; }
+    .details, .related, .discussion { padding: 0 12px; }
+  }
   .watch.mini { display: block; padding: 0; max-width: none; }
   .watch.mini .details, .watch.mini .related, .watch.mini .discussion { display: none; }
   .minibar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 2px; padding: 4px 6px 14px 10px;
     color: #fff; background: linear-gradient(rgba(0, 0, 0, 0.75), transparent); opacity: 0; transition: opacity 0.15s; z-index: 4; }
   .stage:hover .minibar, .minibar:focus-within { opacity: 1; }
+  @media (hover: none) { .minibar { opacity: 1; } }       /* a touch screen has no hover: always show it */
   .minibar .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .minibar button { background: none; border: 0; color: #fff; font-size: 16px; padding: 4px 8px; border-radius: 6px; }
   .minibar button:hover { background: rgba(255, 255, 255, 0.2); }

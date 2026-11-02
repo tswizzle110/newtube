@@ -414,6 +414,8 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('clicking one plays it and records where you came from', p.url().includes('src=related'));
 
   // ---- Mini-player: leaving the video page keeps the video playing in a corner box
+  await p.goto(BASE + '/watch?v=e2eVIDEO001&src=subs'); await p.waitForSelector('.stage video');
+  check('the video page is just the video page (no stray "Not found" message above it)', (await p.locator('main :text("Not found")').count()) === 0);
   await p.goto(BASE + '/watch?v=e2eVIDEO001&src=subs');
   await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1.5, null, { timeout: 20000 });
   await p.evaluate(() => { document.querySelector('video').dataset.mark = 'orig'; });
@@ -575,6 +577,54 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.waitForSelector('aside.side');
   check('/ shows the sidebar again with the search box focused', await V(p, () => document.activeElement?.getAttribute('aria-label') === 'Search'));
   await p.keyboard.press('Escape');
+
+  // ---- On a phone (390x844, touch): menu drawer, no sideways scrolling, tap-friendly player, install files
+  const mctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+  const m = await mctx.newPage();
+  m.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL (phone): ' + r.url()); });
+  m.on('pageerror', e => problems.push('pageerror (phone): ' + e.message));
+  await m.goto(BASE + '/'); await m.fill('input[type=password]', 'e2e-password'); await m.click('button.primary');
+  await m.waitForSelector('.reopen');
+  const overflow = () => m.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  check('phone: the menu starts closed and the page does not scroll sideways', (await m.locator('aside.side').count()) === 0 && (await overflow()) <= 0, String(await overflow()));
+  await m.tap('.reopen'); await m.waitForSelector('aside.side');
+  const drawer = await m.evaluate(() => ({ pos: getComputedStyle(document.querySelector('aside.side')).position, w: document.querySelector('aside.side').getBoundingClientRect().width,
+    mainW: document.querySelector('main').getBoundingClientRect().width, vw: innerWidth, backdrop: getComputedStyle(document.querySelector('.backdrop')).display }));
+  check('phone: ☰ slides the menu over the page (the page keeps its full width) with a backdrop', drawer.pos === 'fixed' && drawer.w <= 300 && drawer.mainW === drawer.vw && drawer.backdrop === 'block', JSON.stringify(drawer));
+  await m.tap('aside.side a:has-text("History")'); await m.waitForURL(/\/history/);
+  await m.waitForFunction(() => !document.querySelector('aside.side'));
+  check('phone: choosing something closes the menu', (await m.locator('aside.side').count()) === 0);
+  await m.tap('.reopen'); await m.waitForSelector('aside.side'); await m.tap('.backdrop', { position: { x: 360, y: 400 } });
+  await m.waitForFunction(() => !document.querySelector('aside.side'));
+  check('phone: tapping outside the menu closes it', (await m.locator('aside.side').count()) === 0);
+  for (const path of ['/', '/subscriptions', '/search?q=zoo&kind=video', '/settings', '/history', '/list/liked']) {
+    await m.goto(BASE + path); await m.waitForSelector('.page'); await m.waitForTimeout(500);
+    const o = await overflow();
+    check(`phone: ${path} fits the screen`, o <= 0, String(o));
+  }
+  await m.goto(BASE + '/watch?v=e2eVIDEO001&src=subs');
+  await m.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
+  const mw = await m.evaluate(() => ({ player: document.querySelector('.player').getBoundingClientRect().width, vw: innerWidth,
+    relTop: document.querySelector('.related').getBoundingClientRect().top, stageBottom: document.querySelector('.stage').getBoundingClientRect().bottom }));
+  check('phone: the video fills the width and Up next is below it', mw.player === mw.vw && mw.relTop >= mw.stageBottom - 1 && (await overflow()) <= 0, JSON.stringify(mw));
+  await m.waitForSelector('.player.idle', { timeout: 8000 });                   // controls hide themselves while playing
+  await m.tap('.player video'); await m.waitForTimeout(200);
+  const afterTap = await m.evaluate(() => ({ idle: document.querySelector('.player').classList.contains('idle'), paused: document.querySelector('video').paused }));
+  check('phone: the first tap on a playing video shows the controls instead of pausing it', !afterTap.idle && !afterTap.paused, JSON.stringify(afterTap));
+  await m.tap('.player video'); await m.waitForTimeout(200);
+  check('phone: the next tap pauses', await m.evaluate(() => document.querySelector('video').paused));
+  const targets = await m.evaluate(() => [...document.querySelectorAll('.player .row button')].filter((x) => x.offsetParent).map((x) => Math.round(x.getBoundingClientRect().height)));
+  check('phone: player buttons are big enough to tap (at least 40px tall)', targets.length > 4 && targets.every((h) => h >= 40), JSON.stringify(targets));
+  await m.tap('.reopen'); await m.waitForSelector('aside.side'); await m.tap('aside.side a:has-text("Settings")');
+  await m.waitForSelector('.watchhost.mini');
+  const mm = await m.evaluate(() => { const r = document.querySelector('.watchhost').getBoundingClientRect(); return { w: r.width, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight,
+    bar: getComputedStyle(document.querySelector('.minibar')).opacity }; });
+  check('phone: the mini-player fits in the corner and its buttons are always visible', mm.w <= 320 && mm.right <= mm.vw && mm.bottom <= mm.vh && mm.bar === '1', JSON.stringify(mm));
+  const unauth = await require('playwright').request.newContext({ baseURL: BASE });
+  const man = await unauth.get('/manifest.webmanifest'), icon = await unauth.get('/icon-192.png');
+  check('install: the manifest and icons load without logging in', man.status() === 200 && (await man.json()).display === 'standalone' && icon.status() === 200 && (await icon.body())[1] === 0x50);
+  check('install: the page links its manifest', (await m.locator('link[rel="manifest"]').count()) === 1 && (await m.locator('meta[name="theme-color"]').count()) === 1);
+  await unauth.dispose(); await mctx.close();
 
   const hits = await (await ctx.request.get(BASE + '/__hits')).json();
   const gv = hits.filter(h => /^\/(v360|v180|aud|mux)$/.test(h[0]));

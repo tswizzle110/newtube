@@ -15,13 +15,14 @@ function write(key, value) {
 }
 
 export const nav = $state({
-  collapsed: read('sidebarCollapsed', window.innerWidth < 900), // narrow windows start without it
+  collapsed: window.innerWidth < 900 ? true : read('sidebarCollapsed', false), // a phone always starts with the menu closed
   subsOpen: read('subsOpen', false),
   startPage: readStr('startPage', 'home'),                  // which page newtube opens on: 'home' or 'subscriptions'
 })
 export const subs = $state({ list: [], loaded: false })
 
-export function setCollapsed(v) { nav.collapsed = v; write('sidebarCollapsed', v) }
+// (On a narrow screen the sidebar is a slide-over menu that closes after every move: that is not a preference.)
+export function setCollapsed(v) { nav.collapsed = v; if (window.innerWidth >= 900) write('sidebarCollapsed', v) }
 export function setSubsOpen(v) { nav.subsOpen = v; write('subsOpen', v) }
 export function setStartPage(v) {
   nav.startPage = v

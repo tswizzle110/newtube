@@ -10,6 +10,15 @@
   let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null, sb = null, theater = false, ontheater = null, compact = false, keys = true } = $props()
 
   let box, el
+  // Touch: the first tap on a playing video only brings the controls back; the next tap pauses. (A tap is followed
+  // by an emulated mouse move that wakes the controls BEFORE the click arrives, so what matters is whether they
+  // were hidden when the finger went down.)
+  let tapRevealsOnly = false, lastPointer = 'mouse'
+  const fingerDown = (e) => { lastPointer = e.pointerType; tapRevealsOnly = e.pointerType === 'touch' && !showControls }
+  function videoClick() {
+    if (tapRevealsOnly) { tapRevealsOnly = false; wake(); return }
+    toggle()
+  }
   let paused = $state(true)
   let t = $state(0)
   let dur = $state(video.duration ?? 0)
@@ -424,8 +433,9 @@
     bind:paused bind:volume bind:muted
     ontimeupdate={onTime} onprogress={onTime}
     ondurationchange={() => Number.isFinite(el.duration) && (dur = el.duration)}
+    onplaying={wake}                                  /* start the hide timer: a touch screen has no mouse movement to do it */
     onended={() => onended?.()}
-    onclick={toggle} ondblclick={toggleFullscreen}
+    onpointerdown={fingerDown} onclick={videoClick} ondblclick={() => lastPointer !== 'touch' && toggleFullscreen()}
     onerror={() => mode === 'muxed' && (error = 'Playback error')}></video>
 
   {#if mode === 'loading'}<div class="center muted">Loading…</div>{/if}
@@ -591,6 +601,7 @@
     overflow: hidden; user-select: none; }
   .player:fullscreen { border-radius: 0; aspect-ratio: auto; width: 100%; }
   .player.idle { cursor: none; }
+  @media (max-width: 699px) { .player { border-radius: 0; width: 100%; } }
   video { width: 100%; height: 100%; display: block; background: #000; }
   video::cue { font-size: 1.4em; background: rgba(0, 0, 0, 0.7); }
   .center { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
@@ -607,6 +618,11 @@
   .controls { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 12px 8px; color: #fff;
     background: linear-gradient(transparent, rgba(0, 0, 0, 0.8)); transition: opacity 0.2s; }
   .player.idle .controls { opacity: 0; pointer-events: none; }
+  /* The controls' background is only a gradient: taps on it must reach the picture (to pause), so only the seek bar
+     and the buttons themselves catch the pointer. (Matters on a phone, where the bar covers half the video.) */
+  .controls { pointer-events: none; }
+  .controls > * { pointer-events: auto; }
+  .player.idle .controls > * { pointer-events: none; }
   .bar { position: relative; display: flex; gap: 2px; height: 14px; align-items: center; cursor: pointer; touch-action: none; }
   .seg { height: 100%; display: flex; align-items: center; }
   .track { position: relative; width: 100%; height: 4px; background: rgba(255, 255, 255, 0.25); transition: height 0.1s; }
@@ -652,4 +668,12 @@
     background: rgba(20, 20, 24, 0.96); border-radius: 8px; max-height: 260px; overflow: auto; }
   .menu button { width: 100%; text-align: left; }
   .menu button.sel { color: var(--accent); font-weight: 700; }
+
+  /* (last, so these beat the base rules above) */
+  /* touch screens: bigger targets, no volume slider (the phone has buttons) */
+  @media (pointer: coarse), (max-width: 699px) {      /* (a small window counts too: emulators and some browsers do not report 'coarse') */
+    .row button { padding: 11px 12px; }
+    .vol { display: none; }
+    .bar { height: 26px; }
+  }
 </style>

@@ -46,6 +46,9 @@
     session = { id: q.get('v'), source: q.get('src') ?? 'direct', list: q.get('list'), mylist: q.get('mylist'), key: ++sessionKey }
   }
 
+  // On a phone the sidebar is a slide-over menu: choosing something closes it.
+  $effect(() => { router.path; if (window.innerWidth < 900) untrack(() => setCollapsed(true)) })
+
   let started = false
   $effect(() => {
     if (!auth.loggedIn) return
@@ -87,6 +90,7 @@
 {:else}
   <div class="layout" class:collapsed={nav.collapsed}>
     {#if !nav.collapsed}
+      <button class="backdrop" aria-label="Close the menu" onclick={() => setCollapsed(true)}></button>
       <Sidebar bind:this={sidebar} {theme} ontheme={() => (theme = theme === 'dark' ? 'light' : 'dark')} onlogout={logout} />
     {:else}
       <button class="reopen" title="Show the sidebar" aria-label="Show the sidebar" onclick={() => setCollapsed(false)}>☰</button>
@@ -109,6 +113,8 @@
           <Channel />
         {:else if is('/playlist')}
           <Playlist />
+        {:else if is('/watch')}
+          <!-- the video page is rendered below, outside the routed pages, so that it can keep playing as a mini-player -->
         {:else if is('/settings')}
           <Settings />
         {:else}
@@ -135,7 +141,13 @@
   .watchhost.mini { position: fixed; right: 16px; bottom: 16px; z-index: 60; width: min(400px, calc(100vw - 32px));
     border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
   main { min-width: 0; }
-  .reopen { position: fixed; top: 10px; left: 10px; z-index: 20; background: var(--bg-elev); border: 1px solid var(--border);
+  .backdrop { display: none; }
+  @media (max-width: 899px) {
+    .layout, .layout.collapsed { grid-template-columns: minmax(0, 1fr); }
+    .backdrop { display: block; position: fixed; inset: 0; z-index: 65; border: 0; background: rgba(0, 0, 0, 0.55); }
+    .watchhost.mini { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); width: min(320px, calc(100vw - 16px)); }
+  }
+  .reopen { position: fixed; top: calc(10px + env(safe-area-inset-top)); left: 10px; z-index: 20; background: var(--bg-elev); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 10px; color: var(--text-dim); }
   .reopen:hover { background: var(--bg-hover); color: var(--text); }
 </style>

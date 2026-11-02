@@ -148,4 +148,11 @@
   .empty { padding: 6px 14px; font-size: 13px; }
   .bottom { display: flex; gap: 8px; }
   .bottom .btn:last-child { flex: 1; }
+
+  /* (after the base rules above, so these win) */
+  @media (max-width: 899px) {      /* a phone: the sidebar slides over the page instead of sitting beside it */
+    .side { position: fixed; z-index: 70; top: 0; left: 0; bottom: 0; height: auto; width: min(300px, 86vw);
+      padding-top: calc(12px + env(safe-area-inset-top)); box-shadow: 0 0 30px rgba(0, 0, 0, 0.6); }
+  }
+  @media (pointer: coarse), (max-width: 899px) { .item, .row { min-height: 44px; } .subs a { min-height: 44px; } }
 </style>
