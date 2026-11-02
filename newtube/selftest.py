@@ -17,7 +17,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+import re
+from urllib.parse import parse_qs, urlsplit
 
 from .config import Settings, load_settings
 from .extract.base import ChannelSummary, Extractor, PlaylistSummary, VideoInfo, VideoSummary
@@ -193,6 +194,19 @@ class SelfTest:
             raise RuntimeError("no formats to test")
         return "; ".join(out)
 
+    async def exit_ip(self) -> str:
+        """Which IP address did YouTube see? Its signed stream URLs carry the address that asked
+        for them (``ip=...``), so this needs no third-party "what is my IP" site."""
+        if not self.info:
+            raise RuntimeError("skipped: video_info failed")
+        ip = next((q["ip"][0] for f in self.info.formats
+                   if (q := parse_qs(urlsplit(f.url).query)).get("ip")), None)
+        if not ip:
+            raise RuntimeError("stream URLs carry no ip= parameter, so this can't be determined")
+        proxy = self.settings.outbound_proxy
+        via = f"via proxy {re.sub(r'//[^@/]*@', '//***@', proxy)}" if proxy else "direct, no proxy configured"
+        return f"YouTube saw {ip} ({via})"
+
     async def thumbnail(self) -> str:
         r = await self.http.get(f"https://i.ytimg.com/vi/{TEST_VIDEO}/hqdefault.jpg")
         r.raise_for_status()
@@ -285,7 +299,7 @@ class SelfTest:
         for name, fn in [
             ("environment", self.environment), ("allowlist", self.allowlist),
             ("rss", self.rss), ("video_info", self.video_info), ("video_warm", self.video_info_warm),
-            ("stream_range", self.stream_range), ("thumbnail", self.thumbnail),
+            ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("thumbnail", self.thumbnail),
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
             ("channel_videos", self.channel_videos), ("playlist", self.playlist_videos),

@@ -83,10 +83,50 @@ Copy `newtube.toml.example` to `newtube.toml` (git-ignored) or set `NEWTUBE_*` e
 variables. To send all outbound traffic through a proxy later, set `outbound_proxy`: one
 setting covers the app and yt-dlp.
 
+## Hiding your home IP: route everything through gluetun / a VPN
+
+Everything the server sends to YouTube goes through one setting, `outbound_proxy`, and this is
+covered by tests: the app's HTTP client, video streaming and yt-dlp all use it, and hostnames are
+sent to the proxy (DNS is resolved on the VPN side). Gluetun has a built-in HTTP proxy:
+
+1. In your gluetun service enable it and publish the port **on localhost only** (the proxy has no
+   password by default, so never publish it to your LAN). Check gluetun's wiki for the current
+   variable names; at the time of writing:
+
+   ```yaml
+   services:
+     gluetun:
+       environment:
+         - HTTPPROXY=on
+         - HTTPPROXY_LISTENING_ADDRESS=:8888
+         # optional: - HTTPPROXY_USER=newtube   - HTTPPROXY_PASSWORD=...
+       ports:
+         - 127.0.0.1:8888:8888/tcp
+   ```
+
+   Recreate gluetun, then restart any containers that use `network_mode: service:gluetun`
+   (they lose their network when gluetun is recreated).
+
+2. In `~/newtube/newtube.toml`:
+
+   ```toml
+   outbound_proxy = "http://127.0.0.1:8888"      # with a password: "http://user:pass@127.0.0.1:8888"
+   ```
+
+3. Restart newtube and run `uv run newtube selftest`. The `exit_ip` line shows the address YouTube
+   saw; it must differ from your home IP. If the VPN drops, gluetun's kill switch makes requests
+   fail instead of leaking.
+
+Things to know: VPN addresses are shared and often flagged, so YouTube may ask "Sign in to confirm
+you're not a bot" more often than on a home connection. If `selftest` fails with that message, pick
+a different PIA region in gluetun (`SERVER_REGIONS`). Video data also flows through the VPN, so its
+speed limits playback quality. To undo: remove the `outbound_proxy` line and restart.
+
 ## Privacy checklist (what is enforced)
 
 - The browser only talks to this server (CSP `default-src 'self'`; thumbnails, avatars, captions
   and video are all proxied; no web fonts).
+- With `outbound_proxy` set, all of that traffic leaves through the proxy (see above).
 - The server only contacts youtube.com, googlevideo.com, ytimg.com, ggpht.com,
   googleusercontent.com and sponsor.ajay.app (SponsorBlock arrives in phase 2).
 - Watch history, impressions and other signals live only in `data/newtube.db`.

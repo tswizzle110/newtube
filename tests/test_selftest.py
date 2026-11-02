@@ -15,7 +15,7 @@ class FakeExtractor:
     async def video_info(self, video_id, *, background=False):
         if self.fail:
             raise ExtractionError("Sign in to confirm you're not a bot")
-        fmts = [Format("137", "https://r.googlevideo.com/v", "mp4", "avc1", None, height=1080),
+        fmts = [Format("137", "https://r.googlevideo.com/v?expire=1&ip=203.0.113.9&ipbits=0", "mp4", "avc1", None, height=1080),
                 Format("140", "https://r.googlevideo.com/a", "m4a", None, "mp4a", tbr=128)]
         return VideoInfo(video_id, "Zoo", "UC1", "c", "", 19, 0, 1, None, [], None, False, 0,
                          formats=fmts)
@@ -68,6 +68,8 @@ async def test_all_good_paths_report_ok_except_failing_channel():
     assert not results["channel"].ok          # one failure doesn't stop the others
     assert "2 entries" in results["rss"].detail
     assert results["video_warm"].ok and "2nd video" in results["video_warm"].detail
+    assert results["exit_ip"].ok and "203.0.113.9" in results["exit_ip"].detail
+    assert "direct, no proxy configured" in results["exit_ip"].detail
     for name in ("search_video", "search_channel", "search_playlist", "channel_videos", "playlist",
                  "comments_top", "comment_replies"):
         assert results[name].ok, (name, results[name].detail)
@@ -106,3 +108,24 @@ async def test_search_check_reports_what_was_parsed_when_the_kind_is_wrong(tmp_p
     res = {r.name: r for r in await st.run()}
     assert not res["search_channel"].ok and "VideoSummary" in res["search_channel"].detail
     assert (tmp_path / "search_channel.json").exists() and "search_channel" in (tmp_path / "samples.txt").read_text()
+
+
+async def test_exit_ip_reports_the_proxy_without_leaking_its_password():
+    http = OutboundClient(Settings(), RateLimiter(0, 0, 10), transport=httpx.MockTransport(handler))
+    st = SelfTest(Settings(js_runtime="python3", outbound_proxy="http://user:s3cret@127.0.0.1:8888"),
+                  FakeExtractor(), http)
+    res = {r.name: r for r in await st.run()}
+    assert "via proxy http://***@127.0.0.1:8888" in res["exit_ip"].detail
+    assert "s3cret" not in res["exit_ip"].detail and "s3cret" not in format_results(list(res.values()))
+
+
+async def test_exit_ip_says_so_when_the_url_has_no_ip():
+    class NoIp(FakeExtractor):
+        async def video_info(self, video_id, *, background=False):
+            v = await super().video_info(video_id)
+            for f in v.formats:
+                f.url = f.url.split("?")[0]
+            return v
+    http = OutboundClient(Settings(), RateLimiter(0, 0, 10), transport=httpx.MockTransport(handler))
+    res = {r.name: r for r in await SelfTest(Settings(js_runtime="python3"), NoIp(), http).run()}
+    assert not res["exit_ip"].ok and "can't be determined" in res["exit_ip"].detail
