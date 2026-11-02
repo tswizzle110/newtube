@@ -19,6 +19,17 @@ class NoSuchList(LookupError):
     pass
 
 
+class NameTaken(ValueError):
+    """Another list already has this name."""
+
+
+class NotYours(ValueError):
+    """Liked videos and Watch later cannot be renamed, deleted or reordered."""
+
+
+MAX_NAME = 100
+
+
 def resolve(conn: sqlite3.Connection, ref: str) -> sqlite3.Row:
     """``ref`` is 'liked', 'watch_later' or a list's numeric id."""
     if ref in SYSTEM_EVENTS:
@@ -93,3 +104,69 @@ def membership(conn: sqlite3.Connection, video_id: str) -> dict[str, Any]:
                         " WHERE i.video_id = ?", (video_id,)).fetchall()
     return {"liked": any(r["kind"] == "liked" for r in rows), "watch_later": any(r["kind"] == "watch_later" for r in rows),
             "playlists": sorted(r["id"] for r in rows if r["kind"] == "user")}
+
+
+# ---- playlists you make --------------------------------------------------------------------------------
+
+def _clean(name: str) -> str:
+    name = " ".join((name or "").split())
+    if not name or len(name) > MAX_NAME:
+        raise ValueError(f"a playlist name must be 1 to {MAX_NAME} characters")
+    return name
+
+
+def _check_free(conn: sqlite3.Connection, name: str, except_id: int | None = None) -> None:
+    row = conn.execute("SELECT id FROM playlists WHERE lower(name)=lower(?) AND id IS NOT ?", (name, except_id)).fetchone()
+    if row:
+        raise NameTaken(name)
+
+
+def _user(playlist: sqlite3.Row) -> None:
+    if playlist["kind"] != "user":
+        raise NotYours(playlist["name"])
+
+
+def create(conn: sqlite3.Connection, name: str, now: int | None = None) -> sqlite3.Row:
+    name = _clean(name)
+    _check_free(conn, name)
+    now = now if now is not None else int(time.time())
+    cur = conn.execute("INSERT INTO playlists(kind, name, created_at, updated_at) VALUES ('user', ?, ?, ?)", (name, now, now))
+    log_event(conn, "playlist_create", payload={"playlist": name}, ts=now)
+    return conn.execute("SELECT * FROM playlists WHERE id=?", (cur.lastrowid,)).fetchone()
+
+
+def rename(conn: sqlite3.Connection, playlist: sqlite3.Row, name: str, now: int | None = None) -> None:
+    _user(playlist)
+    name = _clean(name)
+    _check_free(conn, name, except_id=playlist["id"])
+    now = now if now is not None else int(time.time())
+    conn.execute("UPDATE playlists SET name=?, updated_at=? WHERE id=?", (name, now, playlist["id"]))
+    log_event(conn, "playlist_rename", payload={"from": playlist["name"], "to": name}, ts=now)
+
+
+def delete(conn: sqlite3.Connection, playlist: sqlite3.Row, now: int | None = None) -> None:
+    """Delete a playlist you made (its videos are untouched; they are just no longer on it)."""
+    _user(playlist)
+    conn.execute("DELETE FROM playlists WHERE id=?", (playlist["id"],))        # its items go with it (cascade)
+    log_event(conn, "playlist_delete", payload={"playlist": playlist["name"]}, ts=now)
+
+
+def reorder(conn: sqlite3.Connection, playlist: sqlite3.Row, video_ids: list[str]) -> list[str]:
+    """Put the playlist in this order. Videos not mentioned (added meanwhile) keep their order, after the others.
+    Returns the final order."""
+    _user(playlist)
+    current = [r[0] for r in conn.execute(
+        "SELECT video_id FROM playlist_items WHERE playlist_id=? ORDER BY position", (playlist["id"],))]
+    have = set(current)
+    seen: set[str] = set()
+    wanted = [v for v in video_ids if v in have and not (v in seen or seen.add(v))]
+    final = wanted + [v for v in current if v not in seen]
+    conn.execute("BEGIN")
+    try:
+        conn.executemany("UPDATE playlist_items SET position=? WHERE playlist_id=? AND video_id=?",
+                         [(i + 1, playlist["id"], v) for i, v in enumerate(final)])
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return final

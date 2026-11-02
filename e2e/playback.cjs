@@ -399,6 +399,41 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.goto(BASE + '/list/nope'); await p.waitForSelector('.error');
   check('an unknown list says so instead of breaking', (await p.locator('.error').innerText()).includes('no such list'));
 
+  // ---- Your own playlists: create from the Save menu, fill, reorder, rename, delete
+  await p.goto(BASE + '/watch?v=e2eMUXED001'); await p.waitForSelector('.byline .actions');
+  await p.click('.byline button:has-text("Save")');
+  check('the Save menu starts with no playlists', (await p.locator('.menu p:has-text("No playlists yet")').count()) === 1);
+  await p.fill('input[aria-label="New playlist name"]', 'E2E mix'); await p.click('.menu button:has-text("Create")');
+  await p.waitForSelector('.byline button:has-text("In 1 playlist")');
+  check('Create & save makes the playlist and puts the video in it', (await p.locator('.menu input[type=checkbox]:checked').count()) === 1);
+  check('...and it appears in the sidebar Library', (await p.locator('aside.side a:has-text("E2E mix")').count()) === 1);
+  await p.keyboard.press('Escape');
+  await p.goto(BASE + '/watch?v=e2eVIDEO001'); await p.waitForSelector('.byline .actions');
+  await p.click('.byline button:has-text("Save")');
+  await p.click('.menu label:has-text("E2E mix") input');
+  await p.waitForSelector('.byline button:has-text("In 1 playlist")');
+  await p.click('aside.side a:has-text("E2E mix")'); await p.waitForSelector('.grid .card');
+  const ids = () => p.locator('.grid .card a.title').evaluateAll((as) => as.map((a) => new URL(a.href).searchParams.get('v')));
+  const order1 = await ids();
+  check('the playlist lists both videos in the order added', order1.join() === 'e2eMUXED001,e2eVIDEO001', order1.join());
+  await p.click('.grid .card:first-child .act[aria-label="Move later"]');
+  await p.waitForFunction((first) => new URL(document.querySelector('.grid .card a.title').href).searchParams.get('v') !== first, order1[0]);
+  await p.reload(); await p.waitForSelector('.grid .card');
+  const order2 = await ids();
+  check('Move later reorders it, and the new order survives a reload', order2.join() === order1.slice().reverse().join(), order2.join());
+  await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
+  check('Play all starts with the first video of the new order', new URL(p.url()).searchParams.get('v') === order2[0] && p.url().includes('mylist='));
+  await p.goto(BASE + '/list/' + (await p.evaluate(() => 0).then(() => '3'))); await p.waitForSelector('h1');
+  await p.click('button:has-text("Rename")'); await p.fill('input[aria-label="Playlist name"]', 'E2E renamed'); await p.click('.rename button:has-text("Save")');
+  await p.waitForFunction(() => document.querySelector('h1')?.innerText === 'E2E renamed');
+  check('Rename changes the title and the sidebar', (await p.locator('aside.side a:has-text("E2E renamed")').count()) === 1);
+  p.once('dialog', (d) => d.accept());
+  await p.click('button:has-text("Delete playlist")');
+  await p.waitForFunction(() => location.pathname === '/');
+  check('Delete playlist removes it from the sidebar and returns home', (await p.locator('aside.side a:has-text("E2E renamed")').count()) === 0);
+  await p.goto(BASE + '/list/liked'); await p.waitForSelector('h1');
+  check('Liked videos cannot be renamed or deleted', (await p.locator('button:has-text("Rename")').count()) === 0 && (await p.locator('button:has-text("Delete playlist")').count()) === 0);
+
   // ---- History: what you watched, searchable, removable, and it stays removed
   await p.goto(BASE + '/history'); await p.waitForSelector('.grid .card');
   const hBefore = await p.locator('.grid .card').count();

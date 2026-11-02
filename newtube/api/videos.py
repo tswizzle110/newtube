@@ -44,5 +44,5 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
                      "vcodec": f.vcodec, "acodec": f.acodec, "muxed": f.is_muxed,
                      "tbr": f.tbr} for f in v.formats],
         "resume_position": prog["position"] if prog and not prog["completed"] else 0,
-        **{k: lists_state[k] for k in ("liked", "watch_later")},
+        **lists_state,
     }

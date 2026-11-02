@@ -714,3 +714,26 @@ def test_lists_api_rejects_bad_input(env):
     assert client.post("/api/mylists/liked/items", json={"video_id": "short"}).status_code == 400
     assert client.post("/api/mylists/999/items", json={"video_id": VID}).status_code == 404
     assert client.delete("/api/mylists/liked/items/not-an-id").status_code == 400
+
+
+def test_playlists_through_the_api(env):
+    client, ctx, ex, seen = env
+    made = client.post("/api/mylists", json={"name": "  My   mix "})
+    assert made.status_code == 200 and made.json()["name"] == "My mix"
+    pid = made.json()["id"]
+    assert client.post("/api/mylists", json={"name": "my mix"}).status_code == 409
+    assert client.post("/api/mylists", json={"name": " "}).status_code == 400
+    ctx.conn.execute("INSERT INTO videos(id,title,first_seen_at) VALUES ('aaaaaaaaaab','B',1),('aaaaaaaaaac','C',1)")
+    for v in ("aaaaaaaaaab", "aaaaaaaaaac"):
+        r = client.post(f"/api/mylists/{pid}/items", json={"video_id": v})
+        assert r.status_code == 200 and r.json()["playlists"] and pid in r.json()["playlists"]
+    assert client.get(f"/api/video/{VID}").json()["playlists"] == []
+    assert client.put(f"/api/mylists/{pid}/order", json={"video_ids": ["aaaaaaaaaac", "aaaaaaaaaab"]}).json() == {"video_ids": ["aaaaaaaaaac", "aaaaaaaaaab"]}
+    assert [v["id"] for v in client.get(f"/api/mylists/{pid}").json()["videos"]] == ["aaaaaaaaaac", "aaaaaaaaaab"]
+    assert client.patch(f"/api/mylists/{pid}", json={"name": "Renamed"}).json() == {"id": pid, "name": "Renamed"}
+    assert client.patch("/api/mylists/liked", json={"name": "x"}).status_code == 400
+    assert client.delete("/api/mylists/watch_later").status_code == 400
+    assert client.put("/api/mylists/liked/order", json={"video_ids": []}).status_code == 400
+    assert client.put(f"/api/mylists/{pid}/order", json={"video_ids": ["bad"]}).status_code == 400
+    assert client.delete(f"/api/mylists/{pid}").json() == {"deleted": True}
+    assert client.get(f"/api/mylists/{pid}").status_code == 404

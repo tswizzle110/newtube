@@ -11,7 +11,7 @@
   let done = $state(false)
   let error = $state('')
   let q = $state('')
-  let applied = '' // the search the list on screen belongs to
+  let applied = $state('') // the search the list on screen belongs to
 
   async function load(reset = false) {
     if (reset) { items = []; done = false; applied = q.trim() }

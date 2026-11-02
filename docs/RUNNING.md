@@ -155,6 +155,10 @@ in your database: nothing is sent to YouTube, and your YouTube account is not to
 
 - Your imported likes and Watch later items from the Takeout are already on these lists.
 - **Play all** on a list plays it in order and moves on by itself when a video ends.
+- **Your own playlists:** the **Save** menu under a video adds it to any playlist you have (or **Create & save**
+  a new one). The **＋** next to *Library* in the sidebar makes an empty playlist. On a playlist's page you can
+  **Rename** it, **Delete** it (its videos are not affected), and reorder with the ↑ / ↓ buttons; **Play all**
+  follows that order. Names must be unique (ignoring capitals). A video can be on any number of playlists.
 - The recommender uses them: liked videos raise the channels and subjects you like for as long as they stay on
   the list (remove one and it stops counting), and Watch later items are recommended until you watch or remove them.
 

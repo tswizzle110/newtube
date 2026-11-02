@@ -1,7 +1,8 @@
 <script>
   import { tick } from 'svelte'
   import { router, navigate } from '../lib/router.svelte.js'
-  import { nav, subs, mylists, setCollapsed, setSubsOpen } from '../lib/nav.svelte.js'
+  import { nav, subs, mylists, setCollapsed, setSubsOpen, loadLists } from '../lib/nav.svelte.js'
+  import { api } from '../lib/api.js'
 
   let { theme, ontheme, onlogout } = $props()
   let searchEl = $state()
@@ -9,6 +10,21 @@
 
   const is = (p) => router.pathname === p
   const activeList = $derived(router.pathname.startsWith('/list/') ? router.pathname.split('/')[2] : null)
+  let adding = $state(false)
+  let newName = $state('')
+  let addError = $state('')
+  async function newPlaylist(e) {
+    e.preventDefault()
+    if (!newName.trim()) return
+    try {
+      const p = await api.post('/api/mylists', { name: newName })
+      adding = false; newName = ''; addError = ''
+      await loadLists()
+      navigate(`/list/${p.id}`)
+    } catch (err) {
+      addError = err.message
+    }
+  }
   const listRef = (l) => (l.kind === 'user' ? String(l.id) : l.kind)
   const activeChannel = $derived(router.pathname.startsWith('/channel/') ? router.pathname.split('/')[2] : null)
 
@@ -72,7 +88,16 @@
       </ul>
     {/if}
 
-    <div class="lib">Library</div>
+    <div class="lib"><span>Library</span>
+      <button class="plus" title="New playlist" aria-label="New playlist" aria-expanded={adding} onclick={() => (adding = !adding)}>＋</button>
+    </div>
+    {#if adding}
+      <form class="newpl" onsubmit={newPlaylist}>
+        <input class="input" bind:value={newName} placeholder="Playlist name" aria-label="New playlist name" maxlength="100"
+               onkeydown={(e) => e.key === 'Escape' && (adding = false)} />
+        {#if addError}<span class="error small">{addError}</span>{/if}
+      </form>
+    {/if}
     <a class="item" class:active={is('/history')} href="/history">History</a>
     {#each mylists.list as l (l.id)}
       <a class="item" class:active={activeList === listRef(l)} href={`/list/${listRef(l)}`}>
@@ -104,7 +129,12 @@
   .row.active, .item.active { background: var(--bg-hover); color: var(--text); }
   .label { flex: 1; padding: 8px 12px; }
   .item { padding: 8px 12px; }
-  .lib { padding: 10px 12px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+  .lib { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+  .plus { background: none; border: 0; color: var(--text-dim); font-size: 15px; padding: 0 4px; border-radius: 6px; }
+  .plus:hover { color: var(--text); background: var(--bg-hover); }
+  .newpl { padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .newpl .input { width: 100%; }
+  .small { font-size: 12px; }
   .lname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .count { font-size: 12px; margin-left: 8px; }
   .chev { background: none; border: 0; color: inherit; padding: 8px 12px; }

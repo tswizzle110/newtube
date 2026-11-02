@@ -64,7 +64,7 @@
       <a class="chan" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
       <span class="muted">{[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}</span>
       <span class="spacer"></span>
-      <ListButtons videoId={video.id} liked={video.liked} watchLater={video.watch_later} />
+      <ListButtons videoId={video.id} liked={video.liked} watchLater={video.watch_later} playlists={video.playlists} />
     </div>
 
     <SponsorBlockPanel data={sbData} settings={sbSettings} channelId={video.channel_id}

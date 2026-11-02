@@ -122,3 +122,69 @@ def test_the_migration_carries_over_imports_made_before_lists_existed(tmp_path):
     got = {(r["kind"], r["video_id"], r["added_at"]) for r in c.execute(
         "SELECT p.kind, i.video_id, i.added_at FROM playlist_items i JOIN playlists p ON p.id=i.playlist_id")}
     assert got == {("liked", V1, 100), ("watch_later", V2, 0)}                       # earliest date kept; plain watches are not likes
+
+
+# ---- playlists you make -------------------------------------------------------------------------------
+
+def test_create_rename_delete(conn):
+    p = ml.create(conn, "  Piano   covers ")
+    assert p["name"] == "Piano covers" and p["kind"] == "user"
+    assert [r["name"] for r in ml.list_all(conn)] == ["Liked videos", "Watch later", "Piano covers"]
+    ml.rename(conn, p, "Piano")
+    assert ml.resolve(conn, str(p["id"]))["name"] == "Piano"
+    video(conn, V1)
+    ml.add(conn, ml.resolve(conn, str(p["id"])), V1)
+    ml.delete(conn, ml.resolve(conn, str(p["id"])))
+    assert conn.execute("SELECT count(*) FROM playlist_items WHERE video_id=?", (V1,)).fetchone()[0] == 0     # items go too
+    assert [r["name"] for r in ml.list_all(conn)] == ["Liked videos", "Watch later"]
+    assert [t for t, in conn.execute("SELECT type FROM events WHERE type LIKE 'playlist_%' ORDER BY id")] == [
+        "playlist_create", "playlist_rename", "playlist_add", "playlist_delete"]
+
+
+def test_names_must_be_sensible_and_unique_ignoring_case(conn):
+    ml.create(conn, "Mine")
+    for bad in ("", "   ", "x" * 101):
+        with pytest.raises(ValueError):
+            ml.create(conn, bad)
+    for dup in ("mine", "MINE ", "liked videos", "Watch Later"):                  # also the two built-in names
+        with pytest.raises(ml.NameTaken):
+            ml.create(conn, dup)
+    other = ml.create(conn, "Other")
+    with pytest.raises(ml.NameTaken):
+        ml.rename(conn, other, "mine")
+    ml.rename(conn, other, "OTHER")                                              # renaming to itself (case change) is fine
+
+
+def test_liked_and_watch_later_are_not_yours_to_change(conn):
+    for ref in ("liked", "watch_later"):
+        p = ml.resolve(conn, ref)
+        for fn in (lambda: ml.rename(conn, p, "x"), lambda: ml.delete(conn, p), lambda: ml.reorder(conn, p, [])):
+            with pytest.raises(ml.NotYours):
+                fn()
+
+
+def test_user_playlists_play_in_the_order_you_set(conn):
+    p = ml.create(conn, "Order")
+    for v in (V1, V2, V3):
+        video(conn, v, v[0]); ml.add(conn, p, v)
+    assert [i["id"] for i in ml.items(conn, p)] == [V1, V2, V3]                  # in the order added
+    assert ml.reorder(conn, p, [V3, V1, V2]) == [V3, V1, V2]
+    assert [i["id"] for i in ml.items(conn, p)] == [V3, V1, V2]
+    ml.add(conn, p, "ddddddddddd")
+    assert [i["id"] for i in ml.items(conn, p)][-1] == "ddddddddddd"            # new additions go last
+
+
+def test_reorder_tolerates_stale_unknown_and_repeated_ids(conn):
+    p = ml.create(conn, "Order")
+    for v in (V1, V2, V3):
+        ml.add(conn, p, v)
+    assert ml.reorder(conn, p, [V2, "zzzzzzzzzzz", V2]) == [V2, V1, V3]          # unknown dropped, repeats ignored, rest kept
+    assert ml.reorder(conn, p, []) == [V2, V1, V3]
+
+
+def test_one_video_can_be_on_several_playlists(conn):
+    a, b = ml.create(conn, "A"), ml.create(conn, "B")
+    ml.add(conn, a, V1); ml.add(conn, b, V1); ml.add(conn, ml.resolve(conn, "liked"), V1)
+    assert ml.membership(conn, V1) == {"liked": True, "watch_later": False, "playlists": [a["id"], b["id"]]}
+    ml.remove(conn, a, V1)
+    assert ml.membership(conn, V1)["playlists"] == [b["id"]]
