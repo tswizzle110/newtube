@@ -46,8 +46,8 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const ct = (await state(p)).t;
   check('chapter click seeks to 8s', ct >= 8 && ct < 10.5, ct.toFixed(1));
   check('current chapter highlighted', await p.locator('.chapters li.current').innerText().then(x => x.includes('Middle part')));
-  await p.keyboard.press(']'); await p.waitForTimeout(600);
-  check('] jumps to next chapter (16s)', (await state(p)).t >= 16);
+  await p.keyboard.press('}'); await p.waitForTimeout(600);
+  check('} (Shift+]) jumps to next chapter (16s)', (await state(p)).t >= 16);
 
   // ---- quality
   await p.hover('.player'); await p.click('button[title=Quality]');
@@ -97,6 +97,84 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 }).catch(() => {});
   s = await state(p);
   check('muxed fallback plays when DASH is unavailable', s.t > 1 && s.w === 640, JSON.stringify(s));
+
+  // ---- SponsorBlock
+  const put = (body) => p.evaluate(async (b) => (await fetch('/api/settings/sponsorblock', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })).status, body);
+  const CH = 'UC' + 'a'.repeat(22);
+  await put({ categories: {}, channels: {}, min_length: 1, show_toast: true, contribute: false });   // back to defaults
+  await p.setViewportSize({ width: 1400, height: 900 });
+  await p.goto(BASE + '/watch?v=e2eSPONSOR1');
+  await p.waitForFunction(() => document.querySelector('video')?.currentTime > 0.3, null, { timeout: 20000 });
+  await p.evaluate(() => { window.__ts = []; setInterval(() => window.__ts.push(document.querySelector('video').currentTime), 50); });
+  check('seek bar shows the 4 segments, sponsor in the usual green', (await p.locator('.sbmark').count()) === 4 &&
+    (await p.locator('.sbmark').first().evaluate(e => getComputedStyle(e).backgroundColor)) === 'rgb(0, 212, 0)');
+  check('whole-video label is shown (not skipped)', (await p.locator('.fulllabel').innerText()).includes('Unpaid / self promotion'));
+  check('highlight offers a jump button before it', (await p.locator('.sbskip:has-text("Jump to highlight")').count()) === 1);
+  await p.waitForSelector('.sbtoast', { timeout: 10000 });
+  const ts = await V(p, () => window.__ts);
+  check('sponsor segment is skipped automatically', !ts.some(x => x > 4.4 && x < 5.8) && ts.some(x => x >= 5.9), `max seen ${Math.max(...ts).toFixed(1)}`);
+  check('toast names the category', (await p.locator('.sbtoast').innerText()).includes('Skipped Sponsor'));
+  await p.click('.sbtoast button');                                   // Undo
+  await p.waitForTimeout(300);
+  const back = (await state(p)).t;
+  check('Undo returns to the start of the segment', back >= 3.7 && back < 4.9, back.toFixed(1));
+  await p.waitForTimeout(2600);
+  const after = (await state(p)).t;
+  check('after Undo it plays through and does not skip again', after > 6.2 && after < 7.8, after.toFixed(1));
+
+  await p.keyboard.press('4');                                         // ~9.6 s: just before the intro [10,12]
+  await p.waitForSelector('.sbskip:has-text("Skip Intermission")', { timeout: 6000 });
+  await p.click('.sbskip:has-text("Skip Intermission")');
+  await p.waitForTimeout(300);
+  check('"button" categories wait for a click, then skip', (await state(p)).t >= 11.9);
+
+  await p.keyboard.press('6');                                         // ~14.4 s: inside the mark-only segment
+  await p.waitForTimeout(1800);
+  check('"mark" categories never skip or show a skip button', (await state(p)).t > 15.5 && (await p.locator('.sbskip:has-text("Skip")').count()) === 0);
+  await p.click('.sbskip:has-text("Jump to highlight")').catch(() => {});
+
+  await p.waitForTimeout(5500);                                        // let the tracker flush
+  const sbHits = (await (await ctx.request.get(BASE + '/__hits')).json()).filter(h => h[0].startsWith('/api/skipSegments'));
+  check('SponsorBlock was asked with a 4-char hash prefix only, never the video id',
+    sbHits.length >= 1 && sbHits.every(h => /^\/api\/skipSegments\/[0-9a-f]{4}$/.test(h[0])), JSON.stringify(sbHits.slice(0, 2)));
+  const sbEvents = (await (await ctx.request.get(BASE + '/__events')).json()).filter(e => e.type.startsWith('sb_'));
+  check('skips and undos are logged locally for the recommender',
+    sbEvents.some(e => e.type === 'sb_skip' && JSON.parse(e.payload).uuid === 'sp1') &&
+    sbEvents.some(e => e.type === 'sb_undo') && sbEvents.some(e => e.type === 'sb_manual_skip' && JSON.parse(e.payload).uuid === 'in1'),
+    sbEvents.map(e => e.type).join(','));
+
+  // Earlier visits leave a resume position (correctly), so rewind to the start after each reload.
+  const fresh = async () => {
+    await p.goto(BASE + '/watch?v=e2eSPONSOR1');
+    await p.waitForFunction(() => document.querySelector('video')?.currentTime > 0.2, null, { timeout: 20000 });
+    await p.keyboard.press('Home');
+    await p.evaluate(() => { window.__ts = []; setInterval(() => window.__ts.push(document.querySelector('video').currentTime), 50); });
+  };
+  // settings: ignore a category -> no mark, no skip
+  check('settings accept an "ignore"', (await put({ categories: { sponsor: 'ignore' } })) === 200);
+  await fresh();
+  await p.waitForFunction(() => document.querySelector('video').currentTime > 6.2, null, { timeout: 15000 });
+  check('ignored category: no mark and no skip', (await p.locator('.sbmark').count()) === 3 &&
+    (await V(p, () => window.__ts)).some(x => x > 4.4 && x < 5.8));
+  // per-channel override beats the global setting
+  check('channel override accepted', (await put({ categories: { sponsor: 'ignore' }, channels: { [CH]: { sponsor: 'auto' } } })) === 200);
+  await fresh();
+  const reenabled = await p.waitForSelector('.sbtoast', { timeout: 12000 }).then(() => true).catch(() => false);
+  check('a per-channel override re-enables skipping for that channel', reenabled && (await p.locator('.sbmark').count()) === 4);
+  await p.hover('.player');
+  await p.click('button[title^="SponsorBlock for this video"]');
+  check('the SB switch turns SponsorBlock off for this video', (await p.locator('.sbmark').count()) === 0);
+
+  // Settings page
+  await put({ categories: {}, channels: { [CH]: { intro: 'ignore' } } });
+  await p.goto(BASE + '/settings'); await p.waitForSelector('.cats');
+  check('settings page lists every category and the contribute opt-in is off by default',
+    (await p.locator('.cats tr').count()) === 10 && !(await p.locator('text=Allow submitting segments and voting').locator('input').isChecked()));
+  check('settings page shows the privacy warning', (await p.locator('.warn').innerText()).includes("which video you mean"));
+  check('channel overrides are listed and removable', (await p.locator('.over li').count()) === 1);
+  await p.click('.over li button'); await p.waitForTimeout(500);
+  check('removing an override saves', (await V(p, async () => Object.keys((await (await fetch('/api/settings/sponsorblock')).json()).channels).length)) === 0);
+  await put({ categories: {}, channels: {}, min_length: 1, show_toast: true, contribute: false });
 
   // ---- comments: lazy, sortable, replies capped at the first 10, timestamps seek
   const commentReqs = [];

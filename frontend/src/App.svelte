@@ -9,6 +9,7 @@
   import Search from './routes/Search.svelte'
   import Channel from './routes/Channel.svelte'
   import Playlist from './routes/Playlist.svelte'
+  import Settings from './routes/Settings.svelte'
 
   onMount(checkAuth)
 
@@ -52,6 +53,7 @@
     <nav>
       <a href="/" class:active={is('/')}>Subscriptions</a>
       <a href="/channels" class:active={is('/channels')}>Channels</a>
+      <a href="/settings" class:active={is('/settings')}>Settings</a>
     </nav>
     <form class="search" onsubmit={doSearch} role="search">
       <input class="input" bind:this={searchEl} bind:value={q} placeholder="Search  ( / )" aria-label="Search"
@@ -76,6 +78,8 @@
       <Channel />
     {:else if is('/playlist')}
       <Playlist />
+    {:else if is('/settings')}
+      <Settings />
     {:else}
       <div class="page"><h1>Not found</h1><a href="/" class="muted">Back to subscriptions</a></div>
     {/if}

@@ -5,11 +5,14 @@
   import { duration as fmt, ago, views } from '../lib/format.js'
   import Player from '../components/Player.svelte'
   import Comments from '../components/Comments.svelte'
+  import SponsorBlockPanel from '../components/SponsorBlockPanel.svelte'
 
   const id = router.query.get('v')
   const source = router.query.get('src') ?? 'direct'
   const list = router.query.get('list')   // present when playing from a playlist
   let pl = $state(null)
+  let sbData = $state(null)       // SponsorBlock segments for this video
+  let sbSettings = $state(null)   // your SponsorBlock settings
 
   let video = $state(null)
   let error = $state('')
@@ -22,6 +25,9 @@
     // Start the slow parts in parallel with the metadata request instead of after it:
     // the player library chunk, and the manifest (the server then extracts the video and probes the
     // stream layouts once; the player's own manifest request a moment later is a cheap cache hit).
+    // SponsorBlock info and settings load in parallel with everything else; failures are harmless.
+    api.get(`/api/sponsorblock/${id}`).then((d) => (sbData = d)).catch(() => {})
+    api.get('/api/settings/sponsorblock').then((s) => (sbSettings = s)).catch(() => {})
     import('shaka-player/dist/shaka-player.dash.js').catch(() => {})
     fetch(`/api/dash/${id}.mpd`, { priority: 'low' }).catch(() => {})
     if (list) api.get(`/api/playlist/${list}`).then((p) => (pl = p)).catch(() => {})
@@ -48,12 +54,16 @@
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}
-    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list ? advance : null} />
+    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list ? advance : null}
+      sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null} />
     <h1>{video.title}</h1>
     <div class="byline">
       <a class="chan" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
       <span class="muted">{[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}</span>
     </div>
+
+    <SponsorBlockPanel data={sbData} settings={sbSettings} channelId={video.channel_id}
+      channelTitle={video.channel_title} onsettings={(s) => (sbSettings = s)} />
 
     {#if pl}
       <section class="plist">

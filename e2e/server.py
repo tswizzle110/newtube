@@ -1,5 +1,5 @@
 """Real newtube app; only YouTube is faked (extractor + a googlevideo that serves local files)."""
-import re, sys, tempfile
+import hashlib, json, re, sys, tempfile
 from pathlib import Path
 import httpx, uvicorn
 
@@ -25,9 +25,31 @@ class Body(httpx.AsyncByteStream):
     async def __aiter__(self): yield self.b
 
 
+SB_VIDEO = "e2eSPONSOR1"
+SB_HASH = hashlib.sha256(SB_VIDEO.encode()).hexdigest()
+
+
+def _seg(cat, a, b, uuid, action="skip"):
+    return {"category": cat, "actionType": action, "segment": [a, b], "UUID": uuid, "videoDuration": 24,
+            "locked": 0, "votes": 5, "description": ""}
+
+
+def sponsorblock(req):
+    if req.method == "GET" and req.url.path == f"/api/skipSegments/{SB_HASH[:4]}":
+        return httpx.Response(200, json=[
+            # another video that shares the 4-char prefix: must be ignored
+            {"videoID": "zzzzzzzzzzz", "hash": "x" * 64, "segments": [_seg("sponsor", 1, 3, "other")]},
+            {"videoID": SB_VIDEO, "hash": SB_HASH, "segments": [
+                _seg("sponsor", 4, 6, "sp1"), _seg("intro", 10, 12, "in1"), _seg("music_offtopic", 14, 15, "mo1"),
+                _seg("poi_highlight", 20, 20, "po1", "poi"), _seg("selfpromo", 0, 0, "fl1", "full")]}])
+    return httpx.Response(404)
+
+
 def handler(req: httpx.Request) -> httpx.Response:
     u = str(req.url)
     hits.append((req.url.path, req.headers.get("range")))
+    if "sponsor.ajay.app" in u:
+        return sponsorblock(req)
     if "googlevideo.com" in u:
         data = (MEDIA / FILES[req.url.path.strip("/")]).read_bytes()
         m = re.match(r"bytes=(\d+)-(\d*)", req.headers.get("range", "bytes=0-"))

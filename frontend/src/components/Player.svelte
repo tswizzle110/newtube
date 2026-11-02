@@ -2,9 +2,11 @@
   import { onMount } from 'svelte'
   import { duration as fmt } from '../lib/format.js'
   import { WatchTracker, trackEvent } from '../lib/tracker.js'
+  import { COLORS, resolveActions, usable } from '../lib/sponsorblock.js'
 
   // video: metadata from /api/video/<id>.  startAt: resume position (s).  api: bindable handle.
-  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null } = $props()
+  // sb: { data: {segments, full_labels}, settings, channelId } once SponsorBlock info has loaded.
+  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null, sb = null } = $props()
 
   let box, el
   let paused = $state(true)
@@ -29,6 +31,17 @@
   let toast = $state('')
   let help = $state(false)
 
+  // ---- SponsorBlock state
+  let sbOn = $state(true)        // quick per-video off switch
+  let sbButton = $state(null)    // segment currently offered as "Skip ..." button
+  let sbToast = $state(null)     // { seg } after an automatic skip
+  const handled = new Set()      // segments already skipped (re-armed if you rewind past them)
+  const ignored = new Set()      // segments you undid: never auto-skipped again on this page
+  let lastSkip = null
+  let poiDone = false
+  let sbTimer = null
+  let mutedBySb = false, prevMuted = false
+
   const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
   const audioTracks = $derived(video.audio_tracks ?? [])
   const chapters = $derived(video.chapters ?? [])
@@ -38,12 +51,20 @@
       ? chapters.map((c, i) => ({ title: c.title, start: c.start, end: chapters[i + 1]?.start ?? total }))
       : [{ title: '', start: 0, end: total }],
   )
+  const sbActions = $derived(sb?.settings ? resolveActions(sb.settings, sb.channelId) : {})
+  const sbSegments = $derived(
+    sb?.data && sb.settings && sbOn ? usable(sb.data.segments, sb.settings, sbActions, total) : [],
+  )
+  const sbLabels = $derived(sb?.settings?.category_labels ?? {})
+  const sbPoi = $derived(sbSegments.find((s) => s.action === 'poi') ?? null)
+  const sbPoiButton = $derived(sbPoi && sbActions[sbPoi.category] === 'button' && t < sbPoi.start - 1 ? sbPoi : null)
   const currentChapter = $derived(chapters.findLast?.((c) => c.start <= t) ?? null)
 
   let shakaPlayer = null
   let tracker = null
   let hideTimer = null
   let toastTimer = null
+  let sbToastTimer = null
 
   // Videos can carry machine-dubbed audio in ~20 languages. Default is always the original.
   function initialAudio() {
@@ -86,6 +107,7 @@
   onMount(() => {
     let gone = false
     tracker = new WatchTracker(el, { videoId: video.id, source })
+    sbTimer = setInterval(sbTick, 100)
     ;(async () => {
       try {
         // Lazy chunk: only the watch page pays for the player library (served from this server).
@@ -116,7 +138,7 @@
       gone = true
       tracker?.stop()
       shakaPlayer?.destroy()
-      clearTimeout(hideTimer); clearTimeout(toastTimer)
+      clearTimeout(hideTimer); clearTimeout(toastTimer); clearTimeout(sbToastTimer); clearInterval(sbTimer)
     }
   })
 
@@ -211,6 +233,70 @@
     setCaptions(i >= langs.length ? null : langs[i])
   }
 
+  // ---- SponsorBlock: skipping ---------------------------------------------------------------
+  function sbEvent(type, seg, extra = {}) {
+    trackEvent(type, { video_id: video.id, payload: {
+      uuid: seg.uuid, category: seg.category, start: seg.start, end: seg.end, ...extra } })
+  }
+
+  function skipSegment(seg, mode) {
+    handled.add(seg.uuid)
+    lastSkip = { seg }
+    el.currentTime = total ? Math.min(seg.end, total - 0.01) : seg.end
+    sbButton = null
+    sbEvent(mode === 'auto' ? 'sb_skip' : 'sb_manual_skip', seg, { mode })
+    if (mode === 'auto' && sb.settings.show_toast) {
+      sbToast = { seg }
+      clearTimeout(sbToastTimer)
+      sbToastTimer = setTimeout(() => (sbToast = null), 6000)
+    }
+  }
+
+  function undoSkip() {
+    if (!lastSkip) return
+    const { seg } = lastSkip
+    lastSkip = null; sbToast = null
+    ignored.add(seg.uuid); handled.delete(seg.uuid)
+    el.currentTime = seg.start
+    sbEvent('sb_undo', seg)
+  }
+
+  function sbTick() {
+    if (!el || el.seeking || !sbSegments.length) return
+    const now = el.currentTime
+    for (const u of [...handled]) {   // rewound past a skipped segment: arm it again
+      const s = sbSegments.find((x) => x.uuid === u)
+      if (!s || now < s.start - 0.5) handled.delete(u)
+    }
+    if (el.paused) return
+    const poi = sbPoi
+    if (poi && !poiDone && sbActions[poi.category] === 'auto' && startAt < 5 && now < 3) {
+      poiDone = true            // "auto" for highlights: jump to it once, at the start
+      el.currentTime = poi.start
+      return
+    }
+    const inside = sbSegments.find((s) => s.action !== 'poi' && now >= s.start && now < s.end - 0.05
+      && !ignored.has(s.uuid) && !handled.has(s.uuid))
+    if (!inside) {
+      sbButton = null
+      if (mutedBySb) { mutedBySb = false; el.muted = prevMuted }
+      return
+    }
+    const mode = sbActions[inside.category]
+    if (inside.action === 'mute') {
+      if (mode === 'auto' && !mutedBySb) { prevMuted = el.muted; mutedBySb = true; el.muted = true }
+    } else if (mode === 'auto') {
+      skipSegment(inside, 'auto')
+    } else if (mode === 'button') {
+      sbButton = inside
+    }
+  }
+
+  function skipNow() {              // Enter: take whatever skip button is on screen
+    if (sbButton) skipSegment(sbButton, 'button')
+    else if (sbPoiButton) { el.currentTime = sbPoiButton.start; sbEvent('sb_manual_skip', sbPoiButton, { mode: 'button' }) }
+  }
+
   api = { seekTo, toggle, get time() { return el?.currentTime ?? 0 }, el: () => el }
 
   function onKey(e) {
@@ -221,7 +307,9 @@
       ArrowLeft: () => seekBy(-5), ArrowRight: () => seekBy(5),
       ArrowUp: () => setVolume(volume + 0.05), ArrowDown: () => setVolume(volume - 0.05),
       m: toggleMute, f: toggleFullscreen, c: cycleCaptions, '<': () => stepRate(-1), '>': () => stepRate(1),
-      '[': () => jumpChapter(-1), ']': () => jumpChapter(1),
+      '{': () => jumpChapter(-1), '}': () => jumpChapter(1),   // Shift+[ / Shift+]: chapters
+      u: undoSkip,
+      Enter: () => (sbButton || sbPoiButton) && !e.target.closest('button') && skipNow(),
       Home: () => seekTo(0), End: () => seekTo(total - 1), '?': () => (help = !help),
       Escape: () => { help = false; menu = null },
     }[k]
@@ -282,13 +370,27 @@
   {/if}
   {#if toast}<div class="toast">{toast}</div>{/if}
 
+  {#if sbButton}
+    <button class="sbskip" onclick={() => skipSegment(sbButton, 'button')}>
+      Skip {sbLabels[sbButton.category] ?? sbButton.category} ⏭ <kbd>Enter</kbd>
+    </button>
+  {:else if sbPoiButton}
+    <button class="sbskip" onclick={skipNow}>Jump to highlight ({fmt(sbPoiButton.start)}) <kbd>Enter</kbd></button>
+  {/if}
+  {#if sbToast}
+    <div class="sbtoast" role="status">
+      Skipped {sbLabels[sbToast.seg.category] ?? sbToast.seg.category}
+      <button onclick={undoSkip}>Undo <kbd>u</kbd></button>
+    </div>
+  {/if}
+
   {#if help}
     <div class="help">
       <b>Keyboard</b>
       <dl>
         <dt>Space / k</dt><dd>play / pause</dd><dt>← →</dt><dd>seek 5 s</dd><dt>j / l</dt><dd>seek 10 s</dd>
         <dt>↑ ↓</dt><dd>volume</dd><dt>m</dt><dd>mute</dd><dt>f</dt><dd>fullscreen</dd>
-        <dt>c</dt><dd>captions</dd><dt>&lt; &gt;</dt><dd>speed</dd><dt>[ ]</dt><dd>previous / next chapter</dd>
+        <dt>c</dt><dd>captions</dd><dt>&lt; &gt;</dt><dd>speed</dd><dt>{'{'} {'}'}</dt><dd>previous / next chapter</dd><dt>Enter</dt><dd>skip (when a skip button shows)</dd><dt>u</dt><dd>undo last auto-skip</dd>
         <dt>0–9</dt><dd>jump to 0–90%</dd><dt>?</dt><dd>this help</dd>
       </dl>
     </div>
@@ -307,6 +409,15 @@
           </div>
         </div>
       {/each}
+      <div class="marks" aria-hidden="true">
+        {#each sbSegments as s (s.uuid)}
+          {#if total}
+            <div class="sbmark" class:poi={s.action === 'poi'} style:left={(s.start / total) * 100 + '%'}
+              style:width={s.action === 'poi' ? '3px' : ((s.end - s.start) / total) * 100 + '%'}
+              style:background={COLORS[s.category]} title={sbLabels[s.category]}></div>
+          {/if}
+        {/each}
+      </div>
       {#if hover}
         <div class="tip" style:left={hover.frac * 100 + '%'}>
           {#if chapterAt(hover.time)}<div>{chapterAt(hover.time)}</div>{/if}{fmt(hover.time)}
@@ -334,6 +445,9 @@
           {/if}
         {/if}
       </div>
+      {#if sb?.data?.segments?.length}
+        <button class:on={sbOn} title="SponsorBlock for this video: {sbOn ? 'on' : 'off'}" onclick={() => { sbOn = !sbOn; sbButton = null }}>SB</button>
+      {/if}
       {#if audioTracks.length > 1 && mode === 'dash'}
         <div class="menuwrap">
           <button title="Audio language" onclick={() => (menu = menu === 'audio' ? null : 'audio')}>
@@ -403,6 +517,15 @@
   .buf, .played { position: absolute; left: 0; top: 0; bottom: 0; }
   .buf { background: rgba(255, 255, 255, 0.35); }
   .played { background: var(--accent); }
+  .marks { position: absolute; left: 0; right: 0; top: 50%; height: 4px; transform: translateY(-50%); pointer-events: none; }
+  .bar:hover .marks { height: 7px; }
+  .sbmark { position: absolute; top: 0; bottom: 0; opacity: 0.9; }
+  .sbmark.poi { min-width: 3px; }
+  .sbskip, .sbtoast { position: absolute; right: 14px; bottom: 74px; background: rgba(0, 0, 0, 0.85); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px; padding: 8px 14px; z-index: 2; }
+  .sbskip:hover { background: var(--accent); color: var(--accent-fg); }
+  .sbtoast button { margin-left: 10px; background: none; border: 0; color: var(--accent); font-weight: 700; }
+  kbd { font: inherit; font-size: 11px; opacity: 0.7; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .tip { position: absolute; bottom: 22px; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); padding: 3px 8px;
     border-radius: 6px; font-size: 12px; text-align: center; pointer-events: none; white-space: nowrap; }
   .row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
