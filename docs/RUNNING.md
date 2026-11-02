@@ -280,6 +280,48 @@ speed limits playback quality. To undo: remove the `outbound_proxy` line and res
   Its random anonymous ID is stored in the local database and is never sent to your browser. The
   optional "viewed" pings the official extension sends on every skip are not implemented.
 
+## Embeddings ("similar to what you watch")
+
+Each video gets a vector describing what it is about (from its title, channel, category, tags and the start of
+the description). Your taste is the average of the videos you watched, liked or saved, and a candidate scores
+higher the closer it is to that. It shows in **Why this?** as "Similar to videos you have watched". All of it
+happens on this machine; nothing is sent anywhere.
+
+**It already works with nothing installed**, using a simple built-in embedder (it compares shared words). Videos
+are embedded in the background while the server is idle; check progress with:
+
+```bash
+uv run newtube ml status
+```
+
+**For much better results, use a real language model on the T600.** The server never downloads anything, so you
+fetch the model files yourself, once. My suggestion is the multilingual MiniLM (about 470 MB, 384 dimensions, 50+
+languages); I could not check the name or size from my sandbox, so confirm them on huggingface.co first. On any
+computer with internet:
+
+```bash
+pip install huggingface_hub
+huggingface-cli download sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+    --local-dir paraphrase-multilingual-MiniLM-L12-v2
+scp -r paraphrase-multilingual-MiniLM-L12-v2 you@server:~/newtube/data/models/
+```
+
+Then on the server:
+
+```bash
+cd ~/newtube && git pull
+uv sync --extra ml                       # PyTorch + sentence-transformers (several GB; one time)
+echo 'embedding_model = "paraphrase-multilingual-MiniLM-L12-v2"' >> newtube.toml
+uv run newtube ml check                  # should say "on cuda"; "on cpu" means the GPU was not found
+uv run newtube ml embed                  # embed everything now (otherwise it happens in the background)
+systemctl --user restart newtube
+```
+
+The model is loaded from that folder only, with Hugging Face's offline mode forced on, so it cannot download
+anything or phone home; `newtube privacy-check` will show if it ever tried. Changing `embedding_model` simply
+re-embeds everything with the new model (vectors from different models are never compared). Remove the line to go
+back to the built-in embedder.
+
 ## Checking it yourself: `privacy-check`
 
 Our own HTTP client refuses hosts that are not on the allowlist, but yt-dlp does its own networking. So the server

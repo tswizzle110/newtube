@@ -11,5 +11,7 @@ request_jitter = 0.6
 background_daily_cap = 2000   # background YouTube requests per day (RSS polling now; backfill later)
 backfill_daily_cap = 300      # imported (Takeout) videos whose details are fetched per 24 h; 0 = off
 egress_mode = "record"        # "record" (note every outside host), "enforce" (block off-allowlist), "off"
+embedding_model = ""          # "" = built-in simple embedder; or a folder name under data/models/ (needs `uv sync --extra ml`)
+embedding_device = "auto"     # "auto" (GPU if there is one), "cuda" or "cpu"
 backup_dir = ""               # where `newtube backup` writes ("" = data/backups)
 backup_keep = 14              # how many copies to keep

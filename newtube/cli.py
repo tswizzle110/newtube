@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     pc = sub.add_parser("privacy-check", help="show every outside host this server contacts (and prove nothing else is)")
     pc.add_argument("--log", action="store_true",
                     help="show what the running server has contacted so far, instead of testing now")
+    ml = sub.add_parser("ml", help="text embeddings for 'similar to what you watch'")
+    ml.add_argument("ml_command", choices=["status", "check", "embed"], nargs="?", default="status",
+                    help="status: counts; check: load the model and time it (shows GPU/CPU); embed: embed everything pending now")
     sub.add_parser("migrate", help="apply database migrations")
     return p
 
@@ -57,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         return _passwd()
     if args.command == "takeout":
         return _takeout(args)
+    if args.command == "ml":
+        return _ml(args)
     if args.command == "privacy-check":
         return _privacy_check(args)
     if args.command == "backup":
@@ -68,6 +73,44 @@ def main(argv: list[str] | None = None) -> int:
 
         return migrate_cli()
     return 2
+
+
+def _ml(args: argparse.Namespace) -> int:
+    import time
+
+    from .config import load_settings
+    from .db.connection import connect, migrate
+    from .ml.embedder import ModelNotInstalled, load_embedder
+    from .ml.store import count_pending, embed_pending
+
+    s = load_settings()
+    conn = connect(s.db_path)
+    migrate(conn)
+    try:
+        emb = load_embedder(s)
+    except ModelNotInstalled as e:
+        print(e)
+        return 2
+    device = getattr(emb, "device", "cpu (built-in word-hashing embedder: no model, no GPU)")
+    if args.ml_command == "check":
+        t0 = time.time()
+        vecs = emb.embed(["a quick test of the embedding model"] * 64)
+        dt = time.time() - t0
+        print(f"model {emb.name} on {device}: {len(vecs[0])} dimensions, 64 texts in {dt:.2f}s")
+        return 0
+    if args.ml_command == "embed":
+        done, t0 = 0, time.time()
+        while (n := embed_pending(conn, emb, 256)):
+            done += n
+            print(f"\r{done:,} embedded", end="", flush=True)
+        print(f"\nEmbedded {done:,} video(s) in {time.time() - t0:.1f}s with {emb.name}.")
+        return 0
+    have = conn.execute("SELECT count(*) FROM video_embeddings WHERE model=?", (emb.name,)).fetchone()[0]
+    other = conn.execute("SELECT count(*) FROM video_embeddings WHERE model<>?", (emb.name,)).fetchone()[0]
+    print(f"Embedder: {emb.name} on {device}")
+    print(f"Videos embedded: {have:,}   waiting: {count_pending(conn, emb.name):,}"
+          + (f"   (+{other:,} from another model, re-done when reached)" if other else ""))
+    return 0
 
 
 def _privacy_check(args: argparse.Namespace) -> int:

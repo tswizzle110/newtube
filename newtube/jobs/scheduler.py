@@ -21,6 +21,8 @@ from ..extract.base import ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
 from ..net.ratelimit import DailyCapReached, Lane
+from ..ml.embedder import ModelNotInstalled, load_embedder
+from ..ml.store import embed_pending_async
 from ..net import audit
 from .backfill import Backfiller
 
@@ -59,6 +61,8 @@ class Scheduler:
         self._rss_failures = 0
         self._rss_skip_until = 0.0
         self._last_purge = 0.0
+        self._embedder = None
+        self._embed_off = False
         self.backfiller = (Backfiller(conn, extractor, settings.backfill_daily_cap)
                            if extractor is not None else None)
 
@@ -107,6 +111,24 @@ class Scheduler:
                               (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
         return "polled"
 
+    async def embed_step(self) -> str:
+        """Embed a batch of videos for the similarity feature. Local work only; 'embedded' or 'idle'."""
+        if self._embed_off:
+            return "idle"
+        try:
+            if self._embedder is None:
+                self._embedder = await asyncio.to_thread(load_embedder, self.settings)
+            n = await embed_pending_async(self.conn, self._embedder)
+        except ModelNotInstalled as e:
+            self._embed_off = True
+            log.warning("embeddings are off: %s", e)
+            return "idle"
+        except Exception as e:  # noqa: BLE001 - never let this take the poller down
+            self._embed_off = True
+            log.exception("embeddings stopped: %s", e)
+            return "idle"
+        return "embedded" if n else "idle"
+
     def flush_audit(self) -> None:
         a = audit.active()
         if a is not None:
@@ -126,7 +148,9 @@ class Scheduler:
             result = await self.tick()
             if result == "idle" and self.backfiller is not None:
                 result = await self.backfiller.step()
+            if result in ("idle", "capped", "paused") and await self.embed_step() == "embedded":
+                result = "embedded"            # (the backfill having nothing to do leaves time for this)
             # Busy: a few seconds (jittered) between channels. Backfill: about a minute between videos,
             # so the daily budget is spread over hours. Idle/capped: check back in a bit.
-            base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0}.get(result, 300.0)
+            base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0, "embedded": 3.0}.get(result, 300.0)
             await self._sleep(base * (0.5 + self._rand()))

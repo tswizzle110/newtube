@@ -11,6 +11,10 @@ dependencies = [
     "yt-dlp-ejs",      # YouTube JS-challenge solver scripts (so nothing is fetched at runtime)
 ]
 
+[project.optional-dependencies]
+# Real text-embedding model on the GPU. Not installed by default: `uv sync --extra ml`.
+ml = ["sentence-transformers>=3"]
+
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
 

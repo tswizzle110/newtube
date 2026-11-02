@@ -10,6 +10,7 @@ offline evaluation (phase 4). So it is deliberately simple and every number is e
     subscribed         the channel is one you subscribe to
     saved              the video is in your Watch later
     resume             you started it in newtube and did not finish
+    taste_similarity   how close its subject is to what you watch (needs embeddings; see ml/)
     shown_unclicked    NEGATIVE: this was shown to you repeatedly and you never clicked it
 
 Candidates are videos already in the database: recent uploads of subscribed channels, and your Watch-later
@@ -45,6 +46,9 @@ class Weights:
     subscribed: float = 1.0
     saved: float = 1.2
     resume: float = 0.8
+    taste_similarity: float = 2.0          # needs embeddings; see newtube/ml
+    taste_floor: float = 0.15              # cosine similarity at or below this counts as 'not similar'
+    taste_span: float = 0.6                # ...and floor + span counts as 'very similar'
     shown_unclicked: float = -1.5
     repeat_factor: float = 0.7               # per higher-ranked video from the same channel
     freshness_half_life_days: float = 7.0
@@ -153,15 +157,18 @@ def _age_text(seconds: float) -> str:
 # ---------------------------------------------------------------------------- ranking
 
 def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = None,
-              weights: Weights = Weights()) -> list[Recommendation]:
+              weights: Weights = Weights(), taste=None) -> list[Recommendation]:
+    """``taste``: optional ``ids -> {video_id: cosine similarity to what you watch}`` (see ml/taste.py)."""
     now = now if now is not None else int(time.time())
     w = weights
     interest = channel_interest(conn, now, w.affinity_half_life_days)
     unclicked = _fatigue(conn, now, w.fatigue_days)
     hidden_videos, hidden_channels = _blocked(conn)
 
+    rows = conn.execute(_CANDIDATES, (now - w.window_days * DAY,)).fetchall()
+    similar = taste([r["id"] for r in rows]) if taste and rows else {}
     scored: list[Recommendation] = []
-    for r in conn.execute(_CANDIDATES, (now - w.window_days * DAY,)):
+    for r in rows:
         if r["id"] in hidden_videos or r["channel_id"] in hidden_channels or r["completed"]:
             continue
         resumable = bool(r["resume_position"]) and r["resume_position"] > 0
@@ -184,6 +191,9 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
         term(w.subscribed, 1.0 if r["subscribed"] else 0.0, "From a channel you subscribe to")
         term(w.saved, 1.0 if r["saved"] else 0.0, "In your Watch later")
         term(w.resume, 1.0 if resumable else 0.0, "You started this and did not finish")
+        if r["id"] in similar:
+            term(w.taste_similarity, min(1.0, max(0.0, (similar[r["id"]] - w.taste_floor) / w.taste_span)),
+                 "Similar to videos you have watched")
         n = unclicked.get(r["id"], 0)
         if n:
             reasons.append(Reason(f"Shown {n} time{'s' if n != 1 else ''} without a click",

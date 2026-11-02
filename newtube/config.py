@@ -46,6 +46,12 @@ class Settings:
     # including yt-dlp's own connections. "off". Run privacy-check first, then consider "enforce".
     egress_mode: str = "record"
 
+    # Text embeddings for "similar to what you watch". "" = the built-in word-hashing embedder (no model needed);
+    # otherwise the name of a folder under <data_dir>/models/ holding a sentence-transformers model (install
+    # the libraries with `uv sync --extra ml`). Never downloaded by the server. "auto" = GPU when there is one.
+    embedding_model: str = ""
+    embedding_device: str = "auto"
+
     # Database snapshots (`newtube backup`): where they go ("" = <data_dir>/backups) and how many to keep.
     backup_dir: str = ""
     backup_keep: int = 14
