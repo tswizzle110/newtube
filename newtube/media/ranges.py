@@ -4,23 +4,38 @@ from __future__ import annotations
 
 import re
 
-# googlevideo throttles open-ended requests; yt-dlp avoids that by fetching ~10 MiB chunks.
-# We do the same: the browser just sees ordinary 206 responses and asks for the next piece.
+# googlevideo throttles long single requests; yt-dlp avoids that by fetching ~10 MiB chunks. We do the
+# same upstream. The browser, however, must get exactly the bytes it asked for, so a big explicit
+# range is fetched as several chunks and stitched together (see api/media.py), never cut short.
 CHUNK = 10 * 1024 * 1024
 _RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
-def clamp_range(header: str | None, chunk: int = CHUNK) -> str:
-    """Return the Range header to send upstream. Missing/open-ended/oversized ranges are
-    clamped to ``chunk`` bytes. Unparseable or multi-range headers fall back to the first chunk."""
-    if not header:
-        return f"bytes=0-{chunk - 1}"
-    m = _RANGE.match(header.strip())
+def parse_range(header: str | None) -> tuple[int | None, int | None]:
+    """(start, end) of a single byte range; end is None when open-ended. A suffix range
+    ("bytes=-500") is (None, 500). Missing, multi-range or malformed headers mean "from the start"."""
+    m = _RANGE.match((header or "").strip())
     if not m or (m.group(1) == "" and m.group(2) == ""):
-        return f"bytes=0-{chunk - 1}"
+        return 0, None
     start, end = m.group(1), m.group(2)
-    if start == "":                       # suffix range "bytes=-500": pass through (tiny)
-        return f"bytes=-{min(int(end), chunk)}"
+    if start == "":
+        return None, int(end)
     s = int(start)
-    e = int(end) if end else s + chunk - 1
-    return f"bytes={s}-{min(e, s + chunk - 1)}"
+    if end and int(end) < s:
+        return 0, None
+    return s, int(end) if end else None
+
+
+def split_range(start: int, end: int, chunk: int = CHUNK) -> list[tuple[int, int]]:
+    """Cut [start, end] (inclusive) into upstream-sized pieces."""
+    return [(a, min(a + chunk - 1, end)) for a in range(start, end + 1, chunk)]
+
+
+def clamp_range(header: str | None, chunk: int = CHUNK) -> str:
+    """The Range to send upstream for the FIRST piece: open-ended/missing ranges are limited to one
+    chunk (the browser just asks for the next piece); bounded ranges start at their own start."""
+    start, end = parse_range(header)
+    if start is None:                                  # suffix range: tiny, pass through
+        return f"bytes=-{min(end or chunk, chunk)}"
+    last = start + chunk - 1 if end is None else min(end, start + chunk - 1)
+    return f"bytes={start}-{last}"

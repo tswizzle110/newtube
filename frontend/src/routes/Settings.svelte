@@ -5,13 +5,17 @@
 
   const ACTIONS = [['auto', 'Skip automatically'], ['button', 'Show skip button'], ['mark', 'Only mark on the bar'], ['ignore', 'Ignore']]
   let s = $state(null)
+  let pb = $state(null)   // playback preferences
   let status = $state('')
   let error = $state('')
   let timer
 
   onMount(async () => {
     document.title = 'Settings · newtube'
-    try { s = await api.get('/api/settings/sponsorblock') } catch (e) { error = e.message }
+    try {
+      s = await api.get('/api/settings/sponsorblock')
+      pb = await api.get('/api/settings/playback')
+    } catch (e) { error = e.message }
   })
 
   async function save() {
@@ -28,12 +32,47 @@
       error = e.message
     }
   }
+  const CODEC_LABELS = { auto: 'Automatic (best quality available)', avc1: 'H.264 (most compatible, up to 1080p)',
+    vp9: 'VP9 (up to 4K)', av1: 'AV1 (up to 4K, needs a recent browser/GPU)' }
+  async function savePlayback() {
+    error = ''
+    try {
+      const saved = await api.put('/api/settings/playback', { codec: pb.codec, max_height: Number(pb.max_height) })
+      pb = { ...pb, ...saved }
+      status = 'Saved'
+      clearTimeout(timer); timer = setTimeout(() => (status = ''), 1500)
+    } catch (e) {
+      error = e.message
+    }
+  }
   function removeChannel(id) { delete s.channels[id]; save() }
 </script>
 
 <div class="page narrow">
   <h1>Settings</h1>
   {#if error}<p class="error">{error}</p>{/if}
+  {#if pb}
+    <h2>Playback <span class="status muted">{status}</span></h2>
+    <p class="muted">
+      Above 1080p YouTube only offers VP9 and AV1, which take more computer power to decode than H.264.
+      If 1440p/4K stutters, limit the resolution or choose H.264. Takes effect the next time you open a video.
+    </p>
+    <div class="row">
+      <label>Video codec
+        <select bind:value={pb.codec} onchange={savePlayback}>
+          {#each pb.codecs as c}<option value={c}>{CODEC_LABELS[c] ?? c}</option>{/each}
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Highest resolution
+        <select bind:value={pb.max_height} onchange={savePlayback}>
+          {#each pb.max_heights as h}<option value={h}>{h === 0 ? 'No limit (up to 4K)' : h + 'p'}</option>{/each}
+        </select>
+      </label>
+    </div>
+  {/if}
+
   {#if s}
     <h2>SponsorBlock <span class="status muted">{status}</span></h2>
     <p class="muted">
@@ -92,7 +131,7 @@
 
 <style>
   .narrow { max-width: 760px; }
-  h2 { margin-top: 8px; } h3 { margin: 28px 0 8px; font-size: 15px; }
+  h2 { margin-top: 28px; } h3 { margin: 28px 0 8px; font-size: 15px; }
   .status { font-size: 13px; font-weight: 400; margin-left: 10px; }
   .cats { border-spacing: 0 6px; } .cats td { padding-right: 24px; }
   i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }

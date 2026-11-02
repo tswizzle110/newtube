@@ -217,6 +217,28 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     votes.every(v => v.body.UUID.startsWith('sp1') && v.body.UUID.length === 64 && v.body.userID === first.body.userID), JSON.stringify(votes.map(v => v.body.type)));
   await put({ categories: {}, channels: {}, min_length: 1, show_toast: true, contribute: false });
 
+  // ---- 1440p / 4K: VP9 in WebM, played by the real browser through our manifest + index ranges
+  await p.evaluate(async () => fetch('/api/settings/playback', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ codec: 'auto', max_height: 0 }) }));
+  await p.goto(BASE + '/watch?v=e2eVP9VID01');
+  await p.waitForFunction(() => { const v = document.querySelector('video'); return v && v.readyState >= 3 && v.currentTime > 1.2; }, null, { timeout: 25000 });
+  const mpd = await p.evaluate(async () => (await fetch('/api/dash/e2eVP9VID01.mpd')).text());
+  check('manifest offers VP9 (WebM) video with H.264 left out', mpd.includes('video/webm') && mpd.includes('vp09') && !mpd.includes('avc1'));
+  check('real VP9/WebM plays (decoded 640px)', (await state(p)).w === 640 && (await state(p)).t > 1.2, JSON.stringify(await state(p)));
+  await p.hover('.player'); await p.click('button[title=Quality]');
+  const qopts = await p.locator('.menu button').allInnerTexts();
+  check('quality menu names 4K and 2K, highest first', qopts[1] === '2160p (4K)' && qopts[2] === '1440p60 (2K)', JSON.stringify(qopts));
+  await p.click('.menu button:has-text("1440p60")'); await p.waitForTimeout(2500);
+  check('switching WebM representations works (decoded 320px)', (await state(p)).w === 320 && !(await state(p)).paused, 'w=' + (await state(p)).w);
+  const tt0 = (await state(p)).t; await p.waitForTimeout(1500);
+  check('...and keeps playing', (await state(p)).t > tt0 + 1, '');
+  // the Settings page controls what is offered
+  await p.evaluate(async () => fetch('/api/settings/playback', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ max_height: 1080 }) }));
+  const mpd2 = await p.evaluate(async () => (await fetch('/api/dash/e2eVP9VID01.mpd')).text());
+  check('a 1080p limit falls back to H.264', mpd2.includes('avc1') && !mpd2.includes('vp09'));
+  await p.goto(BASE + '/settings'); await p.waitForSelector('select');
+  check('Playback section on the settings page', (await p.locator('h2:has-text("Playback")').count()) === 1 && (await p.locator('select').first().inputValue()) === 'auto');
+  await p.evaluate(async () => fetch('/api/settings/playback', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ codec: 'auto', max_height: 0 }) }));
+
   // ---- comments: lazy, sortable, replies capped at the first 10, timestamps seek
   const commentReqs = [];
   p.on('request', r => { if (r.url().includes('/api/comments/')) commentReqs.push(new URL(r.url()).pathname + new URL(r.url()).search); });

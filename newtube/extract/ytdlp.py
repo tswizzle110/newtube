@@ -92,6 +92,7 @@ def parse_formats(raw: list[dict[str, Any]]) -> list[Format]:
             language=f.get("language"),
             note=f.get("format_note"),
             language_preference=f.get("language_preference"),
+            dynamic_range=f.get("dynamic_range"),
         ))
     return out
 

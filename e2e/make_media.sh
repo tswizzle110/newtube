@@ -11,3 +11,7 @@ ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=440:duration=24" -c:a aac 
 ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=640x360:rate=25:duration=24" -f lavfi -i "sine=frequency=330:duration=24" \
   -c:v libx264 -profile:v main -level 3.0 -pix_fmt yuv420p -c:a aac -movflags +faststart -shortest muxed.mp4
 printf 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nHello from the e2e captions\n\n00:00:10.000 --> 00:00:20.000\nSecond cue\n' > en.vtt
+# VP9 in WebM with the Cues up front, like YouTube's DASH files (stand-ins for the 1440p/2160p streams)
+vp9() { ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=$1:rate=25:duration=24" -c:v libvpx-vp9 -deadline realtime -cpu-used 8 \
+  -g 25 -b:v 300k -pix_fmt yuv420p -f webm -dash 1 -cues_to_front 1 "$2"; }
+vp9 640x360 vp9a.webm; vp9 320x180 vp9b.webm

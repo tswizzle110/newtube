@@ -22,7 +22,7 @@
   let menu = $state(null) // 'quality' | 'speed' | 'captions' | null
   let mode = $state('loading') // 'loading' | 'dash' | 'muxed' | 'error'
   let error = $state('')
-  let qualities = $state([]) // heights, high to low
+  let qualities = $state([]) // [{ h: height, fps }], high to low
   let chosenQuality = $state('auto')
   let activeHeight = $state(0)
   let capLang = $state(null)
@@ -75,8 +75,14 @@
     try { v = localStorage.getItem('audioLang') || 'original' } catch { /* ignore */ }
     return v !== 'original' && video.audio_tracks?.some((a) => a.lang === v) ? v : 'original'
   }
-  const manifestUrl = (lang) =>
-    `/api/dash/${video.id}.mpd` + (lang && lang !== 'original' ? `?lang=${encodeURIComponent(lang)}` : '')
+  const manifestUrl = (lang, codec = null) => {
+    const q = []
+    if (lang && lang !== 'original') q.push(`lang=${encodeURIComponent(lang)}`)
+    if (codec) q.push(`codec=${codec}`)
+    return `/api/dash/${video.id}.mpd` + (q.length ? '?' + q.join('&') : '')
+  }
+  // "1080p60", "1440p (2K)", "2160p (4K)"
+  const qname = (h, fps = 0) => `${h}p${fps >= 50 ? Math.round(fps) : ''}${h >= 2160 ? ' (4K)' : h >= 1440 ? ' (2K)' : ''}`
 
   async function setAudio(lang) {
     menu = null
@@ -128,7 +134,16 @@
         })
         shakaPlayer.addEventListener('variantchanged', syncQualities)
         shakaPlayer.addEventListener('adaptation', syncQualities)
-        await shakaPlayer.load(manifestUrl(audioLang), startAt > 5 ? startAt : null)
+        const from = startAt > 5 ? startAt : null
+        try {
+          await shakaPlayer.load(manifestUrl(audioLang), from)
+        } catch (e) {
+          // Not "no DASH for this video" (HTTP error): maybe this browser can't decode the chosen codec
+          // (VP9/AV1). Ask for the most compatible one before giving up on DASH.
+          if (e?.code === 1001) throw e
+          console.warn('DASH load failed, retrying with H.264:', e?.code ?? e)
+          await shakaPlayer.load(manifestUrl(audioLang, 'avc1'), from)
+        }
         if (gone) return
         mode = 'dash'
         syncQualities()
@@ -152,7 +167,7 @@
     if (!muxed.length) { mode = 'error'; error = 'No playable streams for this video.'; return }
     try { await shakaPlayer?.destroy() } catch { /* ignore */ }
     shakaPlayer = null
-    qualities = muxed.map((f) => f.height)
+    qualities = muxed.map((f) => ({ h: f.height, fps: f.fps ?? 0 }))
     activeHeight = muxed[0].height ?? 0
     el.src = `/api/stream/${video.id}/${muxed[0].format_id}`
     if (startAt > 5) el.currentTime = startAt
@@ -163,7 +178,9 @@
   function syncQualities() {
     if (!shakaPlayer) return
     const tracks = shakaPlayer.getVariantTracks()
-    qualities = [...new Set(tracks.map((x) => x.height).filter(Boolean))].sort((a, b) => b - a)
+    const fps = new Map()
+    for (const x of tracks) if (x.height) fps.set(x.height, Math.max(fps.get(x.height) ?? 0, x.frameRate ?? 0))
+    qualities = [...fps].map(([h, f]) => ({ h, fps: f })).sort((a, b) => b.h - a.h)
     activeHeight = tracks.find((x) => x.active)?.height ?? 0
   }
 
@@ -180,7 +197,7 @@
       if (tr) shakaPlayer.selectVariantTrack(tr, true)
     }
     trackEvent('quality_change', { video_id: video.id, payload: { quality: q } })
-    say(q === 'auto' ? 'Quality: auto' : `Quality: ${q}p`)
+    say(q === 'auto' ? 'Quality: auto' : `Quality: ${qname(q, qualities.find((x) => x.h === q)?.fps)}`)
   }
 
   // ---- actions (also used by the keyboard handler) --------------------------------------------
@@ -548,12 +565,12 @@
       </div>
       <div class="menuwrap">
         <button title="Quality" onclick={() => (menu = menu === 'quality' ? null : 'quality')}>
-          {chosenQuality === 'auto' ? `Auto${activeHeight ? ` ${activeHeight}p` : ''}` : `${chosenQuality}p`}
+          {chosenQuality === 'auto' ? `Auto${activeHeight ? ` ${activeHeight}p` : ''}` : qname(chosenQuality, qualities.find((x) => x.h === chosenQuality)?.fps)}
         </button>
         {#if menu === 'quality'}
           <ul class="menu">
             {#if mode === 'dash'}<li><button class:sel={chosenQuality === 'auto'} onclick={() => setQuality('auto')}>Auto</button></li>{/if}
-            {#each qualities as q}<li><button class:sel={chosenQuality === q || (mode === 'muxed' && activeHeight === q)} onclick={() => setQuality(q)}>{q}p</button></li>{/each}
+            {#each qualities as q (q.h)}<li><button class:sel={chosenQuality === q.h || (mode === 'muxed' && activeHeight === q.h)} onclick={() => setQuality(q.h)}>{qname(q.h, q.fps)}</button></li>{/each}
           </ul>
         {/if}
       </div>

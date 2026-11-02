@@ -16,7 +16,8 @@ from newtube.net.ratelimit import RateLimiter
 from newtube.services.videos import VideoService
 
 MEDIA = Path(sys.argv[1]); PORT = int(sys.argv[2])
-FILES = {"v360": "v360.mp4", "v180": "v180.mp4", "aud": "a.m4a", "mux": "muxed.mp4"}
+FILES = {"v360": "v360.mp4", "v180": "v180.mp4", "aud": "a.m4a", "mux": "muxed.mp4",
+         "vp9a": "vp9a.webm", "vp9b": "vp9b.webm"}
 hits = []
 
 
@@ -78,7 +79,12 @@ PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001
 class Ex:
     async def video_info(self, vid, *, background=False):
         gv = lambda n: f"https://rr1.googlevideo.com/{n}?sig=x"
-        if vid == "e2eMUXED001":
+        if vid == "e2eVP9VID01":      # offers H.264 up to 1080p and VP9 "2160p"/"1440p" (stand-in files)
+            fm = [Format("137", gv("v360"), "mp4", "avc1.4d401e", None, height=1080, width=1920, fps=25, tbr=4000, dynamic_range="SDR"),
+                  Format("313", gv("vp9a"), "webm", "vp09.00.40.08", None, height=2160, width=3840, fps=25, tbr=15000, dynamic_range="SDR"),
+                  Format("271", gv("vp9b"), "webm", "vp09.00.40.08", None, height=1440, width=2560, fps=60, tbr=6000, dynamic_range="SDR"),
+                  Format("140", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64, language="en-US", language_preference=10)]
+        elif vid == "e2eMUXED001":
             fm = [Format("18", gv("mux"), "mp4", "avc1.4d401e", "mp4a.40.2", height=360, width=640, tbr=500)]
         else:
             fm = [Format("134", gv("v360"), "mp4", "avc1.4d401e", None, height=360, width=640, fps=25, tbr=800),

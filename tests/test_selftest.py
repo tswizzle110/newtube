@@ -6,6 +6,10 @@ from newtube.net.http import OutboundClient
 from newtube.net.ratelimit import RateLimiter
 from newtube.selftest import SelfTest, format_results, redact_info, sponsorblock_prefix
 from tests.fixtures_rss import SAMPLE_FEED
+from tests.test_dash import FTYP, MOOV, SIDX, box
+from tests.test_webm import WEBM
+
+MP4 = FTYP + MOOV + SIDX + box(b"mdat", b"d" * 200)
 
 
 class FakeExtractor:
@@ -15,6 +19,11 @@ class FakeExtractor:
     async def video_info(self, video_id, *, background=False):
         if self.fail:
             raise ExtractionError("Sign in to confirm you're not a bot")
+        if video_id == "aqz-KE-bpKQ":          # the 4K test video: one H.264 and one VP9 stream, real container bytes
+            from newtube.extract.base import Format as F2
+            fm = [F2("137", "https://r.googlevideo.com/hd/h264", "mp4", "avc1.640028", None, height=1080, tbr=4000, dynamic_range="SDR"),
+                  F2("313", "https://r.googlevideo.com/hd/vp9", "webm", "vp09.00.51.08", None, height=2160, tbr=15000, dynamic_range="SDR")]
+            return VideoInfo(video_id, "Big Buck Bunny", "UC1", "c", "", 600, 0, 1, None, [], None, False, 0, formats=fm)
         fmts = [Format("137", "https://r.googlevideo.com/v?expire=1&ip=203.0.113.9&ipbits=0", "mp4", "avc1", None, height=1080),
                 Format("140", "https://r.googlevideo.com/a", "m4a", None, "mp4a", tbr=128)]
         return VideoInfo(video_id, "Zoo", "UC1", "c", "", 19, 0, 1, None, [], None, False, 0,
@@ -48,6 +57,11 @@ class FakeExtractor:
 def handler(req: httpx.Request) -> httpx.Response:
     if "videos.xml" in str(req.url):
         return httpx.Response(200, text=SAMPLE_FEED)
+    if "googlevideo" in str(req.url) and "/hd/" in str(req.url):
+        import re as _re
+        a, b = map(int, _re.match(r"bytes=(\d+)-(\d+)", req.headers["range"]).groups())
+        data = WEBM if req.url.path.endswith("vp9") else MP4
+        return httpx.Response(206, content=data[a:b + 1])
     if "googlevideo" in str(req.url):
         return httpx.Response(206, content=b"x" * 1024, headers={"content-range": "bytes 0-1023/99"})
     if "sponsor.ajay.app" in str(req.url):
@@ -69,6 +83,8 @@ async def test_all_good_paths_report_ok_except_failing_channel():
     assert "2 entries" in results["rss"].detail
     assert results["video_warm"].ok and "2nd video" in results["video_warm"].detail
     assert results["exit_ip"].ok and "203.0.113.9" in results["exit_ip"].detail
+    assert results["video_hd"].ok, results["video_hd"].detail
+    assert "avc1 up to 1080p (sidx at" in results["video_hd"].detail and "vp9 up to 2160p (Cues at" in results["video_hd"].detail
     assert "direct, no proxy configured" in results["exit_ip"].detail
     for name in ("search_video", "search_channel", "search_playlist", "channel_videos", "playlist",
                  "comments_top", "comment_replies"):

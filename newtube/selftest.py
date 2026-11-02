@@ -28,6 +28,7 @@ from .net.ratelimit import RateLimiter
 
 # Long-lived, boring test targets. Change here if one ever disappears.
 TEST_VIDEO = "jNQXAC9IVRw"                       # "Me at the zoo", the first YouTube video
+TEST_VIDEO_HD = "aqz-KE-bpKQ"                    # Big Buck Bunny in 4K (Blender): has VP9/AV1 up to 2160p
 TEST_VIDEO_2 = "dQw4w9WgXcQ"                     # a second video, to time a "warm" extraction
 TEST_CHANNEL_HANDLE = "@YouTube"
 TEST_CHANNEL_ID = "UCBR8-60-B28hp2BmDPdntcQ"     # official YouTube channel (RSS test)
@@ -164,6 +165,38 @@ class SelfTest:
         first = self.first_info_seconds
         return (f"2nd video in {took:.1f}s (1st took {first:.1f}s"
                 + (f", {first - took:+.1f}s" if first else "") + f"); '{v.title[:30]}'")
+
+    async def video_hd(self) -> str:
+        """What does a 4K video offer, and do our index parsers understand the REAL streams?
+        For each codec family, fetch the first bytes of its best stream and locate the init/index ranges."""
+        from .media import dash, isobmff, webm
+        v = await self.extractor.video_info(TEST_VIDEO_HD)
+        ladders = dash.video_ladders(v.formats)
+        if not ladders:
+            raise RuntimeError("no SDR video-only formats found")
+        if self.dump_dir:
+            self.dump_dir.mkdir(parents=True, exist_ok=True)
+            (self.dump_dir / "video_hd_formats.json").write_text(json.dumps([
+                {"id": f.format_id, "ext": f.ext, "vcodec": f.vcodec, "height": f.height, "fps": f.fps,
+                 "tbr": f.tbr, "dynamic_range": f.dynamic_range, "note": f.note}
+                for f in v.formats if f.has_video and not f.has_audio], indent=1))
+        out = []
+        for fam in dash.FAMILY_ORDER:
+            if fam not in ladders:
+                continue
+            top = ladders[fam][max(ladders[fam])]
+
+            async def fetch(a: int, b: int, url: str = top.url) -> bytes:
+                async with self.http.stream(url, headers={"Range": f"bytes={a}-{b}"}) as r:
+                    if r.status_code not in (200, 206):
+                        raise RuntimeError(f"HTTP {r.status_code} fetching the {fam} stream")
+                    return await r.aread()
+
+            probe = webm.probe_ranges if top.ext == "webm" else isobmff.probe_ranges
+            r = await probe(fetch)
+            kind = "Cues" if top.ext == "webm" else "sidx"
+            out.append(f"{fam} up to {top.height}p ({kind} at {r.index_start}-{r.index_end})")
+        return "; ".join(out)
 
     async def _range(self, url: str) -> str:
         async with self.http.stream(url, headers={"Range": "bytes=0-1023"}) as r:
@@ -311,7 +344,7 @@ class SelfTest:
         for name, fn in [
             ("environment", self.environment), ("allowlist", self.allowlist),
             ("rss", self.rss), ("video_info", self.video_info), ("video_warm", self.video_info_warm),
-            ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("thumbnail", self.thumbnail),
+            ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("video_hd", self.video_hd), ("thumbnail", self.thumbnail),
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
             ("channel_videos", self.channel_videos), ("playlist", self.playlist_videos),

@@ -47,6 +47,7 @@ class Format:
     language: str | None = None
     note: str | None = None
     language_preference: int | None = None   # yt-dlp: 10 = the video's original audio, -1 = a dub
+    dynamic_range: str | None = None         # 'SDR', 'HDR10', 'HLG', ...
 
     @property
     def has_video(self) -> bool:
