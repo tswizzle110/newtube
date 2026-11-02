@@ -14,7 +14,9 @@ def conn(tmp_path):
 
 def test_migrate_is_idempotent(tmp_path):
     c = connect(tmp_path / "t.db")
-    assert migrate(c) == ["001_init.sql"]
+    from newtube.db.connection import MIGRATIONS_DIR
+    every_file = sorted(f.name for f in MIGRATIONS_DIR.glob("*.sql"))
+    assert migrate(c) == every_file and every_file[0] == "001_init.sql"      # all of them, in order, once
     assert migrate(c) == []
 
 
