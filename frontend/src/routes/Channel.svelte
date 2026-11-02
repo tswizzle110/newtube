@@ -121,8 +121,8 @@
       <div class="scan" role="status">
         <b>Reading this channel's uploads…</b>
         {scanning.done.toLocaleString()}{scanning.total ? ` of ${scanning.total.toLocaleString()}` : ''} videos.
-        <span class="muted">This happens once per channel (then it's remembered for a day), so {sort === 'oldest' ? 'Oldest' : 'Popular'}
-        can cover every video. You can leave this page; it carries on.</span>
+        <span class="muted">This happens once per channel: the list is then saved on this server and only topped up with new uploads, so
+        {sort === 'oldest' ? 'Oldest' : 'Popular'} can cover every video. You can leave this page; it carries on.</span>
         {#if scanning.total}<progress max={scanning.total} value={scanning.done}></progress>{/if}
       </div>
     {/if}
