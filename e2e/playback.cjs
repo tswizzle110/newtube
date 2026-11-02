@@ -139,14 +139,15 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     sbHits.length >= 1 && sbHits.every(h => /^\/api\/skipSegments\/[0-9a-f]{4}$/.test(h[0])), JSON.stringify(sbHits.slice(0, 2)));
   const sbEvents = (await (await ctx.request.get(BASE + '/__events')).json()).filter(e => e.type.startsWith('sb_'));
   check('skips and undos are logged locally for the recommender',
-    sbEvents.some(e => e.type === 'sb_skip' && JSON.parse(e.payload).uuid === 'sp1') &&
-    sbEvents.some(e => e.type === 'sb_undo') && sbEvents.some(e => e.type === 'sb_manual_skip' && JSON.parse(e.payload).uuid === 'in1'),
+    sbEvents.some(e => e.type === 'sb_skip' && JSON.parse(e.payload).uuid.startsWith('sp1')) &&
+    sbEvents.some(e => e.type === 'sb_undo') && sbEvents.some(e => e.type === 'sb_manual_skip' && JSON.parse(e.payload).uuid.startsWith('in1')),
     sbEvents.map(e => e.type).join(','));
 
   // Earlier visits leave a resume position (correctly), so rewind to the start after each reload.
   const fresh = async () => {
     await p.goto(BASE + '/watch?v=e2eSPONSOR1');
-    await p.waitForFunction(() => document.querySelector('video')?.currentTime > 0.2, null, { timeout: 20000 });
+    await p.waitForFunction(() => { const v = document.querySelector('video'); return v && v.readyState >= 3 && v.currentTime > 0.2; }, null, { timeout: 20000 });
+    await p.waitForTimeout(800);        // let the player finish starting up: it may still seek to the resume point
     await p.keyboard.press('Home');
     await p.evaluate(() => { window.__ts = []; setInterval(() => window.__ts.push(document.querySelector('video').currentTime), 50); });
   };
@@ -174,6 +175,46 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('channel overrides are listed and removable', (await p.locator('.over li').count()) === 1);
   await p.click('.over li button'); await p.waitForTimeout(500);
   check('removing an override saves', (await V(p, async () => Object.keys((await (await fetch('/api/settings/sponsorblock')).json()).channels).length)) === 0);
+  await put({ categories: {}, channels: {}, min_length: 1, show_toast: true, contribute: false });
+
+  // ---- SponsorBlock: contributing is opt-in
+  const sbPosts = async () => (await ctx.request.get(BASE + '/__sbposts')).json();
+  await put({ categories: {}, channels: {}, contribute: false });
+  await fresh();
+  await p.waitForSelector('.sbtoast', { timeout: 10000 });
+  check('with contributing off the skip toast has no vote buttons', (await p.locator('.sbtoast .vote').count()) === 0);
+  await p.keyboard.press('[');
+  check('[ says contributing is off', (await p.locator('.toast').innerText()).includes('Contributing is off'));
+  check('...and nothing was sent to SponsorBlock', (await sbPosts()).length === 0);
+
+  await put({ categories: {}, channels: {}, contribute: true });
+  await fresh();
+  await p.keyboard.press('[');
+  await p.waitForTimeout(1300);
+  await p.keyboard.press(']');
+  await p.waitForSelector('.sbdialog');
+  check('dialog opens, pauses the video and says what submitting reveals', (await state(p)).paused && (await p.locator('.sbdialog .note').innerText()).includes('which video'));
+  await p.selectOption('.sbdialog select', 'interaction');
+  await p.click('.sbdialog .go');
+  await p.waitForFunction(() => document.querySelector('.toast')?.innerText.includes('Submitted'), null, { timeout: 8000 });
+  const first = (await sbPosts())[0];
+  check('submission reaches SponsorBlock with the right body',
+    first && first.path === '/api/skipSegments' && first.body.videoID === 'e2eSPONSOR1' && first.body.segments[0].category === 'interaction' &&
+    first.body.segments[0].actionType === 'skip' && first.body.segments[0].segment[1] - first.body.segments[0].segment[0] > 1, JSON.stringify(first?.body));
+  check('anonymous random user id (64 hex chars)', /^[0-9a-f]{64}$/.test(first?.body.userID ?? ''));
+  check('no viewed-ping or other call was made to SponsorBlock', (await sbPosts()).every(x => ['/api/skipSegments', '/api/voteOnSponsorTime'].includes(x.path)));
+
+  await p.keyboard.press('k');                                         // the dialog paused it; carry on to the sponsor skip
+  await p.waitForSelector('.sbtoast .vote', { timeout: 10000 });
+  await p.click('.sbtoast .vote[title^="Good skip"]');
+  await p.waitForFunction(() => document.querySelector('.toast')?.innerText.includes('Upvoted'), null, { timeout: 5000 });
+  await p.keyboard.press('Home');                                      // rewind: the segment arms again
+  await p.waitForSelector('.sbtoast .vote', { timeout: 10000 });
+  await p.click('.sbtoast .vote[title^="Wrong skip"]');
+  await p.waitForFunction(() => document.querySelector('.toast')?.innerText.includes('Downvoted'), null, { timeout: 5000 });
+  const votes = (await sbPosts()).filter(x => x.path === '/api/voteOnSponsorTime');
+  check('votes are sent as up=1 / down=0 for the skipped segment', votes.length === 2 && votes[0].body.type === 1 && votes[1].body.type === 0 &&
+    votes.every(v => v.body.UUID.startsWith('sp1') && v.body.UUID.length === 64 && v.body.userID === first.body.userID), JSON.stringify(votes.map(v => v.body.type)));
   await put({ categories: {}, channels: {}, min_length: 1, show_toast: true, contribute: false });
 
   // ---- comments: lazy, sortable, replies capped at the first 10, timestamps seek

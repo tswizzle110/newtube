@@ -30,11 +30,18 @@ SB_HASH = hashlib.sha256(SB_VIDEO.encode()).hexdigest()
 
 
 def _seg(cat, a, b, uuid, action="skip"):
-    return {"category": cat, "actionType": action, "segment": [a, b], "UUID": uuid, "videoDuration": 24,
+    # real SponsorBlock segment ids are 64-character hashes, so pad ours to look the same
+    return {"category": cat, "actionType": action, "segment": [a, b], "UUID": uuid.ljust(64, "0"), "videoDuration": 24,
             "locked": 0, "votes": 5, "description": ""}
 
 
+sb_posts = []      # what SponsorBlock was sent (for the privacy assertions)
+
+
 def sponsorblock(req):
+    if req.method == "POST":
+        sb_posts.append({"path": req.url.path, "body": json.loads(req.content)})
+        return httpx.Response(200, text="OK")
     if req.method == "GET" and req.url.path == f"/api/skipSegments/{SB_HASH[:4]}":
         return httpx.Response(200, json=[
             # another video that shares the 4-char prefix: must be ignored
@@ -131,28 +138,30 @@ ctx = Context(s, conn, lim, OutboundClient(s, lim, transport=httpx.MockTransport
               VideoService(conn, ex), DiskCache(tmp / "img", 10**7), auth, run_scheduler=False)
 app = create_app(ctx)
 
-@app.get("/__hits")      # harness-only introspection (sandbox only)
-async def _hits(): return hits
-@app.get("/__db")
-async def _db():
-    return {"progress": [dict(r) for r in conn.execute("select * from video_progress")],
-            "sessions": [dict(r) for r in conn.execute("select id, video_id, intervals, max_position, duration, ended_at from watch_sessions")]}
-@app.get("/__db")
-async def _db():
-    return {"progress": [dict(r) for r in conn.execute("select * from video_progress")],
-            "sessions": [dict(r) for r in conn.execute("select id, video_id, intervals, max_position, duration, ended_at from watch_sessions")]}
-for _ in range(2):
-    app.router.routes.insert(0, app.router.routes.pop())
-@app.get("/__db")
-async def _db():
-    return {"progress": [dict(r) for r in conn.execute("select * from video_progress")],
-            "sessions": [dict(r) for r in conn.execute("select id, video_id, intervals, max_position, duration, ended_at from watch_sessions")]}
-for _ in range(2):
-    app.router.routes.insert(0, app.router.routes.pop())   # must precede the SPA catch-all
+# ---- harness-only introspection endpoints. Sandbox only: NOT part of the real app.
+@app.get("/__hits")
+async def _hits():
+    return hits
 
-@app.get("/__events")      # harness-only: what the app logged (sandbox only, never part of the real app)
+
+@app.get("/__db")
+async def _db():
+    return {"progress": [dict(r) for r in conn.execute("SELECT * FROM video_progress")],
+            "sessions": [dict(r) for r in conn.execute(
+                "SELECT id, video_id, intervals, max_position, duration, ended_at FROM watch_sessions")]}
+
+
+@app.get("/__events")
 async def _events():
     return [dict(r) for r in conn.execute("SELECT type, video_id, channel_id, payload FROM events ORDER BY id")]
-app.router.routes.insert(0, app.router.routes.pop())   # must precede the SPA catch-all
+
+
+@app.get("/__sbposts")
+async def _sbposts():
+    return sb_posts
+
+
+for _ in range(4):     # these must come before the app's catch-all route
+    app.router.routes.insert(0, app.router.routes.pop())
 
 uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

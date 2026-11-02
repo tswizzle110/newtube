@@ -22,6 +22,7 @@ from .media.diskcache import DiskCache
 from .net.http import OutboundClient
 from .net.ratelimit import RateLimiter
 from .services.comments import CommentService
+from .sponsorblock.contribute import Contributor
 from .sponsorblock.provider import SponsorBlockApi
 from .sponsorblock.service import SponsorBlockService
 from .services.lists import ListService
@@ -44,17 +45,21 @@ class Context:
     lists: ListService | None = None
     comments: CommentService | None = None
     sponsorblock: SponsorBlockService | None = None
+    sb_contrib: Contributor | None = None
+    sb_limiter: RateLimiter | None = None
 
     def __post_init__(self) -> None:
         if self.lists is None:
             self.lists = ListService(self.conn, self.extractor)
         if self.comments is None:
             self.comments = CommentService(self.conn, self.extractor)
-        if self.sponsorblock is None:
+        if self.sb_limiter is None:
             # SponsorBlock is a different host from YouTube: it gets its own, lighter limiter.
-            self.sponsorblock = SponsorBlockService(
-                self.conn, SponsorBlockApi(self.http, RateLimiter(0.25, 0.1, 10**9)))
-
+            self.sb_limiter = RateLimiter(0.25, 0.1, 10**9)
+        if self.sponsorblock is None:
+            self.sponsorblock = SponsorBlockService(self.conn, SponsorBlockApi(self.http, self.sb_limiter))
+        if self.sb_contrib is None:
+            self.sb_contrib = Contributor(self.conn, self.http, self.sb_limiter)
 
 def build_context(settings: Settings | None = None) -> Context:
     from .extract.ytdlp import YtDlpExtractor

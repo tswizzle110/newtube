@@ -28,3 +28,7 @@ def put(conn: sqlite3.Connection, key: str, payload: Any, ttl: int, now: int | N
 def purge_expired(conn: sqlite3.Connection, now: int | None = None) -> int:
     now = now if now is not None else int(time.time())
     return conn.execute("DELETE FROM meta_cache WHERE expires_at<=?", (now,)).rowcount
+
+
+def delete(conn: sqlite3.Connection, key: str) -> None:
+    conn.execute("DELETE FROM meta_cache WHERE key=?", (key,))

@@ -3,6 +3,7 @@
   import { duration as fmt } from '../lib/format.js'
   import { WatchTracker, trackEvent } from '../lib/tracker.js'
   import { COLORS, resolveActions, usable } from '../lib/sponsorblock.js'
+  import { api as http } from '../lib/api.js'   // (this component has its own prop called `api`)
 
   // video: metadata from /api/video/<id>.  startAt: resume position (s).  api: bindable handle.
   // sb: { data: {segments, full_labels}, settings, channelId } once SponsorBlock info has loaded.
@@ -38,6 +39,8 @@
   const handled = new Set()      // segments already skipped (re-armed if you rewind past them)
   const ignored = new Set()      // segments you undid: never auto-skipped again on this page
   let lastSkip = null
+  let sbMarkStart = $state(null) // seconds, set with [
+  let sbDraft = $state(null)     // segment being submitted: { start, end, category, busy, error }
   let poiDone = false
   let sbTimer = null
   let mutedBySb = false, prevMuted = false
@@ -292,6 +295,50 @@
     }
   }
 
+  // ---- SponsorBlock: contributing (only when enabled in Settings) -------------------------------
+  function canContribute() {
+    if (sb?.settings?.contribute) return true
+    say('Contributing is off. Turn it on in Settings → SponsorBlock.')
+    return false
+  }
+  function markStart() {
+    if (!canContribute()) return
+    sbMarkStart = el.currentTime
+    say(`Segment starts at ${fmt(sbMarkStart)}. Press ] where it ends.`)
+  }
+  function markEnd() {
+    if (!canContribute()) return
+    if (sbMarkStart === null) { say('Press [ at the start of the segment first.'); return }
+    const end = el.currentTime
+    if (end - sbMarkStart < 0.5) { say('The end must come after the start.'); return }
+    sbDraft = { start: sbMarkStart, end, category: 'sponsor', busy: false, error: '' }
+    el.pause()
+  }
+  function previewDraft() {
+    el.currentTime = Math.max(0, sbDraft.start - 1.5)
+    el.play().catch(() => {})
+  }
+  async function submitDraft() {
+    const d = sbDraft
+    d.busy = true; d.error = ''
+    try {
+      await http.post(`/api/sponsorblock/${video.id}/submit`, {
+        start: d.start, end: d.end, category: d.category, action: d.category === 'poi_highlight' ? 'poi' : 'skip' })
+      sbDraft = null; sbMarkStart = null
+      say('Submitted to SponsorBlock. Thank you!')
+    } catch (e) {
+      d.error = e.message
+    } finally {
+      d.busy = false
+    }
+  }
+  function voteOn(seg, type) {
+    sbToast = null
+    http.post('/api/sponsorblock/vote', { uuid: seg.uuid, type, video_id: video.id })
+      .then(() => say(type === 'up' ? 'Upvoted. Thanks!' : 'Downvoted. Thanks!'))
+      .catch((e) => say(e.message))
+  }
+
   function skipNow() {              // Enter: take whatever skip button is on screen
     if (sbButton) skipSegment(sbButton, 'button')
     else if (sbPoiButton) { el.currentTime = sbPoiButton.start; sbEvent('sb_manual_skip', sbPoiButton, { mode: 'button' }) }
@@ -308,10 +355,10 @@
       ArrowUp: () => setVolume(volume + 0.05), ArrowDown: () => setVolume(volume - 0.05),
       m: toggleMute, f: toggleFullscreen, c: cycleCaptions, '<': () => stepRate(-1), '>': () => stepRate(1),
       '{': () => jumpChapter(-1), '}': () => jumpChapter(1),   // Shift+[ / Shift+]: chapters
-      u: undoSkip,
+      u: undoSkip, '[': markStart, ']': markEnd,
       Enter: () => (sbButton || sbPoiButton) && !e.target.closest('button') && skipNow(),
       Home: () => seekTo(0), End: () => seekTo(total - 1), '?': () => (help = !help),
-      Escape: () => { help = false; menu = null },
+      Escape: () => { help = false; menu = null; sbDraft = null },
     }[k]
     if (act) { e.preventDefault(); act() }
     else if (/^[0-9]$/.test(k)) { e.preventDefault(); seekTo((total * Number(k)) / 10) }
@@ -381,6 +428,31 @@
     <div class="sbtoast" role="status">
       Skipped {sbLabels[sbToast.seg.category] ?? sbToast.seg.category}
       <button onclick={undoSkip}>Undo <kbd>u</kbd></button>
+      {#if sb.settings.contribute}
+        <button class="vote" title="Good skip: upvote (tells SponsorBlock which video this is)" onclick={() => voteOn(sbToast.seg, 'up')}>👍</button>
+        <button class="vote" title="Wrong skip: downvote (tells SponsorBlock which video this is)" onclick={() => voteOn(sbToast.seg, 'down')}>👎</button>
+      {/if}
+    </div>
+  {/if}
+
+  {#if sbDraft}
+    <div class="sbdialog" role="dialog" aria-label="Submit a SponsorBlock segment">
+      <h3>Submit to SponsorBlock</h3>
+      <p>
+        {fmt(sbDraft.start)}{sbDraft.category === 'poi_highlight' ? '' : ` – ${fmt(sbDraft.end)} (${(sbDraft.end - sbDraft.start).toFixed(1)} s)`}
+      </p>
+      <label>Category
+        <select bind:value={sbDraft.category}>
+          {#each sb.settings.category_order as c}<option value={c}>{sbLabels[c] ?? c}</option>{/each}
+        </select>
+      </label>
+      <p class="note">This tells SponsorBlock's server which video this is (looking segments up does not). It uses a random anonymous ID.</p>
+      {#if sbDraft.error}<p class="err">{sbDraft.error}</p>{/if}
+      <div class="btns">
+        <button onclick={previewDraft}>Preview</button>
+        <button class="go" disabled={sbDraft.busy} onclick={submitDraft}>{sbDraft.busy ? 'Submitting…' : 'Submit'}</button>
+        <button onclick={() => (sbDraft = null)}>Cancel <kbd>Esc</kbd></button>
+      </div>
     </div>
   {/if}
 
@@ -390,7 +462,7 @@
       <dl>
         <dt>Space / k</dt><dd>play / pause</dd><dt>← →</dt><dd>seek 5 s</dd><dt>j / l</dt><dd>seek 10 s</dd>
         <dt>↑ ↓</dt><dd>volume</dd><dt>m</dt><dd>mute</dd><dt>f</dt><dd>fullscreen</dd>
-        <dt>c</dt><dd>captions</dd><dt>&lt; &gt;</dt><dd>speed</dd><dt>{'{'} {'}'}</dt><dd>previous / next chapter</dd><dt>Enter</dt><dd>skip (when a skip button shows)</dd><dt>u</dt><dd>undo last auto-skip</dd>
+        <dt>c</dt><dd>captions</dd><dt>&lt; &gt;</dt><dd>speed</dd><dt>{'{'} {'}'}</dt><dd>previous / next chapter</dd><dt>Enter</dt><dd>skip (when a skip button shows)</dd><dt>u</dt><dd>undo last auto-skip</dd><dt>[ ]</dt><dd>mark a segment's start / end (SponsorBlock, if enabled)</dd>
         <dt>0–9</dt><dd>jump to 0–90%</dd><dt>?</dt><dd>this help</dd>
       </dl>
     </div>
@@ -409,6 +481,9 @@
           </div>
         </div>
       {/each}
+      {#if sbMarkStart !== null && total}
+        <div class="pending" style:left={(sbMarkStart / total) * 100 + '%'} title="Segment start"></div>
+      {/if}
       <div class="marks" aria-hidden="true">
         {#each sbSegments as s (s.uuid)}
           {#if total}
@@ -517,6 +592,17 @@
   .buf, .played { position: absolute; left: 0; top: 0; bottom: 0; }
   .buf { background: rgba(255, 255, 255, 0.35); }
   .played { background: var(--accent); }
+  .pending { position: absolute; top: 0; bottom: 0; width: 3px; background: #fff; pointer-events: none; z-index: 1; }
+  .sbtoast .vote { font-size: 15px; }
+  .sbdialog { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; width: min(420px, 90%);
+    background: rgba(18, 18, 22, 0.97); color: #fff; padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.2); }
+  .sbdialog h3 { margin: 0 0 6px; font-size: 16px; } .sbdialog p { margin: 6px 0; }
+  .sbdialog label { display: flex; gap: 10px; align-items: center; }
+  .sbdialog select { flex: 1; background: #222; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 5px 8px; }
+  .sbdialog .note { font-size: 12px; opacity: 0.75; } .sbdialog .err { color: #ff8080; }
+  .sbdialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+  .sbdialog .btns button { background: #333; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; }
+  .sbdialog .btns .go { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
   .marks { position: absolute; left: 0; right: 0; top: 50%; height: 4px; transform: translateY(-50%); pointer-events: none; }
   .bar:hover .marks { height: 7px; }
   .sbmark { position: absolute; top: 0; bottom: 0; opacity: 0.9; }

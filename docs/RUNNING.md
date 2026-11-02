@@ -128,8 +128,12 @@ speed limits playback quality. To undo: remove the `outbound_proxy` line and res
   and video are all proxied; no web fonts).
 - With `outbound_proxy` set, all of that traffic leaves through the proxy (see above).
 - The server only contacts youtube.com, googlevideo.com, ytimg.com, ggpht.com,
-  googleusercontent.com and sponsor.ajay.app (SponsorBlock arrives in phase 2).
+  googleusercontent.com and sponsor.ajay.app (SponsorBlock).
 - Watch history, impressions and other signals live only in `data/newtube.db`.
+- SponsorBlock: looking up segments sends only a 4-character hash prefix (the server can't tell which
+  video). Submitting a segment or voting does reveal the video, so it is **off by default** (Settings).
+  Its random anonymous ID is stored in the local database and is never sent to your browser. The
+  optional "viewed" pings the official extension sends on every skip are not implemented.
 
 ## Tests
 

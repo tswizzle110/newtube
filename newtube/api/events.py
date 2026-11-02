@@ -21,7 +21,7 @@ EVENT_TYPES = {
     "comments_opened", "comments_scrolled", "chapter_click", "description_expanded",
     "like", "unlike", "not_interested", "more_like_this", "dont_recommend_channel",
     "search", "search_click", "feed_refresh",
-    "sb_skip", "sb_undo", "sb_manual_skip", "sb_vote",
+    "sb_skip", "sb_undo", "sb_manual_skip", "sb_vote", "sb_submit",
 }
 SURFACES = {"for_you", "subs", "search", "related", "channel", "playlist", "history"}
 MAX_PAYLOAD = 2048
