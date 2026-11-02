@@ -95,8 +95,11 @@
         shakaPlayer = new shaka.Player()
         await shakaPlayer.attach(el)
         shakaPlayer.configure({
-          streaming: { bufferingGoal: 90, rebufferingGoal: 2, bufferBehind: 30 },
-          abr: { enabled: true },
+          // Start playing after ~1 s of buffer, and start at a quality that suits a home connection
+          // (Shaka's default assumes 1 Mbit/s and ramps up from the lowest rung). ABR still adapts.
+          streaming: { bufferingGoal: 90, rebufferingGoal: 1, bufferBehind: 30 },
+          abr: { enabled: true, defaultBandwidthEstimate: 25_000_000 },
+          manifest: { dash: { ignoreMinBufferTime: true } },
         })
         shakaPlayer.addEventListener('variantchanged', syncQualities)
         shakaPlayer.addEventListener('adaptation', syncQualities)

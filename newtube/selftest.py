@@ -27,6 +27,7 @@ from .net.ratelimit import RateLimiter
 
 # Long-lived, boring test targets. Change here if one ever disappears.
 TEST_VIDEO = "jNQXAC9IVRw"                       # "Me at the zoo", the first YouTube video
+TEST_VIDEO_2 = "dQw4w9WgXcQ"                     # a second video, to time a "warm" extraction
 TEST_CHANNEL_HANDLE = "@YouTube"
 TEST_CHANNEL_ID = "UCBR8-60-B28hp2BmDPdntcQ"     # official YouTube channel (RSS test)
 TEST_QUERIES = {"video": "me at the zoo", "channel": "youtube", "playlist": "crash course"}
@@ -64,6 +65,7 @@ class SelfTest:
         self.results: list[Result] = []
         self.info: VideoInfo | None = None
         self.playlist_id: str | None = None
+        self.first_info_seconds = 0.0
         self.samples: list[str] = []
 
     async def _check(self, name: str, fn: Callable[[], Awaitable[str]]) -> None:
@@ -124,6 +126,13 @@ class SelfTest:
         return f"'{feed.channel_title}': {len(feed.entries)} entries, newest '{e.title[:40]}'"
 
     async def video_info(self) -> str:
+        t0 = time.monotonic()
+        try:
+            return await self._video_info()
+        finally:
+            self.first_info_seconds = time.monotonic() - t0
+
+    async def _video_info(self) -> str:
         if self.dump_dir and hasattr(self.extractor, "raw_video_info"):
             raw = await self.extractor.raw_video_info(TEST_VIDEO)  # type: ignore[attr-defined]
             self.dump_dir.mkdir(parents=True, exist_ok=True)
@@ -143,6 +152,17 @@ class SelfTest:
         top = max((f.height or 0 for f in v.formats), default=0)
         return (f"'{v.title}' {v.duration}s; {len(vids)} video-only, {len(auds)} audio-only, "
                 f"{len(muxed)} muxed; best {top}p; {len(v.captions)} caption tracks{dumped}")
+
+    async def video_info_warm(self) -> str:
+        """A second extraction on the SAME extractor: shows what keeping yt-dlp's player cache warm saves."""
+        t0 = time.monotonic()
+        v = await self.extractor.video_info(TEST_VIDEO_2)
+        took = time.monotonic() - t0
+        if not v.formats:
+            raise RuntimeError("no formats for the second video")
+        first = self.first_info_seconds
+        return (f"2nd video in {took:.1f}s (1st took {first:.1f}s"
+                + (f", {first - took:+.1f}s" if first else "") + f"); '{v.title[:30]}'")
 
     async def _range(self, url: str) -> str:
         async with self.http.stream(url, headers={"Range": "bytes=0-1023"}) as r:
@@ -264,7 +284,7 @@ class SelfTest:
     async def run(self) -> list[Result]:
         for name, fn in [
             ("environment", self.environment), ("allowlist", self.allowlist),
-            ("rss", self.rss), ("video_info", self.video_info),
+            ("rss", self.rss), ("video_info", self.video_info), ("video_warm", self.video_info_warm),
             ("stream_range", self.stream_range), ("thumbnail", self.thumbnail),
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),

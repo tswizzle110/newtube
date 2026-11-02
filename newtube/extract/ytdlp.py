@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import threading
 import re
 import time
 from urllib.parse import quote_plus
+from collections.abc import Callable
 from typing import Any
 
 import yt_dlp
@@ -244,6 +246,37 @@ def parse_comments(info: dict[str, Any]) -> list[Comment]:
     return out
 
 
+class _Session:
+    """A long-lived yt-dlp instance.
+
+    yt-dlp keeps YouTube's player JavaScript and the solved challenges in memory *per instance*.
+    A fresh instance per request (what we used to do) re-downloads and re-solves all of it every
+    time, which was a large part of the ~3.5 s it took to open a video. yt-dlp isn't safe for
+    concurrent use, so calls on one session are serialised; per-call options are applied for the
+    duration of the call and then restored."""
+
+    def __init__(self, make_opts: Callable[[], dict[str, Any]]) -> None:
+        self._make_opts = make_opts
+        self._ydl: Any = None
+        self._lock = threading.Lock()
+
+    def run(self, url: str, extra: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            if self._ydl is None:                       # built lazily, off the event loop
+                self._ydl = yt_dlp.YoutubeDL(self._make_opts())
+            ydl = self._ydl
+            saved = {k: ydl.params[k] for k in extra if k in ydl.params}
+            ydl.params.update(extra)
+            try:
+                return ydl.sanitize_info(ydl.extract_info(url, download=False))
+            finally:
+                for k in extra:
+                    if k in saved:
+                        ydl.params[k] = saved[k]
+                    else:
+                        ydl.params.pop(k, None)
+
+
 # ------------------------------------------------------------ implementation
 
 
@@ -251,6 +284,8 @@ class YtDlpExtractor:
     def __init__(self, settings: Settings, limiter: RateLimiter) -> None:
         self._settings = settings
         self._limiter = limiter
+        # Separate sessions so a slow background job can never block something you clicked.
+        self._sessions = {False: _Session(self._base_opts), True: _Session(self._base_opts)}
 
     def _base_opts(self) -> dict[str, Any]:
         s = self._settings
@@ -265,13 +300,8 @@ class YtDlpExtractor:
 
     async def _extract(self, url: str, extra: dict[str, Any], background: bool) -> dict[str, Any]:
         await self._limiter.acquire(Lane.BACKGROUND if background else Lane.INTERACTIVE)
-
-        def work() -> dict[str, Any]:
-            with yt_dlp.YoutubeDL({**self._base_opts(), **extra}) as ydl:
-                return ydl.sanitize_info(ydl.extract_info(url, download=False))
-
         try:
-            return await asyncio.to_thread(work)
+            return await asyncio.to_thread(self._sessions[background].run, url, extra)
         except yt_dlp.utils.DownloadError as e:
             raise classify_error(str(e)) from e
 

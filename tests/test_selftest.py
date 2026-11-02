@@ -67,6 +67,7 @@ async def test_all_good_paths_report_ok_except_failing_channel():
     assert results["sponsorblock"].ok
     assert not results["channel"].ok          # one failure doesn't stop the others
     assert "2 entries" in results["rss"].detail
+    assert results["video_warm"].ok and "2nd video" in results["video_warm"].detail
     for name in ("search_video", "search_channel", "search_playlist", "channel_videos", "playlist",
                  "comments_top", "comment_replies"):
         assert results[name].ok, (name, results[name].detail)

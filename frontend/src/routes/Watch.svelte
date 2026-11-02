@@ -19,6 +19,11 @@
 
   onMount(() => {
     let timer
+    // Start the slow parts in parallel with the metadata request instead of after it:
+    // the player library chunk, and the manifest (the server then extracts the video and probes the
+    // stream layouts once; the player's own manifest request a moment later is a cheap cache hit).
+    import('shaka-player/dist/shaka-player.dash.js').catch(() => {})
+    fetch(`/api/dash/${id}.mpd`, { priority: 'low' }).catch(() => {})
     if (list) api.get(`/api/playlist/${list}`).then((p) => (pl = p)).catch(() => {})
     api.get(`/api/video/${id}`).then((v) => {
       video = v
