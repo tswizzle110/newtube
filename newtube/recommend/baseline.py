@@ -36,6 +36,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..db.queries.seen import WATCHED_EVENT_SQL, WATCHED_SESSION_SQL, not_hidden
+
 DAY = 86400
 
 
@@ -94,11 +96,13 @@ def interest_rows(conn: sqlite3.Connection, now: int) -> list[tuple[str, str | N
     marks = ",".join("?" * len(EVENT_INTEREST))
     for r in conn.execute(
             f"SELECT e.video_id, e.type, e.ts, COALESCE(e.channel_id, v.channel_id) AS ch FROM events e"
-            f" LEFT JOIN videos v ON v.id = e.video_id WHERE e.video_id IS NOT NULL AND e.type IN ({marks})",
+            f" LEFT JOIN videos v ON v.id = e.video_id WHERE e.video_id IS NOT NULL AND e.type IN ({marks})"
+            f" AND (e.type <> 'import_watch' OR {not_hidden('e.video_id', 'e.ts')})",
             tuple(EVENT_INTEREST)):
         rows.append((r["video_id"], r["ch"], EVENT_INTEREST[r["type"]], r["ts"]))
     for r in conn.execute("SELECT w.video_id, w.started_at AS ts, w.max_position AS pos, w.duration AS dur,"
-                          " v.channel_id AS ch FROM watch_sessions w LEFT JOIN videos v ON v.id = w.video_id"):
+                          " v.channel_id AS ch FROM watch_sessions w LEFT JOIN videos v ON v.id = w.video_id"
+                          f" WHERE {not_hidden('w.video_id', 'w.started_at')}"):
         fraction = min(1.0, r["pos"] / r["dur"]) if r["dur"] else 0.5
         rows.append((r["video_id"], r["ch"], 0.2 + 0.8 * fraction, r["ts"]))
     for r in conn.execute("SELECT i.video_id, i.added_at, p.kind, v.channel_id AS ch FROM playlist_items i"
@@ -147,8 +151,7 @@ SELECT v.id, v.title, v.channel_id, COALESCE(c.title, '') AS channel_title, v.pu
        (s.channel_id IS NOT NULL) AS subscribed,
        EXISTS (SELECT 1 FROM playlist_items i JOIN playlists pl ON pl.id = i.playlist_id
                WHERE i.video_id = v.id AND pl.kind = 'watch_later') AS saved,
-       (EXISTS (SELECT 1 FROM watch_sessions w WHERE w.video_id = v.id)
-        OR EXISTS (SELECT 1 FROM events e WHERE e.video_id = v.id AND e.type = 'import_watch')) AS watched_before
+       (""" + WATCHED_SESSION_SQL + " OR " + WATCHED_EVENT_SQL + """) AS watched_before
 FROM videos v
 LEFT JOIN channels c ON c.id = v.channel_id
 LEFT JOIN subscriptions s ON s.channel_id = v.channel_id

@@ -5,7 +5,7 @@
 
   // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
   // why: {score, reasons[{label, points}]} for recommended cards; ondismiss(type): 'not_interested' | 'dont_recommend_channel'
-  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null } = $props()
+  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '' } = $props()
   let showWhy = $state(false)
   const href = $derived(`/watch?v=${video.id}&src=${surface}${extra}`)
 
@@ -45,8 +45,9 @@
     <div class="muted small">
       {[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}
     </div>
+    {#if note}<div class="muted small">{note}</div>{/if}
     {#if onremove}
-      <div class="actions small"><button class="act" onclick={onremove}>Remove from this list</button></div>
+      <div class="actions small"><button class="act" onclick={onremove}>{removeLabel}</button></div>
     {/if}
     {#if why}
       <div class="actions small">

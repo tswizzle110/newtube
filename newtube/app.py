@@ -78,7 +78,7 @@ def build_context(settings: Settings | None = None) -> Context:
 
 def create_app(ctx: Context | None = None) -> FastAPI:
     from .api import auth as auth_api
-    from .api import comments, events, lists, media, mylists, playback, recommendations, sponsorblock, subscriptions, videos
+    from .api import comments, events, history, lists, media, mylists, playback, recommendations, sponsorblock, subscriptions, videos
     from .security import GuardMiddleware
 
     @contextlib.asynccontextmanager
@@ -113,6 +113,7 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app.include_router(subscriptions.router)
     app.include_router(recommendations.router)
     app.include_router(mylists.router)
+    app.include_router(history.router)
     _mount_frontend(app, (ctx.settings if ctx else load_settings()).frontend_dir)
     return app
 

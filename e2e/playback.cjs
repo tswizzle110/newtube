@@ -399,6 +399,24 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.goto(BASE + '/list/nope'); await p.waitForSelector('.error');
   check('an unknown list says so instead of breaking', (await p.locator('.error').innerText()).includes('no such list'));
 
+  // ---- History: what you watched, searchable, removable, and it stays removed
+  await p.goto(BASE + '/history'); await p.waitForSelector('.grid .card');
+  const hBefore = await p.locator('.grid .card').count();
+  check('History lists what you watched, newest under a Today heading', hBefore >= 1 && (await p.locator('h2').first().innerText()) === 'Today' &&
+    (await p.locator('aside.side a.active:has-text("History")').count()) === 1);
+  await p.fill('input[aria-label="Search your history"]', 'zzz-nothing-matches'); await p.click('form.find button');
+  await p.waitForFunction(() => /matches/.test(document.body.innerText));
+  check('searching narrows it (and says so when nothing matches)', (await p.locator('.grid .card').count()) === 0);
+  await p.fill('input[aria-label="Search your history"]', ''); await p.click('form.find button');
+  await p.waitForSelector('.grid .card');
+  const removedTitle = await p.locator('.grid .card .title').first().innerText();
+  await p.click('.card .act:has-text("Remove from history")');
+  await p.waitForFunction((n) => document.querySelectorAll('.grid .card').length === n, hBefore - 1);
+  await p.reload(); await p.waitForSelector('h1');
+  await p.waitForTimeout(500);
+  const titlesAfter = await p.locator('.grid .card .title').allInnerTexts();
+  check('removing takes it off the history, and it stays off after a reload', titlesAfter.length === hBefore - 1, removedTitle);
+
   // ---- For you: recommendations, with a visible reason for each and a way to say no
   await ctx.request.get(BASE + '/__seed_recommendable');
   await p.goto(BASE + '/for-you'); await p.waitForSelector('.grid .card');

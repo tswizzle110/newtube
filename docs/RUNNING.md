@@ -139,6 +139,14 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## History
+
+**History** (sidebar, Library) lists every video you watched, newest first and grouped by day: your imported
+Google history plus what you watch in newtube. Search it by title or channel. **Remove from history** forgets that
+you watched a video, and where you stopped: it stops showing as "Watched before", stops counting towards
+recommendations, and can be recommended again. Removing is permanent even if you import a newer Takeout later
+(only watches *after* the removal count again). The underlying event log is not rewritten.
+
 ## Your lists: Like, Watch later
 
 Under every video are **Like** and **Watch later** buttons. They put the video on your own **Liked videos** or

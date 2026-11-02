@@ -7,6 +7,7 @@
   import Feed from './routes/Feed.svelte'
   import ForYou from './routes/ForYou.svelte'
   import MyList from './routes/MyList.svelte'
+  import History from './routes/History.svelte'
   import Channels from './routes/Channels.svelte'
   import Watch from './routes/Watch.svelte'
   import Search from './routes/Search.svelte'
@@ -60,6 +61,8 @@
           <Feed />
         {:else if is('/for-you')}
           <ForYou />
+        {:else if is('/history')}
+          <History />
         {:else if router.pathname.startsWith('/list/')}
           <MyList />
         {:else if is('/channels')}
