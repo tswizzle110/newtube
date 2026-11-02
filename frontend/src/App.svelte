@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { router, navigate, interceptLinks } from './lib/router.svelte.js'
   import { auth, checkAuth, logout } from './lib/auth.svelte.js'
   import { nav, setCollapsed, loadSubs, loadLists } from './lib/nav.svelte.js'
@@ -19,6 +19,33 @@
   let sidebar = $state()
 
   onMount(checkAuth)
+  // The video being watched (kept when you leave /watch, which turns the page into the mini-player).
+  let session = $state(null)
+  let sessionKey = 0
+  const onWatch = $derived(router.pathname === '/watch')
+  const sessionHref = (s) => `/watch?v=${s.id}&src=${s.source}${s.list ? `&list=${s.list}` : ''}${s.mylist ? `&mylist=${s.mylist}` : ''}`
+  $effect(() => {
+    if (!auth.loggedIn) { untrack(() => (session = null)); return }          // logged out: nothing keeps playing
+    if (router.pathname !== '/watch') return
+    const q = router.query
+    const id = q.get('v')
+    if (!id) return
+    const wanted = { id, source: q.get('src') ?? 'direct', list: q.get('list'), mylist: q.get('mylist') }
+    untrack(() => {
+      // The same video in the same list keeps its page (and its playback), e.g. when you expand the mini-player.
+      // Another video, or the same video reached from a different list, gets a fresh page.
+      const same = session && session.id === id && session.list === wanted.list && session.mylist === wanted.mylist
+      session = same ? { ...session, source: wanted.source } : { ...wanted, key: ++sessionKey }
+    })
+  })
+  // Autoplay of the next video in a list: on the video page that is a normal navigation; in the mini-player the
+  // video just changes in place and you stay where you are.
+  function goTo(href) {
+    if (onWatch) return navigate(href)
+    const q = new URL(href, location.origin).searchParams
+    session = { id: q.get('v'), source: q.get('src') ?? 'direct', list: q.get('list'), mylist: q.get('mylist'), key: ++sessionKey }
+  }
+
   let started = false
   $effect(() => {
     if (!auth.loggedIn) return
@@ -76,8 +103,6 @@
           <MyList />
         {:else if is('/channels')}
           <Channels />
-        {:else if is('/watch')}
-          <Watch />
         {:else if is('/search')}
           <Search />
         {:else if router.pathname.startsWith('/channel/')}
@@ -90,6 +115,16 @@
           <div class="page"><h1>Not found</h1><a href="/" class="muted">Back home</a></div>
         {/if}
       {/key}
+      <!-- The video page lives here, outside the routed pages, so it survives navigation: on /watch it IS the page,
+           anywhere else it shrinks into a corner player that keeps playing. -->
+      {#if session}
+        {#key session.key}
+          <div class="watchhost" class:mini={!onWatch}>
+            <Watch id={session.id} source={session.source} list={session.list} mylist={session.mylist} mini={!onWatch}
+                   onclose={() => (session = null)} onexpand={() => navigate(sessionHref(session))} onnavigate={goTo} />
+          </div>
+        {/key}
+      {/if}
     </main>
   </div>
 {/if}
@@ -97,6 +132,8 @@
 <style>
   .layout { display: grid; grid-template-columns: 256px minmax(0, 1fr); min-height: 100vh; }
   .layout.collapsed { grid-template-columns: minmax(0, 1fr); }
+  .watchhost.mini { position: fixed; right: 16px; bottom: 16px; z-index: 60; width: min(400px, calc(100vw - 32px));
+    border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
   main { min-width: 0; }
   .reopen { position: fixed; top: 10px; left: 10px; z-index: 20; background: var(--bg-elev); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 10px; color: var(--text-dim); }

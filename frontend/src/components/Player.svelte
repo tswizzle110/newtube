@@ -7,7 +7,7 @@
 
   // video: metadata from /api/video/<id>.  startAt: resume position (s).  api: bindable handle.
   // sb: { data: {segments, full_labels}, settings, channelId } once SponsorBlock info has loaded.
-  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null, sb = null, theater = false, ontheater = null } = $props()
+  let { video, startAt = 0, source = 'direct', api = $bindable(), onended = null, sb = null, theater = false, ontheater = null, compact = false, keys = true } = $props()
 
   let box, el
   let paused = $state(true)
@@ -364,6 +364,7 @@
   api = { seekTo, toggle, get time() { return el?.currentTime ?? 0 }, el: () => el }
 
   function onKey(e) {
+    if (!keys) return                      // the mini-player must not answer the keyboard while you use another page
     if (e.target.closest?.('input, textarea, select, [contenteditable]') || e.ctrlKey || e.metaKey || e.altKey) return
     const k = e.key
     const act = {
@@ -417,7 +418,7 @@
 <svelte:window onkeydown={onKey} onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="player" class:idle={!showControls && !paused} bind:this={box} onmousemove={wake} onmouseleave={() => !paused && (showControls = false)}>
+<div class="player" class:compact class:idle={!showControls && !paused} bind:this={box} onmousemove={wake} onmouseleave={() => !paused && (showControls = false)}>
   <!-- svelte-ignore a11y_media_has_caption -->
   <video bind:this={el} playsinline
     bind:paused bind:volume bind:muted
@@ -635,6 +636,9 @@
   kbd { font: inherit; font-size: 11px; opacity: 0.7; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .tip { position: absolute; bottom: 22px; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); padding: 3px 8px;
     border-radius: 6px; font-size: 12px; text-align: center; pointer-events: none; white-space: nowrap; }
+  /* the mini-player: only the essentials fit */
+  .player.compact .vol, .player.compact .chap, .player.compact .theater, .player.compact .time { display: none; }
+  .player.compact .bigplay { width: 52px; height: 52px; font-size: 20px; }
   .row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
   .row button { background: none; border: 0; color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 14px; }
   .row button:hover { background: rgba(255, 255, 255, 0.18); }

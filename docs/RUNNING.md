@@ -139,6 +139,17 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## Theater mode and the mini-player
+
+**Theater mode** (the ▭ button in the player, or `t`) gives the video the whole width of the window and moves
+Up next below it. It is remembered.
+
+**Mini-player:** if you leave the video page (search, open a channel, go Home...) while a video is playing, it does
+not stop: it shrinks into a small player in the bottom-right corner and carries on, with no restart and the same
+position. Hover it for a title bar with **⤢** (back to the full video page, still playing) and **✕** (close it).
+Opening any other video replaces it. The mini-player ignores keyboard shortcuts, so Space and the arrow keys still
+scroll the page you are on. A playlist or list keeps advancing to the next video in the mini-player too.
+
 ## Search filters
 
 A video search has three filters under the tabs: **Uploaded** (last hour, today, this week, this month, this year),

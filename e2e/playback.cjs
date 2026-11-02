@@ -413,6 +413,40 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.click('.related .card .title >> nth=0'); await p.waitForURL(/v=e2eREL00001/);
   check('clicking one plays it and records where you came from', p.url().includes('src=related'));
 
+  // ---- Mini-player: leaving the video page keeps the video playing in a corner box
+  await p.goto(BASE + '/watch?v=e2eVIDEO001&src=subs');
+  await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1.5, null, { timeout: 20000 });
+  await p.evaluate(() => { document.querySelector('video').dataset.mark = 'orig'; });
+  await p.click('aside.side a:has-text("Settings")');                    // an ordinary in-app navigation
+  await p.waitForSelector('.watchhost.mini');
+  const miniState = () => p.evaluate(() => { const v = document.querySelector('.watchhost video'); const r = document.querySelector('.watchhost').getBoundingClientRect();
+    return { t: v.currentTime, paused: v.paused, mark: v.dataset.mark, n: document.querySelectorAll('video').length, r: r.right, b: r.bottom, w: r.width, vw: innerWidth, vh: innerHeight }; });
+  const m0 = await miniState(); await p.waitForTimeout(1800); const m1 = await miniState();
+  check('leaving the video page turns it into a mini-player that keeps playing (same video, no restart)',
+    m1.mark === 'orig' && m1.n === 1 && !m1.paused && m1.t > m0.t + 1, JSON.stringify({ m0, m1 }));
+  check('...in the bottom-right corner, small, with the page you went to intact', m1.r <= m1.vw && m1.b <= m1.vh && m1.vw - m1.r < 40 && m1.w <= 400 &&
+    (await p.locator('h2:has-text("Start page")').count()) === 1 && (await p.locator('.watchhost.mini .related').isVisible()) === false);
+  await p.evaluate(() => document.activeElement?.blur()); await p.keyboard.press(' '); await p.waitForTimeout(400);
+  check('the mini-player ignores the keyboard (Space still belongs to the page)', !(await miniState()).paused);
+  await p.hover('.watchhost.mini'); await p.click('.minibar button[aria-label="Open the video page"]');
+  await p.waitForURL(/\/watch\?v=e2eVIDEO001/); await p.waitForTimeout(300);
+  const expanded0 = await p.evaluate(() => { const v = document.querySelector('video'); return { mark: v.dataset.mark, paused: v.paused, n: document.querySelectorAll('video').length, mini: !!document.querySelector('.watchhost.mini') }; });
+  check('expanding returns to the full page with the same video still playing', expanded0.mark === 'orig' && !expanded0.paused && expanded0.n === 1 && !expanded0.mini, JSON.stringify(expanded0));
+  check('...and its keyboard shortcuts work again', await (async () => { await p.keyboard.press('k'); await p.waitForTimeout(300); const paused = await p.evaluate(() => document.querySelector('video').paused); await p.keyboard.press('k'); return paused; })());
+  await p.click('aside.side a:has-text("Settings")'); await p.waitForSelector('.watchhost.mini');
+  await p.hover('.watchhost.mini'); await p.click('.minibar button[aria-label="Close the mini player"]');
+  await p.waitForFunction(() => !document.querySelector('video'));
+  check('Close removes the mini-player and its video', (await p.locator('.watchhost').count()) === 0);
+  // a different video replaces the mini-player (and is the page, not a second player)
+  await p.goto(BASE + '/watch?v=e2eMUXED001&src=subs');
+  await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
+  await p.evaluate(() => { document.querySelector('video').dataset.mark = 'muxed'; });
+  await p.fill('aside.side input[aria-label="Search"]', 'zoo'); await p.keyboard.press('Enter');
+  await p.waitForSelector('.page .grid .card'); await p.waitForSelector('.watchhost.mini');
+  await p.click('.page .grid .card a.title >> nth=0'); await p.waitForURL(/\/watch\?v=e2eVIDEO001/);
+  await p.waitForFunction(() => document.querySelector('video') && !document.querySelector('video').dataset.mark);
+  check('opening another video replaces the mini-player: one player, the new video', (await p.locator('video').count()) === 1 && (await p.locator('.watchhost.mini').count()) === 0);
+
   // ---- Like / Watch later, and the lists they build
   await p.goto(BASE + '/watch?v=e2eMUXED001'); await p.waitForSelector('.byline .actions');
   check('the video page has Like and Watch later, both off to start with',
@@ -428,7 +462,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     (await p.locator('aside.side a:has-text("Watch later") .count').innerText()) === '1');
   await p.click('aside.side a:has-text("Liked videos")'); await p.waitForSelector('.grid .card');
   check('Liked videos lists it, with a Remove action', (await p.locator('.grid .card').count()) === 1 &&
-    (await p.locator('h1').innerText()) === 'Liked videos' && (await p.locator('.card .act:has-text("Remove")').count()) === 1);
+    (await p.locator('.page h1').innerText()) === 'Liked videos' && (await p.locator('.card .act:has-text("Remove")').count()) === 1);
   await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
   check('Play all plays from the list (and shows it under the video)', p.url().includes('mylist=liked') && (await p.locator('.plist h2').innerText()).startsWith('Liked videos'));
   await p.goto(BASE + '/list/liked'); await p.waitForSelector('.grid .card');
@@ -468,15 +502,15 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('Move later reorders it, and the new order survives a reload', order2.join() === order1.slice().reverse().join(), order2.join());
   await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
   check('Play all starts with the first video of the new order', new URL(p.url()).searchParams.get('v') === order2[0] && p.url().includes('mylist='));
-  await p.goto(BASE + '/list/' + (await p.evaluate(() => 0).then(() => '3'))); await p.waitForSelector('h1');
+  await p.goto(BASE + '/list/' + (await p.evaluate(() => 0).then(() => '3'))); await p.waitForSelector('.page h1');
   await p.click('button:has-text("Rename")'); await p.fill('input[aria-label="Playlist name"]', 'E2E renamed'); await p.click('.rename button:has-text("Save")');
-  await p.waitForFunction(() => document.querySelector('h1')?.innerText === 'E2E renamed');
+  await p.waitForFunction(() => document.querySelector('.page h1')?.innerText === 'E2E renamed');
   check('Rename changes the title and the sidebar', (await p.locator('aside.side a:has-text("E2E renamed")').count()) === 1);
   p.once('dialog', (d) => d.accept());
   await p.click('button:has-text("Delete playlist")');
   await p.waitForFunction(() => location.pathname === '/');
   check('Delete playlist removes it from the sidebar and returns home', (await p.locator('aside.side a:has-text("E2E renamed")').count()) === 0);
-  await p.goto(BASE + '/list/liked'); await p.waitForSelector('h1');
+  await p.goto(BASE + '/list/liked'); await p.waitForSelector('.page h1');
   check('Liked videos cannot be renamed or deleted', (await p.locator('button:has-text("Rename")').count()) === 0 && (await p.locator('button:has-text("Delete playlist")').count()) === 0);
 
   // ---- History: what you watched, searchable, removable, and it stays removed
@@ -492,7 +526,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const removedTitle = await p.locator('.grid .card .title').first().innerText();
   await p.click('.card .act:has-text("Remove from history")');
   await p.waitForFunction((n) => document.querySelectorAll('.grid .card').length === n, hBefore - 1);
-  await p.reload(); await p.waitForSelector('h1');
+  await p.reload(); await p.waitForSelector('.page h1');
   await p.waitForTimeout(500);
   const titlesAfter = await p.locator('.grid .card .title').allInnerTexts();
   check('removing takes it off the history, and it stays off after a reload', titlesAfter.length === hBefore - 1, removedTitle);

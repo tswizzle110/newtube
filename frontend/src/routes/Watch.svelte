@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { router, navigate } from '../lib/router.svelte.js'
+  import { navigate } from '../lib/router.svelte.js'
   import { duration as fmt, ago, views } from '../lib/format.js'
   import Player from '../components/Player.svelte'
   import Comments from '../components/Comments.svelte'
@@ -9,10 +9,9 @@
   import ListButtons from '../components/ListButtons.svelte'
   import RelatedList from '../components/RelatedList.svelte'
 
-  const id = router.query.get('v')
-  const source = router.query.get('src') ?? 'direct'
-  const list = router.query.get('list')   // present when playing from a YouTube playlist
-  const mylist = router.query.get('mylist') // ...or from one of your own lists (Liked videos, Watch later, playlists you made)
+  // The video to play comes from the host (App), not from the address bar, so the same page can keep playing in a
+  // small corner player (`mini`) while you browse elsewhere. list: a YouTube playlist; mylist: one of your own lists.
+  let { id, source = 'direct', list = null, mylist = null, mini = false, onclose = null, onexpand = null, onnavigate = null } = $props()
   let pl = $state(null)
   let sbData = $state(null)       // SponsorBlock segments for this video
   let sbSettings = $state(null)   // your SponsorBlock settings
@@ -45,31 +44,38 @@
     if (mylist) api.get(`/api/mylists/${mylist}?limit=200`).then((p) => (pl = { playlist: { title: p.list.name }, videos: p.videos.map((v) => ({ ...v, title: v.title || v.id })) })).catch(() => {})
     api.get(`/api/video/${id}`).then((v) => {
       video = v
-      document.title = `${v.title} · newtube`
       timer = setInterval(() => { t = player?.time ?? 0 }, 500) // for highlighting the current chapter
     }).catch((e) => (error = e.message))
     return () => { clearInterval(timer); document.title = 'newtube' }
   })
+  $effect(() => { if (video && !mini) document.title = `${video.title} · newtube` })     // (not while it is only the mini-player)
 
   const current = $derived(video?.chapters?.findLastIndex((c) => c.start <= t) ?? -1)
   const at = $derived(pl ? pl.videos.findIndex((v) => v.id === id) : -1)
   const next = $derived(at >= 0 ? pl.videos[at + 1] : null)
   const watchHref = (vid) => (mylist ? `/watch?v=${vid}&src=playlist&mylist=${mylist}` : `/watch?v=${vid}&src=playlist&list=${list}`)
   // Playlist autoplay: when this video ends, go to the next one.
-  const advance = () => { if (next) navigate(watchHref(next.id)) }
+  const advance = () => { if (next) (onnavigate ?? navigate)(watchHref(next.id)) }
 </script>
 
-<div class="watch" class:theater>
+<div class="watch" class:theater class:mini>
   {#if error}
     <p class="error">{error}</p>
-    <a href="/" class="muted">Back to subscriptions</a>
+    {#if mini}<button class="btn" onclick={onclose}>Close</button>{:else}<a href="/" class="muted">Back home</a>{/if}
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}
     <div class="stage">
     <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list || mylist ? advance : null}
       sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null}
-      {theater} ontheater={toggleTheater} />
+      {theater} ontheater={mini ? null : toggleTheater} compact={mini} keys={!mini} />
+      {#if mini}
+        <div class="minibar">
+          <span class="mt" title={video.title}>{video.title}</span>
+          <button onclick={onexpand} aria-label="Open the video page" title="Open the video page">⤢</button>
+          <button onclick={onclose} aria-label="Close the mini player" title="Close">✕</button>
+        </div>
+      {/if}
     </div>
     <div class="details">
     <h1>{video.title}</h1>
@@ -128,7 +134,16 @@
      Up next sits in a column of its own beside the video and the comments. */
   .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 0 24px;
     grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "details" "related" "comments"; }
-  .stage { grid-area: stage; min-width: 0; }
+  .stage { grid-area: stage; min-width: 0; position: relative; }
+  /* the mini-player: just the video, with a small title bar on hover */
+  .watch.mini { display: block; padding: 0; max-width: none; }
+  .watch.mini .details, .watch.mini .related, .watch.mini .discussion { display: none; }
+  .minibar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 2px; padding: 4px 6px 14px 10px;
+    color: #fff; background: linear-gradient(rgba(0, 0, 0, 0.75), transparent); opacity: 0; transition: opacity 0.15s; z-index: 4; }
+  .stage:hover .minibar, .minibar:focus-within { opacity: 1; }
+  .minibar .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  .minibar button { background: none; border: 0; color: #fff; font-size: 16px; padding: 4px 8px; border-radius: 6px; }
+  .minibar button:hover { background: rgba(255, 255, 255, 0.2); }
   .details { grid-area: details; min-width: 0; }
   .related { grid-area: related; margin-top: 24px; min-width: 0; }
   .discussion { grid-area: comments; min-width: 0; }
