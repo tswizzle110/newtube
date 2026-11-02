@@ -1,0 +1,15 @@
+# Install:
+#   cp deploy/newtube-backup.service deploy/newtube-backup.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now newtube-backup.timer
+# Check:   systemctl --user list-timers newtube-backup      /    journalctl --user -u newtube-backup
+[Unit]
+Description=Nightly newtube database backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=10min
+# If the machine was off at 03:20, run once when it is next on.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

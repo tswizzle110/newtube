@@ -1,0 +1,11 @@
+# Nightly database snapshot, run by newtube-backup.timer. User service, no root needed.
+[Unit]
+Description=newtube database backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/newtube
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/uv run --frozen newtube backup
+NoNewPrivileges=true
+PrivateTmp=true

@@ -162,6 +162,43 @@ are remembered (locally). **Refresh** re-ranks using what you have done since.
 The weights are the `Weights` class in `newtube/recommend/baseline.py`. This is the hand-tuned baseline that a
 learned model will later have to beat in the offline evaluation.
 
+## Backups
+
+Your history, imports and likes live in one file, `data/newtube.db`. Take a safe copy any time, even while
+newtube is running:
+
+```bash
+cd ~/newtube && uv run newtube backup          # -> data/backups/newtube-YYYYMMDD-HHMMSS.db (UTC)
+uv run newtube backup --list
+```
+
+Each copy is made with SQLite's online backup, checked (`integrity_check`) before it is kept, and readable by you
+only. The newest 14 are kept (`backup_keep`; `backup_dir` changes the folder: set it to a different disk if you can).
+
+**Nightly, automatically** (a systemd timer; if the machine was off at 03:20 it runs when it next starts):
+
+```bash
+cp deploy/newtube-backup.service deploy/newtube-backup.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now newtube-backup.timer
+systemctl --user list-timers newtube-backup        # when it runs next
+journalctl --user -u newtube-backup                # what the last run said
+```
+
+A copy on the same disk does not survive that disk failing. Now and then copy `data/backups` somewhere else
+(another machine, an external drive); the files are private to you but **not encrypted**, so treat them like the
+database itself.
+
+**Restoring** (this replaces the current database with the copy):
+
+```bash
+systemctl --user stop newtube
+cp ~/newtube/data/newtube.db ~/newtube-before-restore.db      # keep what you have, just in case
+rm -f ~/newtube/data/newtube.db-wal ~/newtube/data/newtube.db-shm
+cp ~/newtube/data/backups/newtube-YYYYMMDD-HHMMSS.db ~/newtube/data/newtube.db
+systemctl --user start newtube
+```
+
 ## When YouTube breaks things
 
 Most breakages are fixed by a newer yt-dlp:

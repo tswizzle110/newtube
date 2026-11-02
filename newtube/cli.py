@@ -31,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="comma-separated parts to leave out: watch,search,subscriptions,likes,watch-later,playlists")
     bf = sub.add_parser("backfill", help="progress of filling in details for imported videos")
     bf.add_argument("backfill_command", choices=["status"], nargs="?", default="status")
+    bk = sub.add_parser("backup", help="save a safe copy of the database (works while newtube is running)")
+    bk.add_argument("--dir", metavar="DIR", help="where to put it (default: backup_dir in newtube.toml, else data/backups)")
+    bk.add_argument("--keep", type=int, metavar="N", help="how many copies to keep (default: backup_keep, 14)")
+    bk.add_argument("--list", action="store_true", help="list the copies instead of making one")
     sub.add_parser("migrate", help="apply database migrations")
     return p
 
@@ -50,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         return _passwd()
     if args.command == "takeout":
         return _takeout(args)
+    if args.command == "backup":
+        return _backup(args)
     if args.command == "backfill":
         return _backfill_status()
     if args.command == "migrate":
@@ -57,6 +63,36 @@ def main(argv: list[str] | None = None) -> int:
 
         return migrate_cli()
     return 2
+
+
+def _backup(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from .backup import BackupError, list_backups, make_backup
+    from .config import load_settings
+    from .db.connection import connect
+
+    s = load_settings()
+    dest = Path(args.dir).expanduser() if args.dir else s.backups_path
+    if args.list:
+        found = list_backups(dest)
+        for p in found:
+            print(f"{p}  {p.stat().st_size / 1e6:.1f} MB")
+        print(f"{len(found)} backup(s) in {dest}")
+        return 0
+    if not s.db_path.exists():
+        print(f"No database at {s.db_path}: nothing to back up.")
+        return 2
+    try:
+        b = make_backup(connect(s.db_path), dest, args.keep if args.keep else s.backup_keep)
+    except BackupError as e:
+        print(e)
+        return 1
+    print(f"Saved {b.path}  ({b.size / 1e6:.1f} MB; {b.events:,} events, {b.videos:,} videos; checked OK)")
+    if b.pruned:
+        print(f"Removed {len(b.pruned)} older backup(s).")
+    print("Keep a copy somewhere other than this machine too: a disk failure would take both.")
+    return 0
 
 
 def _backfill_status() -> int:

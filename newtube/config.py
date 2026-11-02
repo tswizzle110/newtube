@@ -41,6 +41,10 @@ class Settings:
     # Takeout backfill: videos whose details are fetched per rolling 24 hours (0 = never). See jobs/backfill.py.
     backfill_daily_cap: int = 300
 
+    # Database snapshots (`newtube backup`): where they go ("" = <data_dir>/backups) and how many to keep.
+    backup_dir: str = ""
+    backup_keep: int = 14
+
     # Built frontend (`cd frontend && npm run build`). Default: <repo>/frontend/dist
     frontend_dir: Path = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -60,6 +64,10 @@ class Settings:
     @property
     def db_path(self) -> Path:
         return self.data_dir / "newtube.db"
+
+    @property
+    def backups_path(self) -> Path:
+        return Path(self.backup_dir).expanduser() if self.backup_dir else self.data_dir / "backups"
 
     @property
     def cache_dir(self) -> Path:
