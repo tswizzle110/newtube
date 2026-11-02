@@ -29,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("--dry-run", action="store_true", help="do everything, report exact numbers, keep nothing")
     imp.add_argument("--skip", default="", metavar="PARTS",
                      help="comma-separated parts to leave out: watch,search,subscriptions,likes,watch-later,playlists")
+    bf = sub.add_parser("backfill", help="progress of filling in details for imported videos")
+    bf.add_argument("backfill_command", choices=["status"], nargs="?", default="status")
     sub.add_parser("migrate", help="apply database migrations")
     return p
 
@@ -48,11 +50,34 @@ def main(argv: list[str] | None = None) -> int:
         return _passwd()
     if args.command == "takeout":
         return _takeout(args)
+    if args.command == "backfill":
+        return _backfill_status()
     if args.command == "migrate":
         from .db.connection import migrate_cli
 
         return migrate_cli()
     return 2
+
+
+def _backfill_status() -> int:
+    from .config import load_settings
+    from .db.connection import connect, migrate
+    from .jobs.backfill import progress
+
+    s = load_settings()
+    conn = connect(s.db_path)
+    migrate(conn)
+    p = progress(conn, s.backfill_daily_cap)
+    print(f"Imported videos still waiting for details: {p['waiting']:,}  (+ {p['waiting_later']:,} to retry later)")
+    print(f"Done: {p['done']:,}   Private/deleted/given up: {p['gone']:,}")
+    if p["daily_cap"] <= 0:
+        print("Backfill is turned off (backfill_daily_cap = 0).")
+    else:
+        print(f"Fetched in the last 24 hours: {p['used_last_day']:,} of {p['daily_cap']:,} allowed")
+        if p["waiting"]:
+            days = -(-p["waiting"] // p["daily_cap"])
+            print(f"At this rate the rest takes about {days} day(s), while `newtube serve` is running.")
+    return 0
 
 
 def _passwd() -> int:

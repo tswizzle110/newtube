@@ -58,7 +58,7 @@ def store_feed(conn: sqlite3.Connection, feed: Feed) -> int:
                 "INSERT INTO videos(id, channel_id, title, description, published_at,"
                 " view_count, thumbnail_url, first_seen_at) VALUES (?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET view_count=excluded.view_count,"
-                "  title=excluded.title,"
+                "  title=excluded.title, from_import=0, channel_id=COALESCE(channel_id, excluded.channel_id),"
                 "  published_at=COALESCE(published_at, excluded.published_at)",
                 (e.video_id, feed.channel_id, e.title, e.description, e.published_at,
                  e.view_count, e.thumbnail_url, now),
@@ -91,7 +91,7 @@ def store_discovered(conn: sqlite3.Connection, channel_id: str, videos: list[Vid
     try:
         for position, v in enumerate(videos):
             if conn.execute("SELECT 1 FROM videos WHERE id=?", (v.id,)).fetchone():
-                conn.execute("UPDATE videos SET duration=COALESCE(duration, ?) WHERE id=?",
+                conn.execute("UPDATE videos SET duration=COALESCE(duration, ?), from_import=0 WHERE id=?",
                              (v.duration, v.id))
                 continue
             published = now - position if had_history else None
@@ -126,7 +126,7 @@ def get_feed(conn: sqlite3.Connection, *, limit: int = 60,
            " FROM videos v JOIN subscriptions s ON s.channel_id = v.channel_id"
            " JOIN channels c ON c.id = v.channel_id"
            " LEFT JOIN video_progress p ON p.video_id = v.id"
-           " WHERE v.published_at IS NOT NULL")
+           " WHERE v.published_at IS NOT NULL AND v.from_import = 0")
     args: list[object] = []
     if before is not None:
         sql += " AND v.published_at < ?"

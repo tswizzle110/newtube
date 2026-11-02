@@ -38,6 +38,8 @@ class Settings:
     min_request_interval: float = 0.8   # seconds between requests, before jitter
     request_jitter: float = 0.6         # extra random 0..jitter seconds
     background_daily_cap: int = 2000    # background-lane requests per day
+    # Takeout backfill: videos whose details are fetched per rolling 24 hours (0 = never). See jobs/backfill.py.
+    backfill_daily_cap: int = 300
 
     # Built frontend (`cd frontend && npm run build`). Default: <repo>/frontend/dist
     frontend_dir: Path = Path(__file__).resolve().parent.parent / "frontend" / "dist"

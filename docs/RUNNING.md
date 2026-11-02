@@ -124,6 +124,21 @@ What is skipped, and why, is listed in the report: removed videos, ads, communit
 products have no usable video, so they are counted but not stored. Imported items arrive with only an id (and
 the title and channel the history gave); the full details are filled in later, slowly, within the request budget.
 
+### Filling in the details (automatic)
+
+Imported videos start with just an id. While `newtube serve` is running, it fetches the details (title, channel,
+length, date) slowly in the background: about one video a minute, never more than `backfill_daily_cap` (default
+300) in any 24 hours, and only when no subscribed channel is waiting for its update. Liked videos go first, then
+watch later, then videos you watched more than once, then the rest, newest first. Private or deleted videos are
+remembered and not asked for again. If YouTube ever asks for a bot check, the backfill pauses for 6 hours.
+
+```bash
+uv run newtube backfill status
+```
+
+shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
+These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
+
 ## When YouTube breaks things
 
 Most breakages are fixed by a newer yt-dlp:

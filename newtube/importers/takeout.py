@@ -235,7 +235,7 @@ class DbSink:
             "INSERT OR IGNORE INTO channels(id, title, created_at) VALUES (?,?,?)",
             [(cid, title or cid, self.now) for cid, title in self._channels.items()])
         self.stats["videos_new"] += self._changes(
-            "INSERT OR IGNORE INTO videos(id, channel_id, title, first_seen_at) VALUES (?,?,?,?)",
+            "INSERT OR IGNORE INTO videos(id, channel_id, title, first_seen_at, from_import) VALUES (?,?,?,?,1)",
             [(vid, ch, title, self.now) for vid, (ch, title) in self._videos.items()])
         self.stats["events_new"] += self._changes(
             "INSERT OR IGNORE INTO events(ts, type, video_id, channel_id, payload) VALUES (?,?,?,?,?)",

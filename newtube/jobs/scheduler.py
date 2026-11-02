@@ -2,7 +2,8 @@
 
 Phase 1: poll subscribed channels' RSS feeds. Each tick handles at most one
 channel, then sleeps a jittered interval, so polling is spread out instead of
-bursty. (Phase 4 adds metadata backfill and related-video lookups here.)
+bursty. When no channel is due, the same loop fills in details of imported (Takeout) videos, one at a
+time, within its own daily budget (see backfill.py).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from ..extract.base import ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
 from ..net.ratelimit import DailyCapReached, Lane
+from .backfill import Backfiller
 
 log = logging.getLogger("newtube.jobs")
 RETRY_AFTER = 600   # seconds before retrying a channel whose poll failed completely
@@ -56,6 +58,8 @@ class Scheduler:
         self._rss_failures = 0
         self._rss_skip_until = 0.0
         self._last_purge = 0.0
+        self.backfiller = (Backfiller(conn, extractor, settings.backfill_daily_cap)
+                           if extractor is not None else None)
 
     async def _poll_rss(self, cid: str) -> int:
         try:
@@ -113,6 +117,9 @@ class Scheduler:
         while True:
             self.housekeeping()
             result = await self.tick()
-            # Busy: a few seconds (jittered) between channels. Idle/capped: check back in a bit.
-            base = 5.0 if result == "polled" else 300.0
+            if result == "idle" and self.backfiller is not None:
+                result = await self.backfiller.step()
+            # Busy: a few seconds (jittered) between channels. Backfill: about a minute between videos,
+            # so the daily budget is spread over hours. Idle/capped: check back in a bit.
+            base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0}.get(result, 300.0)
             await self._sleep(base * (0.5 + self._rand()))
