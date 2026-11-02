@@ -289,11 +289,23 @@ class SelfTest:
                 f"{len(parents)} comments" + (f" ({len(orphans)} orphaned!)" if orphans else ""))
 
     async def sponsorblock(self) -> str:
-        p = sponsorblock_prefix(TEST_VIDEO)
-        r = await self.http.get(f"https://sponsor.ajay.app/api/skipSegments/{p}")
-        if r.status_code not in (200, 404):
-            raise RuntimeError(f"unexpected status {r.status_code}")
-        return f"hash-prefix lookup /{p} -> HTTP {r.status_code}"
+        """Hash-prefix lookup. The response also holds OTHER videos that share the prefix, so we use
+        one of them to check that our parser copes with real submissions."""
+        from .sponsorblock.provider import SponsorBlockApi, hash_prefix, parse_response
+        api = SponsorBlockApi(self.http, RateLimiter(0.25, 0.1, 10**9))
+        data = await api.raw(TEST_VIDEO)
+        self._dump("sponsorblock_prefix", {"entries": data[:20] if isinstance(data, list) else data})
+        ours = parse_response(data, TEST_VIDEO)
+        head = f"prefix /{hash_prefix(TEST_VIDEO)}: {len(data)} video(s) share it; ours has {len(ours.segments)} segment(s)"
+        others = [d for d in data if isinstance(d, dict) and d.get("videoID") != TEST_VIDEO and d.get("segments")]
+        if not others:
+            return head + " (nothing to test the parser on)"
+        sample = parse_response(data, others[0]["videoID"])
+        raw_n = len(others[0]["segments"])
+        if len(sample.segments) + len(sample.full_labels) < 1:
+            raise RuntimeError(f"{head}; parser found nothing in a real entry with {raw_n} raw segments")
+        cats = sorted({g.category for g in sample.segments} | set(sample.full_labels))
+        return f"{head}; parsed a real entry: {len(sample.segments)} segment(s) + {len(sample.full_labels)} full label(s), {', '.join(cats)}"
 
     async def run(self) -> list[Result]:
         for name, fn in [

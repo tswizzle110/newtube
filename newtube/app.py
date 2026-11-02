@@ -22,6 +22,8 @@ from .media.diskcache import DiskCache
 from .net.http import OutboundClient
 from .net.ratelimit import RateLimiter
 from .services.comments import CommentService
+from .sponsorblock.provider import SponsorBlockApi
+from .sponsorblock.service import SponsorBlockService
 from .services.lists import ListService
 from .services.videos import VideoService
 
@@ -41,12 +43,17 @@ class Context:
     run_scheduler: bool = True
     lists: ListService | None = None
     comments: CommentService | None = None
+    sponsorblock: SponsorBlockService | None = None
 
     def __post_init__(self) -> None:
         if self.lists is None:
             self.lists = ListService(self.conn, self.extractor)
         if self.comments is None:
             self.comments = CommentService(self.conn, self.extractor)
+        if self.sponsorblock is None:
+            # SponsorBlock is a different host from YouTube: it gets its own, lighter limiter.
+            self.sponsorblock = SponsorBlockService(
+                self.conn, SponsorBlockApi(self.http, RateLimiter(0.25, 0.1, 10**9)))
 
 
 def build_context(settings: Settings | None = None) -> Context:
@@ -66,7 +73,7 @@ def build_context(settings: Settings | None = None) -> Context:
 
 def create_app(ctx: Context | None = None) -> FastAPI:
     from .api import auth as auth_api
-    from .api import comments, events, lists, media, subscriptions, videos
+    from .api import comments, events, lists, media, sponsorblock, subscriptions, videos
     from .security import GuardMiddleware
 
     @contextlib.asynccontextmanager
@@ -91,6 +98,7 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app.include_router(events.router)
     app.include_router(lists.router)
     app.include_router(comments.router)
+    app.include_router(sponsorblock.router)
     app.include_router(media.router)
     app.include_router(videos.router)
     app.include_router(subscriptions.router)

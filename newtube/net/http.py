@@ -109,18 +109,21 @@ class OutboundClient:
         )
 
     async def get(
-        self, url: str, *, lane: Lane = Lane.INTERACTIVE, **kwargs: Any
+        self, url: str, *, lane: Lane = Lane.INTERACTIVE, limited: bool = True, **kwargs: Any
     ) -> httpx.Response:
-        """Rate-limited GET for API-style requests (RSS, SponsorBlock, ...)."""
+        """GET for API-style requests. ``limited=False`` skips the YouTube limiter: for other hosts
+        (SponsorBlock), which the caller paces with its own limiter."""
         check_url(url)
-        await self.limiter.acquire(lane)
+        if limited:
+            await self.limiter.acquire(lane)
         return await self._http.get(url, **kwargs)
 
     async def post(
-        self, url: str, *, lane: Lane = Lane.INTERACTIVE, **kwargs: Any
+        self, url: str, *, lane: Lane = Lane.INTERACTIVE, limited: bool = True, **kwargs: Any
     ) -> httpx.Response:
         check_url(url)
-        await self.limiter.acquire(lane)
+        if limited:
+            await self.limiter.acquire(lane)
         return await self._http.post(url, **kwargs)
 
     async def get_media(self, url: str, **kwargs: Any) -> httpx.Response:
