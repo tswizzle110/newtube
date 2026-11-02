@@ -91,11 +91,13 @@ class ListService:
     def _store(self, key: str, value: Any, ttl: int) -> None:
         cache.put(self.conn, f"list:v{CACHE_VERSION}:{key}", value, ttl)
 
-    async def search(self, query: str, kind: str, limit: int = 20) -> list[dict[str, Any]]:
-        key = f"search:{kind}:{limit}:{hashlib.sha1(query.strip().lower().encode()).hexdigest()}"
+    async def search(self, query: str, kind: str, limit: int = 20, filters=None) -> list[dict[str, Any]]:
+        extra = f":{filters.key()}" if filters else ""
+        key = f"search:{kind}:{limit}{extra}:{hashlib.sha1(query.strip().lower().encode()).hexdigest()}"
         items = self._cached(key)
         if items is None:
-            items = [to_dict(i) for i in await self.extractor.search(query, kind, limit)]
+            kwargs = {"filters": filters} if filters else {}        # (only passed when used: simple extractors need not know)
+            items = [to_dict(i) for i in await self.extractor.search(query, kind, limit, **kwargs)]
             self._store(key, items, TTL_SEARCH)
         return enrich_videos(self.conn, items)
 

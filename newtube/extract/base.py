@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 # ---------------------------------------------------------------- errors
 
@@ -183,8 +183,9 @@ class Extractor(Protocol):
         ...
 
     async def search(self, query: str, kind: str = "video", limit: int = 20, *,
-                     background: bool = False) -> list[SearchItem]:
-        """``kind`` is 'video', 'channel' or 'playlist'."""
+                     background: bool = False, filters: Any = None) -> list[SearchItem]:
+        """``kind`` is 'video', 'channel' or 'playlist'. ``filters`` (a ``SearchFilter``: upload date, duration,
+        sort) is passed only when one is in use."""
         ...
 
     async def channel_videos(self, channel_id: str, limit: int = 30, *,

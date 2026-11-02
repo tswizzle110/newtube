@@ -120,7 +120,7 @@ class Ex:
                 out += [Comment(f"{cid}.r{j}", f"reply {j} to {i}", "Replier", parent=cid) for j in range(2)]
         return CommentPage(out, 4321)
 
-    async def search(self, query, kind="video", limit=20, *, background=False):
+    async def search(self, query, kind="video", limit=20, *, background=False, filters=None):
         cid = "UC" + "a" * 22
         return {"video": [VideoSummary("e2eVIDEO001", "Search result video", cid, "E2E Channel", 24, 5000)],
                 "channel": [ChannelSummary(cid, "E2E Channel", "@e2e", "A test channel", "//yt3.ggpht.com/av=s176", 1200)],

@@ -320,6 +320,20 @@ class SelfTest:
             raise RuntimeError(f"no videos parsed from {len(raw.get('entries') or [])} raw entries")
         return f"{self.playlist_id[:14]}...: {len(vids)} videos; first '{vids[0].title[:40]}'"
 
+    async def search_filters(self) -> str:
+        """The duration filter really narrows results: ask for videos over 20 minutes and check their lengths."""
+        from .extract.searchfilter import SearchFilter
+        raw = await self.extractor.raw_search("documentary", "video", 20, filters=SearchFilter(duration="long"))  # type: ignore[attr-defined]
+        self._dump("search_filters", raw)
+        from .extract.ytdlp import parse_entries
+        vids = [v for v in parse_entries(raw) if isinstance(v, VideoSummary) and v.duration]
+        if len(vids) < 3:
+            raise RuntimeError(f"only {len(vids)} results with a length")
+        long = sum(v.duration >= 1100 for v in vids)         # (a little under 20 min, in case of rounding)
+        if long < 0.8 * len(vids):
+            raise RuntimeError(f"the 'over 20 minutes' filter had no effect: only {long} of {len(vids)} results are long")
+        return f"{long} of {len(vids)} results are over 20 minutes"
+
     async def related(self) -> str:
         """YouTube's Mix for a video, read as a playlist: the source of "Up next" and of recommendation candidates."""
         from .extract.ytdlp import parse_entries
@@ -384,7 +398,7 @@ class SelfTest:
             ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("video_hd", self.video_hd), ("thumbnail", self.thumbnail),
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
-            ("channel_videos", self.channel_videos), ("channel_sort", self.channel_sort), ("playlist", self.playlist_videos), ("related", self.related),
+            ("channel_videos", self.channel_videos), ("channel_sort", self.channel_sort), ("playlist", self.playlist_videos), ("related", self.related), ("search_filters", self.search_filters),
             ("comments_top", self.comments_top), ("comment_replies", self.comment_replies),
             ("sponsorblock", self.sponsorblock),
         ]:

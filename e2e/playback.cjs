@@ -368,6 +368,26 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('unsubscribing removes the channel from the sidebar straight away', (await p.locator('ul.subs li a').count()) === 0);
   await p.click('.head button'); await p.waitForFunction(() => document.querySelectorAll('ul.subs li a').length === 1);
   check('subscribing adds it back', (await p.locator('ul.subs li a .name').innerText()) === 'E2E Channel');
+  // ---- Search filters: choose upload date / length / sort; they are part of the address and reach the server
+  await p.goto(BASE + '/search?q=filtertest&kind=video'); await p.waitForSelector('.filters');
+  check('a video search offers date, length and sort filters (not for channels)', (await p.locator('.filters select').count()) === 3);
+  await p.selectOption('select[aria-label="Duration"]', 'long');
+  await p.waitForFunction(() => location.search.includes('duration=long'));
+  await p.selectOption('select[aria-label="Upload date"]', 'week');
+  await p.waitForFunction(() => location.search.includes('date=week') && location.search.includes('duration=long'));
+  await p.selectOption('select[aria-label="Sort by"]', 'views');
+  await p.waitForSelector('.grid .card');
+  check('the chosen filters are kept in the address and shown selected after the page reloads',
+    new URL(p.url()).search.includes('sort=views') && (await p.locator('select[aria-label="Duration"]').inputValue()) === 'long' &&
+    (await p.locator('select[aria-label="Upload date"]').inputValue()) === 'week' && (await p.locator('select[aria-label="Sort by"]').inputValue()) === 'views');
+  const fEvents = await (await ctx.request.get(BASE + '/__events')).json();
+  const fSearch = fEvents.filter(e => e.type === 'search' && JSON.parse(e.payload).q === 'filtertest').map(e => JSON.parse(e.payload).filters).filter(Boolean).pop();
+  check('...and reach the server (and the local search log)', JSON.stringify(fSearch) === JSON.stringify({ date: 'week', duration: 'long', sort: 'views' }), JSON.stringify(fSearch));
+  await p.goto(BASE + '/search?q=filtertest&kind=channel'); await p.waitForSelector('.tabs');
+  check('channel searches have no video filters', (await p.locator('.filters').count()) === 0);
+  await p.goto(BASE + '/search?q=filtertest&kind=video&date=decade&sort=bogus'); await p.waitForSelector('.filters');
+  check('nonsense filter values in the address are ignored, not an error', (await p.locator('.error').count()) === 0 && (await p.locator('select[aria-label="Sort by"]').inputValue()) === '');
+
   // ---- Up next: related videos beside the player (or under it on a narrow window)
   await p.goto(BASE + '/watch?v=e2eVIDEO001'); await p.waitForSelector('.related .card', { timeout: 15000 });
   check('Up next lists the related videos', (await p.locator('.related .card').count()) === 2 &&

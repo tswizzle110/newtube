@@ -139,6 +139,15 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## Search filters
+
+A video search has three filters under the tabs: **Uploaded** (last hour, today, this week, this month, this year),
+**Length** (under 4 minutes, 4 to 20 minutes, over 20 minutes) and **Sort by** (relevance, upload date, view count).
+They are passed to YouTube the way its own site does (the `sp` parameter), they are part of the page address (so a
+filtered search can be bookmarked), and your search log records which ones you used. They apply to video searches
+only. `uv run newtube selftest` has a **search_filters** check that asks for "over 20 minutes" and confirms the
+results really are long, so a change on YouTube's side would show up there.
+
 ## Up next (related videos)
 
 Beside the video you are watching (below it on a narrow window) is **Up next**: videos related to it, taken from

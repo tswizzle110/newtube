@@ -26,6 +26,7 @@ from typing import Any
 import yt_dlp
 
 from ..config import Settings
+from .searchfilter import KINDS, BadFilter, SearchFilter, build_sp
 from ..net.http import absolute_url, ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
 from .base import (
@@ -39,8 +40,9 @@ HANDLE_RE = re.compile(r"^@[A-Za-z0-9._-]{3,}$")
 MAX_UPLOADS = 10_000   # the most uploads we read to sort a channel (~100 pages of ~100)
 PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{13,64}$")
 
-# YouTube's `sp` search-filter parameter (type = video / channel / playlist).
-SEARCH_FILTERS = {"video": "EgIQAQ%3D%3D", "channel": "EgIQAg%3D%3D", "playlist": "EgIQAw%3D%3D"}
+# YouTube's `sp` search-filter parameter: see searchfilter.py (type = video / channel / playlist, plus
+# upload date, duration and sort for videos).
+SEARCH_FILTERS = {kind: build_sp(kind) for kind in KINDS}
 
 
 # ------------------------------------------------------------ pure parsing
@@ -369,16 +371,20 @@ class YtDlpExtractor:
         return {"extract_flat": "in_playlist", "playlistend": limit, "noplaylist": False}
 
     async def raw_search(self, query: str, kind: str = "video", limit: int = 20, *,
-                         background: bool = False) -> dict[str, Any]:
+                         background: bool = False, filters: SearchFilter | None = None) -> dict[str, Any]:
         query = query.strip()
         if not 1 <= len(query) <= 200 or kind not in SEARCH_FILTERS:
             raise ExtractionError("bad search request")
-        url = f"https://www.youtube.com/results?search_query={quote_plus(query)}&sp={SEARCH_FILTERS[kind]}"
+        try:
+            sp = build_sp(kind, filters)
+        except BadFilter as e:
+            raise ExtractionError(f"bad search request: {e}") from e
+        url = f"https://www.youtube.com/results?search_query={quote_plus(query)}&sp={sp}"
         return await self._extract(url, self._flat(max(1, min(limit, 50))), background)
 
     async def search(self, query: str, kind: str = "video", limit: int = 20, *,
-                     background: bool = False) -> list[SearchItem]:
-        return parse_entries(await self.raw_search(query, kind, limit, background=background))
+                     background: bool = False, filters: SearchFilter | None = None) -> list[SearchItem]:
+        return parse_entries(await self.raw_search(query, kind, limit, background=background, filters=filters))
 
     async def raw_channel_videos(self, channel_id: str, limit: int = 30, *,
                                  background: bool = False) -> dict[str, Any]:

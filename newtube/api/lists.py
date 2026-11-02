@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..app import Context
 from ..db.queries.events import log_event
 from ..extract.base import BotCheck, ExtractionError
+from ..extract.searchfilter import BadFilter, SearchFilter, check
 from .deps import get_ctx, valid_channel_id, valid_playlist_id
 
 router = APIRouter(prefix="/api")
@@ -20,17 +21,28 @@ def _fail(e: ExtractionError) -> HTTPException:
 
 @router.get("/search")
 async def search(q: str = Query(min_length=1, max_length=200), kind: str = "video",
-                 limit: int = Query(20, ge=1, le=50),
-                 ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
+                 limit: int = Query(20, ge=1, le=50), date: str | None = None, duration: str | None = None,
+                 sort: str | None = None, ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
+    """``date`` (hour, today, week, month, year), ``duration`` (short, medium, long) and ``sort`` (date, views)
+    narrow a VIDEO search; they are ignored for channels and playlists."""
     q = q.strip()
     if not q or kind not in ("video", "channel", "playlist"):
         raise HTTPException(400, "bad search")
     try:
-        results = await ctx.lists.search(q, kind, limit)
+        filters = check(SearchFilter(date or None, duration or None, sort or None))
+    except BadFilter as e:
+        raise HTTPException(400, str(e)) from e
+    if kind != "video":
+        filters = SearchFilter()
+    try:
+        results = await ctx.lists.search(q, kind, limit, filters or None)
     except ExtractionError as e:
         raise _fail(e) from e
     # Search history stays local; it is one of the recommender's taste signals.
-    log_event(ctx.conn, "search", payload={"q": q, "kind": kind, "n": len(results)})
+    payload: dict[str, Any] = {"q": q, "kind": kind, "n": len(results)}
+    if filters:
+        payload["filters"] = {"date": filters.upload_date, "duration": filters.duration, "sort": filters.sort}
+    log_event(ctx.conn, "search", payload=payload)
     return {"query": q, "kind": kind, "results": results}
 
 
