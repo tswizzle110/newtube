@@ -187,3 +187,20 @@ def test_the_scheduler_backfills_only_when_no_channel_is_due(conn):
     s = Scheduler(Settings(), conn, http=None, extractor=FakeExtractor())
     assert run(s.tick()) == "idle"                                                # nothing due -> the loop moves on to backfill
     assert run(s.backfiller.step()) == "fetched"
+
+
+def test_videos_imported_before_the_column_existed_are_adopted_by_the_migration(tmp_path):
+    """Someone imported with the earlier version, then updated: their videos must still be backfilled."""
+    from newtube.db import connection
+    c = connect(tmp_path / "old.db")
+    migrations = sorted(connection.MIGRATIONS_DIR.glob("*.sql"))
+    for m in migrations:
+        if m.name.startswith("004"):
+            break
+        c.executescript(m.read_text())
+    c.execute("INSERT INTO videos(id,title,first_seen_at) VALUES ('imported0001','',1)")
+    c.execute("INSERT INTO events(ts,type,video_id) VALUES (5,'import_watch','imported0001')")
+    c.execute("INSERT INTO videos(id,title,published_at,first_seen_at) VALUES ('fromfeed0001','x',100,1)")
+    c.execute("INSERT INTO events(ts,type,video_id) VALUES (5,'import_watch','fromfeed0001')")
+    c.executescript(next(m for m in migrations if m.name.startswith("004")).read_text())
+    assert [r[0] for r in c.execute("SELECT id FROM videos WHERE from_import=1")] == ["imported0001"]
