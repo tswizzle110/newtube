@@ -17,6 +17,18 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--dump", metavar="DIR", help="save redacted raw extractor output here "
                                                   "(handy for tests / bug reports)")
     sub.add_parser("passwd", help="set the login password")
+    tk = sub.add_parser("takeout", help="import a Google Takeout (watch history, subscriptions, likes...)")
+    tsub = tk.add_subparsers(dest="takeout_command", required=True)
+    ins = tsub.add_parser("inspect", help="describe an export; reads it, writes nothing")
+    imp = tsub.add_parser("import", help="import an export into the database (all or nothing)")
+    for sp in (ins, imp):
+        sp.add_argument("paths", nargs="+", help="the Takeout .zip file(s), or the folder they were unpacked to")
+        sp.add_argument("--include-music", action="store_true", help="also count YouTube Music plays (skipped by default)")
+        sp.add_argument("--likes", metavar="NAME", help="part of the file name of your liked-videos playlist (if not detected)")
+        sp.add_argument("--watch-later", metavar="NAME", help="part of the file name of your watch-later playlist (if not detected)")
+    imp.add_argument("--dry-run", action="store_true", help="do everything, report exact numbers, keep nothing")
+    imp.add_argument("--skip", default="", metavar="PARTS",
+                     help="comma-separated parts to leave out: watch,search,subscriptions,likes,watch-later,playlists")
     sub.add_parser("migrate", help="apply database migrations")
     return p
 
@@ -34,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         return run(dump_dir=args.dump)
     if args.command == "passwd":
         return _passwd()
+    if args.command == "takeout":
+        return _takeout(args)
     if args.command == "migrate":
         from .db.connection import migrate_cli
 
@@ -59,6 +73,37 @@ def _passwd() -> int:
         return 1
     print("Password set. All existing sessions are logged out.")
     return 0
+
+
+def _takeout(args: argparse.Namespace) -> int:
+    from .importers.takeout import PARTS, NullSink, Options, format_report, read_takeout, run_import
+
+    skip = {s.strip() for s in getattr(args, "skip", "").split(",") if s.strip()}
+    if skip - set(PARTS):
+        print(f"Unknown part(s) to skip: {', '.join(sorted(skip - set(PARTS)))}. Choose from: {', '.join(PARTS)}")
+        return 2
+    opts = Options(include_music=args.include_music, skip=skip, likes=args.likes, watch_later=args.watch_later)
+
+    def progress(msg: str) -> None:
+        print(msg, file=sys.stderr, flush=True)
+
+    try:
+        if args.takeout_command == "inspect":
+            print(format_report(read_takeout(args.paths, NullSink(), opts, progress)))
+            return 0
+        from .config import load_settings
+        from .db.connection import connect, migrate
+
+        conn = connect(load_settings().db_path)
+        migrate(conn)
+        rep = run_import(conn, args.paths, opts, dry_run=args.dry_run, progress=progress)
+        print(format_report(rep, wrote=not args.dry_run))
+        if not args.dry_run:
+            print("\nDone. Run it again any time (or with a newer export): nothing is imported twice.")
+        return 0
+    except FileNotFoundError as e:
+        print(e)
+        return 2
 
 
 if __name__ == "__main__":

@@ -86,6 +86,44 @@ systemctl --user restart newtube
 - **Keys:** `?` in the player lists every shortcut (space/k, j/l, arrows, `f`, `c`, `<` `>`, `{` `}` for
   chapters, `[` `]` to mark a SponsorBlock segment, `u` to undo a skip).
 
+## Importing your Google history (Takeout)
+
+This gives the recommender something to learn from on day one. It reads a file you downloaded yourself;
+newtube never logs in to Google.
+
+1. At <https://takeout.google.com> choose **only YouTube and YouTube Music**. Under *All YouTube data included*
+   select **history**, **playlists** and **subscriptions**. Under *Multiple formats* set **history to JSON**
+   (the default is HTML, which cannot be read). Export once, as a `.zip`.
+2. Copy the zip to the server (`scp takeout-*.zip server:~/`). You do not need to unpack it; an unpacked folder
+   works too.
+3. Look before you import. This only reads, writes nothing, and prints counts, date ranges, and the *shape* of
+   any file it could not use (key names and types, never your history):
+
+   ```bash
+   cd ~/newtube && uv run newtube takeout inspect ~/takeout-*.zip
+   ```
+
+4. Rehearse. A dry run does the whole import and then undoes it, so the numbers are exact:
+
+   ```bash
+   uv run newtube takeout import ~/takeout-*.zip --dry-run
+   ```
+
+5. Import for real. It is all-or-nothing (a failure leaves the database untouched) and safe to repeat: running
+   it again, or with a newer export that overlaps, only adds what is new.
+
+   ```bash
+   uv run newtube takeout import ~/takeout-*.zip
+   ```
+
+Options: `--skip watch,search,subscriptions,likes,watch-later,playlists` leaves parts out;
+`--include-music` also counts YouTube Music plays (off by default); `--likes NAME` / `--watch-later NAME` say
+which playlist file is which if your export's language is one it could not recognise.
+
+What is skipped, and why, is listed in the report: removed videos, ads, community posts and other Google
+products have no usable video, so they are counted but not stored. Imported items arrive with only an id (and
+the title and channel the history gave); the full details are filled in later, slowly, within the request budget.
+
 ## When YouTube breaks things
 
 Most breakages are fixed by a newer yt-dlp:
