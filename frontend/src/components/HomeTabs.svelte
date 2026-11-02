@@ -4,8 +4,8 @@
 </script>
 
 <nav class="tabs" aria-label="Home">
-  <a href="/" class:active={is('/')}>Subscriptions</a>
-  <a href="/for-you" class:active={is('/for-you')}>For you</a>
+  <a href="/" class:active={is('/')}>Home</a>
+  <a href="/subscriptions" class:active={is('/subscriptions')}>Subscriptions</a>
 </nav>
 
 <style>

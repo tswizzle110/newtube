@@ -7,6 +7,9 @@ function read(key, fallback) {
     return v === null ? fallback : v === '1'
   } catch { return fallback }
 }
+function readStr(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback } catch { return fallback }
+}
 function write(key, value) {
   try { localStorage.setItem(key, value ? '1' : '0') } catch { /* private mode */ }
 }
@@ -14,11 +17,16 @@ function write(key, value) {
 export const nav = $state({
   collapsed: read('sidebarCollapsed', window.innerWidth < 900), // narrow windows start without it
   subsOpen: read('subsOpen', false),
+  startPage: readStr('startPage', 'home'),                  // which page newtube opens on: 'home' or 'subscriptions'
 })
 export const subs = $state({ list: [], loaded: false })
 
 export function setCollapsed(v) { nav.collapsed = v; write('sidebarCollapsed', v) }
 export function setSubsOpen(v) { nav.subsOpen = v; write('subsOpen', v) }
+export function setStartPage(v) {
+  nav.startPage = v
+  try { localStorage.setItem('startPage', v) } catch { /* private mode */ }
+}
 
 /** (Re)load the channel list; call after subscribing or unsubscribing. */
 export async function loadSubs() {

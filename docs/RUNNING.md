@@ -178,9 +178,17 @@ in your database: nothing is sent to YouTube, and your YouTube account is not to
 - The recommender uses them: liked videos raise the channels and subjects you like for as long as they stay on
   the list (remove one and it stops counting), and Watch later items are recommended until you watch or remove them.
 
-## "For you" (recommendations)
+## Home and Subscriptions
 
-The **For you** tab next to Subscriptions ranks videos from your subscriptions (last 45 days) and your Watch
+**Home** (the first tab, and the first item in the sidebar) is the mixed front page: a shelf of **New from your
+subscriptions** (your newest unwatched uploads, with *See all*), then **Recommended for you**, ranked from your
+subscriptions, Watch later and videos related to what you like. **Subscriptions** is the plain chronological feed
+of your channels, as before. In **Settings → Start page** you choose which one newtube opens on (remembered by
+that browser only); Home is always one click away.
+
+## How recommendations are ranked
+
+The **Recommended for you** list on Home ranks videos from your subscriptions (last 45 days) and your Watch
 later list. It reads only your own database: it never contacts YouTube. Each video scores the sum of a few
 transparent terms, and **Why this?** under a card shows every term with its points and the total:
 

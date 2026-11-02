@@ -45,7 +45,7 @@
   function openSubscriptions(e) {
     e.preventDefault()
     setSubsOpen(true)
-    navigate('/')
+    navigate('/subscriptions')
   }
 </script>
 
@@ -61,9 +61,9 @@
   </form>
 
   <nav>
-    <a class="item" class:active={is('/for-you')} href="/for-you">For you</a>
-    <div class="row" class:active={is('/')}>
-      <a class="label" href="/" onclick={openSubscriptions}>Subscriptions</a>
+    <a class="item" class:active={is('/')} href="/">Home</a>
+    <div class="row" class:active={is('/subscriptions')}>
+      <a class="label" href="/subscriptions" onclick={openSubscriptions}>Subscriptions</a>
       <button class="chev" aria-expanded={nav.subsOpen} aria-controls="sub-list" title={nav.subsOpen ? 'Hide channels' : 'Show channels'}
               onclick={() => setSubsOpen(!nav.subsOpen)}>{nav.subsOpen ? '▾' : '▸'}</button>
     </div>

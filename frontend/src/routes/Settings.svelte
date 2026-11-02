@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { COLORS } from '../lib/sponsorblock.js'
+  import { nav, setStartPage } from '../lib/nav.svelte.js'
 
   const ACTIONS = [['auto', 'Skip automatically'], ['button', 'Show skip button'], ['mark', 'Only mark on the bar'], ['ignore', 'Ignore']]
   let s = $state(null)
@@ -51,6 +52,20 @@
 <div class="page narrow">
   <h1>Settings</h1>
   {#if error}<p class="error">{error}</p>{/if}
+  <h2>Start page</h2>
+  <p class="muted">
+    What newtube shows when you open it. Home is recommendations plus the newest uploads from your subscriptions;
+    Subscriptions is just the chronological feed. (Remembered by this browser only.)
+  </p>
+  <div class="row">
+    <label>Open newtube on
+      <select value={nav.startPage} onchange={(e) => setStartPage(e.target.value)} aria-label="Open newtube on">
+        <option value="home">Home</option>
+        <option value="subscriptions">Subscriptions</option>
+      </select>
+    </label>
+  </div>
+
   {#if pb}
     <h2>Playback <span class="status muted">{status}</span></h2>
     <p class="muted">

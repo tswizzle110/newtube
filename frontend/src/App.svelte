@@ -1,11 +1,11 @@
 <script>
   import { onMount, tick } from 'svelte'
-  import { router, interceptLinks } from './lib/router.svelte.js'
+  import { router, navigate, interceptLinks } from './lib/router.svelte.js'
   import { auth, checkAuth, logout } from './lib/auth.svelte.js'
   import { nav, setCollapsed, loadSubs, loadLists } from './lib/nav.svelte.js'
   import Login from './routes/Login.svelte'
   import Feed from './routes/Feed.svelte'
-  import ForYou from './routes/ForYou.svelte'
+  import Home from './routes/Home.svelte'
   import MyList from './routes/MyList.svelte'
   import History from './routes/History.svelte'
   import Channels from './routes/Channels.svelte'
@@ -19,7 +19,16 @@
   let sidebar = $state()
 
   onMount(checkAuth)
-  $effect(() => { if (auth.loggedIn) { loadSubs(); loadLists() } })   // the sidebar's channel list and your lists
+  let started = false
+  $effect(() => {
+    if (!auth.loggedIn) return
+    loadSubs(); loadLists()                        // the sidebar's channel list and your lists
+    if (!started) {                                // only when newtube is first opened, never on later visits to Home
+      started = true
+      if (router.pathname === '/for-you') navigate('/', { replace: true })           // the old address of Home
+      else if (router.pathname === '/' && nav.startPage === 'subscriptions') navigate('/subscriptions', { replace: true })
+    }
+  })
 
   let theme = $state(readTheme())
   function readTheme() {
@@ -58,9 +67,9 @@
     <main>
       {#key router.path}
         {#if is('/')}
+          <Home />
+        {:else if is('/subscriptions')}
           <Feed />
-        {:else if is('/for-you')}
-          <ForYou />
         {:else if is('/history')}
           <History />
         {:else if router.pathname.startsWith('/list/')}
@@ -78,7 +87,7 @@
         {:else if is('/settings')}
           <Settings />
         {:else}
-          <div class="page"><h1>Not found</h1><a href="/" class="muted">Back to subscriptions</a></div>
+          <div class="page"><h1>Not found</h1><a href="/" class="muted">Back home</a></div>
         {/if}
       {/key}
     </main>

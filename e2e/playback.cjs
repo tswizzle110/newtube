@@ -236,7 +236,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const mpd2 = await p.evaluate(async () => (await fetch('/api/dash/e2eVP9VID01.mpd')).text());
   check('a 1080p limit falls back to H.264', mpd2.includes('avc1') && !mpd2.includes('vp09'));
   await p.goto(BASE + '/settings'); await p.waitForSelector('select');
-  check('Playback section on the settings page', (await p.locator('h2:has-text("Playback")').count()) === 1 && (await p.locator('select').first().inputValue()) === 'auto');
+  check('Playback section on the settings page', (await p.locator('h2:has-text("Playback")').count()) === 1 && (await p.locator('select').nth(1).inputValue()) === 'auto');         // (the first select is the start page)
   await p.evaluate(async () => fetch('/api/settings/playback', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ codec: 'auto', max_height: 0 }) }));
 
   // ---- comments: lazy, sortable, replies capped at the first 10, timestamps seek
@@ -319,10 +319,10 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const listed = await p.locator('ul.subs li a .name').allInnerTexts();
   // (the fake data names this channel differently on different pages, so check the entry, not its spelling)
   check('clicking Subscriptions opens the channel list under it', listed.length === 1, JSON.stringify(listed));
-  check('...and takes you to the subscriptions feed', new URL(p.url()).pathname === '/');
+  check('...and takes you to the subscriptions feed', new URL(p.url()).pathname === '/subscriptions');
   check('the channel list shows an avatar (served by our proxy)', await V(p, () => { const i = document.querySelector('ul.subs img'); return !!i && i.src.includes('/api/avatar/'); }));
   await p.click('aside.side .chev'); await p.waitForTimeout(150);
-  check('the arrow collapses the list without leaving the page', (await p.locator('ul.subs').count()) === 0 && new URL(p.url()).pathname === '/');
+  check('the arrow collapses the list without leaving the page', (await p.locator('ul.subs').count()) === 0 && new URL(p.url()).pathname === '/subscriptions');
   await p.click('aside.side .chev'); await p.waitForSelector('ul.subs li a');
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
   check('the open/closed state is remembered', (await p.locator('ul.subs').count()) === 1);
@@ -468,27 +468,40 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
 
   // ---- For you: recommendations, with a visible reason for each and a way to say no
   await ctx.request.get(BASE + '/__seed_recommendable');
-  await p.goto(BASE + '/for-you'); await p.waitForSelector('.grid .card');
+  await p.goto(BASE + '/'); await p.waitForSelector('.grid .card');
+  // The two seeded uploads are NEW uploads from a subscription, so they sit on the shelf at the top; the ranked list
+  // below holds the rest (here the related videos), each with its reasons.
   const card = (title) => p.locator('.grid .card', { has: p.locator(`a.title[title="${title}"]`) });
-  const recTitles = async () => p.locator('.grid .card a.title').evaluateAll((as) => as.map((a) => a.title));
-  const recFirst = await recTitles();
-  check('For you is a tab next to Subscriptions and lists recommended videos (the two seeded ones among them)',
-    (await p.locator('nav.tabs a.active').innerText()) === 'For you' && recFirst.includes('Recommended 1') && recFirst.includes('Recommended 2'), JSON.stringify(recFirst));
-  await card('Recommended 1').locator('.act:has-text("Why this?")').click();
+  const gridTitles = async () => p.locator('.grid .card a.title').evaluateAll((as) => as.map((a) => a.title));
+  const shelfTitles = async () => p.locator('.shelf .card a.title').evaluateAll((as) => as.map((a) => a.title));
+  const shelf = await shelfTitles(), ranked = await gridTitles();
+  check('Home is the first tab; new uploads from subscriptions are on a shelf, recommendations below',
+    (await p.locator('nav.tabs a.active').innerText()) === 'Home' && shelf.includes('Recommended 1') && shelf.includes('Recommended 2') &&
+    ranked.includes('Related two') && !ranked.includes('Recommended 1'), JSON.stringify({ shelf, ranked }));
+  await card('Related two').locator('.act:has-text("Why this?")').click();
   const why = await p.locator('.why li').allInnerTexts();
-  check('"Why this?" lists each reason with its points, then the total', why.length >= 3 && why.some(t => /subscribe/.test(t)) &&
+  check('"Why this?" lists each reason with its points, then the total', why.length >= 3 && why.some(t => /Related to videos you have watched/.test(t)) &&
     why.slice(0, -1).every(t => /[+-]\d+\.\d\d/.test(t)) && why.at(-1).startsWith('Score'), JSON.stringify(why));
-  await card('Recommended 1').locator('.act:has-text("Not interested")').click();
-  await p.waitForFunction(() => ![...document.querySelectorAll('.grid .card a.title')].some((a) => a.title === 'Recommended 1'));
+  await card('Related two').locator('.act:has-text("Not interested")').click();
+  await p.waitForFunction(() => ![...document.querySelectorAll('.grid .card a.title')].some((a) => a.title === 'Related two'));
   await p.waitForTimeout(6000);                                  // tracker batches for 5 s
   const recEvts = await (await ctx.request.get(BASE + '/__events')).json();
-  check('Not interested removes the card and is logged for the recommender', recEvts.some(e => e.type === 'not_interested' && e.video_id === 'recVIDEO001'));
-  await p.reload(); await p.waitForSelector('.grid .card');
-  const recAfter = await recTitles();
-  check('...and the video stays gone after a reload (the other one is still there)', !recAfter.includes('Recommended 1') && recAfter.includes('Recommended 2'), JSON.stringify(recAfter));
+  check('Not interested removes the card and is logged for the recommender', recEvts.some(e => e.type === 'not_interested' && e.video_id === 'e2eREL00002'));
+  await p.reload(); await p.waitForSelector('.shelf .card');
+  check('...and the video stays gone after a reload', !(await gridTitles()).includes('Related two'), JSON.stringify(await gridTitles()));
   await p.screenshot({ path: require('os').tmpdir() + '/newtube-foryou.png' });
-  await p.goto(BASE + '/'); await p.waitForSelector('nav.tabs');
-  check('the Subscriptions tab is still the home page', (await p.locator('nav.tabs a.active').innerText()) === 'Subscriptions');
+  check('the Home page also has a shelf of new uploads from your subscriptions', (await p.locator('section[aria-label="New from your subscriptions"]').count()) === 1);
+  await p.goto(BASE + '/subscriptions'); await p.waitForSelector('nav.tabs');
+  check('Subscriptions is its own tab and page', (await p.locator('nav.tabs a.active').innerText()) === 'Subscriptions' && (await p.locator('aside.side .row.active').count()) === 1);
+  await p.goto(BASE + '/for-you'); await p.waitForSelector('nav.tabs');
+  check('the old /for-you address lands on Home', new URL(p.url()).pathname === '/' && (await p.locator('nav.tabs a.active').innerText()) === 'Home');
+  await p.goto(BASE + '/settings'); await p.waitForSelector('select[aria-label="Open newtube on"]');
+  await p.selectOption('select[aria-label="Open newtube on"]', 'subscriptions');
+  await p.goto(BASE + '/'); await p.waitForURL(/\/subscriptions$/);
+  check('"Open newtube on: Subscriptions" starts there', new URL(p.url()).pathname === '/subscriptions');
+  await p.click('nav.tabs a:has-text("Home")'); await p.waitForSelector('h2:has-text("Recommended for you")');
+  check('...but Home is still one click away and is not redirected away from', new URL(p.url()).pathname === '/');
+  await p.goto(BASE + '/settings'); await p.selectOption('select[aria-label="Open newtube on"]', 'home');
 
   // hide / show the sidebar, and `/` brings it back with the search box focused
   await p.click('aside.side .icon');
