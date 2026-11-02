@@ -69,7 +69,10 @@ systemctl --user restart newtube
 
 - **Sidebar:** the navigation is on the left. Click **Subscriptions** to see your feed and open your
   channel list underneath it (the arrow ▸ opens/closes the list without leaving the page). Click a channel
-  to open its page, where you can sort by **Newest / Popular / Oldest** (YouTube's own ordering).
+  to open its page, where you can sort by **Newest / Popular / Oldest**. Popular and Oldest are built from the
+  channel's uploads list (up to 500 videos, read once and cached), because YouTube ignores sort options on the
+  Videos tab: Popular is "most viewed among the newest 500", and Oldest is only offered for channels with
+  500 videos or fewer (the page says so when it isn't).
   The ☰ button hides the sidebar; `/` brings it back and focuses the search box.
 - **Quality:** the quality button offers every resolution the video has, up to 2160p (4K). Above 1080p
   YouTube only serves VP9/AV1, which need more computer power than H.264: **Settings → Playback** lets you
@@ -94,6 +97,16 @@ If `selftest` still fails, send me the output. Extraction code is confined to
 Copy `newtube.toml.example` to `newtube.toml` (git-ignored) or set `NEWTUBE_*` environment
 variables. To send all outbound traffic through a proxy later, set `outbound_proxy`: one
 setting covers the app and yt-dlp.
+
+## IPv4 or IPv6
+
+`selftest` prints the address YouTube saw (`exit_ip`). If it is an IPv6 address, that is your server's own
+address rather than your router's shared IPv4 one. To force a family, put this in `newtube.toml`
+(ignored when `outbound_proxy` is set, because then the proxy decides):
+
+```toml
+ip_version = "4"        # "auto" (default), "4" or "6"
+```
 
 ## Hiding your home IP: route everything through gluetun / a VPN
 

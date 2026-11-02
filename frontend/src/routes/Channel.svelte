@@ -32,8 +32,10 @@
   }
   onMount(load)
 
-  // YouTube's lists can't be paged here, so "load more" asks for a longer list (the sidebar's cost is tiny).
-  function more() { limit = Math.min(limit + 30, 120); load() }
+  // Newest: YouTube's list can't be paged, so "load more" asks for a longer one (capped). Popular/Oldest are
+  // sorted from a list we already hold, so they can go much further at no extra cost.
+  const maxLimit = sort === 'newest' ? 120 : 500
+  function more() { limit = Math.min(limit + 30, maxLimit); load() }
 
   async function toggleSub() {
     busy = true
@@ -78,14 +80,16 @@
         <VideoCard video={v} surface="channel" position={i} {requestId} />
       {/each}
     </div>
-    {#if !page.videos.length && !loading}<p class="muted">No videos found.</p>{/if}
+    {#if page.unavailable}
+      <p class="muted">{page.unavailable} <a class="link" href={`/channel/${id}`}>Show newest instead</a></p>
+    {:else if !page.videos.length && !loading}
+      <p class="muted">No videos found.</p>
+    {/if}
     {#if loading}<p class="muted">Loading…</p>{/if}
-    {#if !loading && page.videos.length >= limit && limit < 120}
+    {#if !loading && page.has_more && limit < maxLimit}
       <p><button class="btn" onclick={more}>Load more videos</button></p>
     {/if}
-    {#if sort !== 'newest'}
-      <p class="muted small">Ordered by YouTube ({sort}). Upload dates and view counts appear for videos this app has seen before.</p>
-    {/if}
+    {#if page.notice}<p class="muted small">{page.notice}</p>{/if}
   {/if}
 </div>
 
@@ -100,6 +104,7 @@
   .sorts a:hover { background: var(--bg-hover); color: var(--text); }
   .sorts a.on { background: var(--text); color: var(--bg); }
   .small { font-size: 13px; }
+  .link { color: var(--accent); }
   .desc { margin: 8px 0 0; max-width: 70ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 18px; }
 </style>

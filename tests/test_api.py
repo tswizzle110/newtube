@@ -73,14 +73,19 @@ class FakeExtractor:
                                          "https://i.ytimg.com/vi/Yocja_N5s1I/hq720.jpg")],
         }[kind]
 
-    async def channel_page(self, channel_id, limit=30, *, sort="newest", background=False):
+    async def channel_page(self, channel_id, limit=30, *, background=False):
         self.list_calls += 1
-        self.channel_calls = getattr(self, "channel_calls", []) + [(sort, limit)]
+        self.channel_calls = getattr(self, "channel_calls", []) + [limit]
         # like the real channel tab: entries carry no views / date / channel name
         vids = [VideoSummary(VID, "Upload one", channel_id, "YouTube", 607), VideoSummary("bbbbbbbbbbb", "Upload two", channel_id, "YouTube", 60)]
-        if sort != "newest":
-            vids.reverse()                       # a different order, as YouTube would give
         return (ChannelInfo(channel_id, "YouTube", "@YouTube", "https://yt3.ggpht.com/av", "official", 46600000), vids[:limit])
+
+    async def channel_uploads(self, channel_id, limit=500, *, background=False):
+        """The uploads playlist: newest first, WITH view counts (shape of the real playlist entries)."""
+        self.upload_calls = getattr(self, "upload_calls", 0) + 1
+        views = [10, 500, 30, 500, None]
+        vids = [VideoSummary(f"vid{i:08d}", f"Video {i}", channel_id, "YouTube", 60 + i, v) for i, v in enumerate(views)]
+        return vids, getattr(self, "uploads_total", 5)
 
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         self.list_calls += 1
@@ -401,24 +406,73 @@ def test_comments_require_login_and_surface_extractor_failures(env):
     assert client.get(f"/api/comments/{V}?sort=new").status_code == 503
 
 
-def test_channel_page_sorting_is_validated_cached_per_sort_and_reported(env):
+
+
+# ---- channel sorting: Popular / Oldest are built from the uploads list ------------------------------
+
+def titles(r):
+    return [v["title"] for v in r["videos"]]
+
+
+def test_popular_ranks_by_views_and_oldest_reverses_from_ONE_fetch(env):
     client, ctx, ex, _ = env
     new = client.get(f"/api/channel/{CID}").json()
-    old = client.get(f"/api/channel/{CID}?sort=oldest").json()
     pop = client.get(f"/api/channel/{CID}?sort=popular").json()
-    assert (new["sort"], old["sort"], pop["sort"]) == ("newest", "oldest", "popular")
-    assert [v["title"] for v in new["videos"]] == ["Upload one", "Upload two"]
-    assert [v["title"] for v in old["videos"]] == ["Upload two", "Upload one"]
-    assert ex.channel_calls == [("newest", 30), ("oldest", 30), ("popular", 30)]
-    client.get(f"/api/channel/{CID}?sort=oldest")                        # each sort is cached on its own
-    assert len(ex.channel_calls) == 3
+    old = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert titles(new) == ["Upload one", "Upload two"]                       # newest: the Videos tab
+    assert titles(pop) == ["Video 1", "Video 3", "Video 2", "Video 0", "Video 4"]   # 500, 500 (stable), 30, 10, unknown last
+    assert titles(old) == ["Video 4", "Video 3", "Video 2", "Video 1", "Video 0"]
+    assert (new["sort"], pop["sort"], old["sort"]) == ("newest", "popular", "oldest")
+    assert ex.upload_calls == 1                                              # both sorts share one scan
+    assert pop["channel"]["title"] == "YouTube" and ex.channel_calls == [30]  # header came with the newest page
+    assert "notice" not in pop and "unavailable" not in old and pop["videos"][0]["view_count"] == 500
+
+
+def test_switching_sort_or_loading_more_costs_no_further_requests(env):
+    client, ctx, ex, _ = env
+    first = client.get(f"/api/channel/{CID}?sort=popular&limit=2").json()
+    assert titles(first) == ["Video 1", "Video 3"] and first["has_more"] is True
+    more = client.get(f"/api/channel/{CID}?sort=popular&limit=5").json()
+    assert len(more["videos"]) == 5 and more["has_more"] is False
+    client.get(f"/api/channel/{CID}?sort=oldest")
+    assert ex.upload_calls == 1
+
+
+def test_a_sorted_page_without_the_newest_page_fetches_the_header_once(env):
+    client, ctx, ex, _ = env
+    r = client.get(f"/api/channel/{CID}?sort=popular").json()
+    assert r["channel"]["title"] == "YouTube" and ex.channel_calls == [1]
+    client.get(f"/api/channel/{CID}?sort=oldest")
+    assert ex.channel_calls == [1]
+
+
+def test_big_channels_get_an_honest_partial_popular_and_no_oldest(env):
+    client, ctx, ex, _ = env
+    ex.uploads_total = 3214
+    pop = client.get(f"/api/channel/{CID}?sort=popular").json()
+    assert len(pop["videos"]) == 5 and "newest 5 of 3214" in pop["notice"]
+    old = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    assert old["videos"] == [] and "3214 videos" in old["unavailable"]
+
+
+def test_unknown_total_with_a_full_scan_also_counts_as_partial(env, monkeypatch):
+    from newtube.services import lists
+    monkeypatch.setattr(lists, "SCAN_LIMIT", 5)
+    client, ctx, ex, _ = env
+    ex.uploads_total = None
+    assert "notice" in client.get(f"/api/channel/{CID}?sort=popular").json()
+    assert "unavailable" in client.get(f"/api/channel/{CID}?sort=oldest").json()
+
+
+def test_channel_sort_and_limit_are_validated(env):
+    client, *_ = env
     assert client.get(f"/api/channel/{CID}?sort=best").status_code == 400
     assert client.get(f"/api/channel/{CID}?limit=0").status_code == 422
-    assert client.get(f"/api/channel/{CID}?limit=121").status_code == 422
+    assert client.get(f"/api/channel/{CID}?limit=501").status_code == 422
 
 
-def test_channel_page_limit_is_part_of_the_cache_key(env):
+def test_newest_limit_is_part_of_its_cache_key(env):
     client, ctx, ex, _ = env
     assert len(client.get(f"/api/channel/{CID}?limit=1").json()["videos"]) == 1
     assert len(client.get(f"/api/channel/{CID}?limit=30").json()["videos"]) == 2
-    assert ex.channel_calls == [("newest", 1), ("newest", 30)]
+    assert ex.channel_calls == [1, 30]

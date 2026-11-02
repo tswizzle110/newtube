@@ -250,7 +250,7 @@ async def test_comments_request_builds_yt_dlp_limits(monkeypatch):
     args = seen["extractor_args"]["youtube"]
     assert args["max_comments"] == ["20", "20", "all", "0", "1"] and args["comment_sort"] == ["new"]
     assert seen["getcomments"] is True and seen["sleep_interval_requests"] == 0.7
-    assert page.total_estimate == 4321 and len(page.comments) == 2
+    assert page.total_estimate is None and len(page.comments) == 2     # yt-dlp's comment_count = number extracted
     await ex.comments("jNQXAC9IVRw", "top", 20, replies_for=3, replies_per_thread=5)
     assert seen["extractor_args"]["youtube"]["max_comments"] == ["18", "3", "all", "5", "2"]
     for bad in [dict(sort="hot"), dict(limit=0), dict(limit=101), dict(replies_for=16), dict(replies_per_thread=0)]:
@@ -260,22 +260,25 @@ async def test_comments_request_builds_yt_dlp_limits(monkeypatch):
         await ex.comments("bad id")
 
 
-async def test_channel_sort_urls_and_validation(monkeypatch):
+async def test_uploads_playlist_url_and_parsing(monkeypatch):
     from newtube.config import Settings
     from newtube.extract.ytdlp import YtDlpExtractor
     from newtube.net.ratelimit import RateLimiter
-    ex = YtDlpExtractor(Settings(), RateLimiter(0, 0, 10))
-    urls = []
+    ex = YtDlpExtractor(Settings(min_request_interval=0.7), RateLimiter(0, 0, 10))
+    seen = {}
 
     async def fake(url, extra, background):
-        urls.append((url, extra["playlistend"]))
-        return {"entries": []}
+        seen.update(url=url, **extra)
+        return {"playlist_count": 3214, "entries": [dict(real.PLAYLIST_VIDEO), {"id": "short", "title": "junk"}]}
     monkeypatch.setattr(ex, "_extract", fake)
-    for sort in ("newest", "popular", "oldest"):
-        await ex.raw_channel_videos(UC, 40, sort=sort)
-    base = f"https://www.youtube.com/channel/{UC}/videos"
-    assert urls == [(base, 40), (base + "?view=0&sort=p&flow=grid", 40), (base + "?view=0&sort=da&flow=grid", 40)]
-    await ex.raw_channel_videos(UC, 9999)
-    assert urls[-1][1] == 150                                              # clamped
+    videos, total = await ex.channel_uploads(UC, 9999)
+    assert seen["url"] == f"https://www.youtube.com/playlist?list=UU{UC[2:]}"      # UU + the id without its UC
+    assert seen["playlistend"] == 500 and seen["sleep_interval_requests"] == 0.7   # clamped, and paced
+    assert total == 3214 and [v.id for v in videos] == ["Yocja_N5s1I"]
+    assert videos[0].view_count == 17000000                                         # playlist entries DO carry views
+    async def no_total(url, extra, background):
+        return {"entries": []}
+    monkeypatch.setattr(ex, "_extract", no_total)
+    assert await ex.channel_uploads(UC, 5) == ([], None)
     with pytest.raises(ExtractionError):
-        await ex.raw_channel_videos(UC, 10, sort="random")
+        await ex.channel_uploads("nope")

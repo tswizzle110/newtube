@@ -285,22 +285,24 @@ class SelfTest:
         return f"{len(vids)} videos; newest '{vids[0].title[:40]}', duration {vids[0].duration}s"
 
     async def channel_sort(self) -> str:
-        """Do 'popular' and 'oldest' really come back in a different order than 'newest'?"""
+        """Popular/Oldest are built from the channel's uploads list. Does it exist, and do its entries carry
+        the view counts we rank by?"""
+        t0 = time.monotonic()
+        raw = await self.extractor.raw_uploads(TEST_CHANNEL_ID, 200)  # type: ignore[attr-defined]
+        self._dump("channel_uploads", {"entries": raw.get("entries", [])[:40], "playlist_count": raw.get("playlist_count")})
         from .extract.ytdlp import parse_entries
-        firsts: dict[str, list[str]] = {}
-        for sort in ("newest", "popular", "oldest"):
-            raw = await self.extractor.raw_channel_videos(TEST_CHANNEL_ID, 8, sort=sort)  # type: ignore[attr-defined]
-            self._dump(f"channel_{sort}", raw)
-            vids = [i for i in parse_entries(raw) if isinstance(i, VideoSummary)]
-            if not vids:
-                raise RuntimeError(f"sort={sort}: no videos came back")
-            firsts[sort] = [v.id for v in vids]
-        problems = [f"'{s}' has the same order as 'newest'" for s in ("popular", "oldest") if firsts[s] == firsts["newest"]]
-        if firsts["popular"][0] == firsts["oldest"][0]:
-            problems.append("'popular' and 'oldest' start with the same video")
-        if problems:
-            raise RuntimeError("YouTube ignored the sort: " + "; ".join(problems))
-        return "newest / popular / oldest start with " + ", ".join(f"{s[0]}={firsts[s][0]}" for s in firsts)
+        vids = [i for i in parse_entries(raw) if isinstance(i, VideoSummary)]
+        took = time.monotonic() - t0
+        if len(vids) < 20:
+            raise RuntimeError(f"the uploads list returned only {len(vids)} videos")
+        with_views = [v for v in vids if v.view_count]
+        if len(with_views) < 0.8 * len(vids):
+            raise RuntimeError(f"only {len(with_views)}/{len(vids)} entries carry a view count, so Popular can't be ranked")
+        top = max(with_views, key=lambda v: v.view_count or 0)
+        if top.id == vids[0].id:
+            raise RuntimeError("the most viewed video is also the newest: suspicious, ranking can't be told apart")
+        return (f"{len(vids)} uploads in {took:.1f}s (channel total: {raw.get('playlist_count')}); {len(with_views)} with view "
+                f"counts; most viewed '{top.title[:30]}' ({top.view_count:,})")
 
     async def playlist_videos(self) -> str:
         if not self.playlist_id:
@@ -322,8 +324,8 @@ class SelfTest:
             raise RuntimeError(f"only {len(top)} top-level comments parsed from "
                                f"{len(raw.get('comments') or [])} raw")
         c = top[0]
-        return (f"{len(top)} comments (YouTube says ~{raw.get('comment_count')}); first by "
-                f"'{c.author}': '{c.text[:30]}', {c.like_count} likes, '{c.time_text}'")
+        return (f"{len(top)} comments; first by '{c.author}': '{c.text[:30]}', "
+                f"{c.like_count} likes, '{c.time_text}'")
 
     async def comment_replies(self) -> str:
         from .extract.ytdlp import parse_comments
@@ -400,7 +402,7 @@ def run(dump_dir: str | None = None) -> int:
             await http.aclose()
 
     print(f"newtube selftest (python {sys.version.split()[0]}, proxy: "
-          f"{settings.outbound_proxy or 'none'})\n")
+          f"{settings.outbound_proxy or 'none'}, ip_version: {settings.ip_version})\n")
     results = asyncio.run(main())
     print(format_results(results))
     return 0 if all(r.ok for r in results) else 1

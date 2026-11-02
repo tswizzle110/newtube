@@ -36,12 +36,10 @@ from .base import (
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 HANDLE_RE = re.compile(r"^@[A-Za-z0-9._-]{3,}$")
+MAX_UPLOADS = 500      # the most uploads we scan to sort a channel (5 pages of ~100)
 PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{13,64}$")
 
 # YouTube's `sp` search-filter parameter (type = video / channel / playlist).
-# The Videos tab's own ordering, as URL parameters (yt-dlp's tests use exactly these two). The default is
-# newest-first, so it needs none.
-CHANNEL_SORTS = {"newest": "", "popular": "?view=0&sort=p&flow=grid", "oldest": "?view=0&sort=da&flow=grid"}
 SEARCH_FILTERS = {"video": "EgIQAQ%3D%3D", "channel": "EgIQAg%3D%3D", "playlist": "EgIQAw%3D%3D"}
 
 
@@ -344,12 +342,31 @@ class YtDlpExtractor:
                      background: bool = False) -> list[SearchItem]:
         return parse_entries(await self.raw_search(query, kind, limit, background=background))
 
-    async def raw_channel_videos(self, channel_id: str, limit: int = 30, *, sort: str = "newest",
+    async def raw_channel_videos(self, channel_id: str, limit: int = 30, *,
                                  background: bool = False) -> dict[str, Any]:
-        if not CHANNEL_ID_RE.match(channel_id) or sort not in CHANNEL_SORTS:
+        if not CHANNEL_ID_RE.match(channel_id):
             raise ExtractionError("bad channel request")
-        return await self._extract(f"https://www.youtube.com/channel/{channel_id}/videos{CHANNEL_SORTS[sort]}",
+        return await self._extract(f"https://www.youtube.com/channel/{channel_id}/videos",
                                    self._flat(max(1, min(limit, 150))), background)
+
+    async def raw_uploads(self, channel_id: str, limit: int = 500, *,
+                          background: bool = False) -> dict[str, Any]:
+        """The channel's "uploads" playlist (id = UU + the channel id minus its UC). Read in pages of
+        ~100, so its requests are paced like comments are."""
+        if not CHANNEL_ID_RE.match(channel_id):
+            raise ExtractionError("bad channel request")
+        extra = {**self._flat(max(1, min(limit, MAX_UPLOADS))),
+                 "sleep_interval_requests": self._settings.min_request_interval}
+        return await self._extract(f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}", extra, background)
+
+    async def channel_uploads(self, channel_id: str, limit: int = 500, *,
+                              background: bool = False) -> tuple[list[VideoSummary], int | None]:
+        info = await self.raw_uploads(channel_id, limit, background=background)
+        videos = [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
+        for v in videos:
+            v.channel_id = v.channel_id or channel_id
+        total = info.get("playlist_count")
+        return videos, int(total) if isinstance(total, (int, float)) else None
 
     async def channel_videos(self, channel_id: str, limit: int = 30, *,
                              background: bool = False) -> list[VideoSummary]:
@@ -368,9 +385,9 @@ class YtDlpExtractor:
         info = await self.raw_playlist(playlist_id, limit, background=background)
         return [i for i in parse_entries(info) if isinstance(i, VideoSummary)]
 
-    async def channel_page(self, channel_id: str, limit: int = 30, *, sort: str = "newest",
+    async def channel_page(self, channel_id: str, limit: int = 30, *,
                            background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
-        info = await self.raw_channel_videos(channel_id, limit, sort=sort, background=background)
+        info = await self.raw_channel_videos(channel_id, limit, background=background)
         try:
             ch = parse_channel_info(info)
         except ExtractionError:     # header fields missing: still show the uploads
@@ -424,4 +441,6 @@ class YtDlpExtractor:
                        background: bool = False) -> CommentPage:
         raw = await self.raw_comments(video_id, sort, limit, replies_for=replies_for,
                                       replies_per_thread=replies_per_thread, background=background)
-        return CommentPage(parse_comments(raw), raw.get("comment_count"))
+        # yt-dlp overwrites `comment_count` with the number it extracted, so the video's real total
+        # isn't available here; a provider that knows it can fill `total_estimate` in.
+        return CommentPage(parse_comments(raw), None)

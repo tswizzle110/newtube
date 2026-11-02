@@ -332,8 +332,8 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const titles = async () => (await p.locator('.grid .card .title').allInnerTexts()).join(',');
   check('default order is newest first', (await titles()) === 'Upload A,Upload B,Upload C' && (await p.locator('.sorts a.on').innerText()) === 'Newest');
   await p.click('.sorts a:has-text("Popular")'); await p.waitForSelector('.sorts a.on:has-text("Popular")');
-  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload C');
-  check('Popular re-orders the videos and the URL records it', (await titles()) === 'Upload C,Upload A,Upload B' && p.url().includes('sort=popular'));
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload B');
+  check('Popular ranks by view count (5000, 300, 100) and the URL records it', (await titles()) === 'Upload B,Upload C,Upload A' && p.url().includes('sort=popular'));
   await p.click('.sorts a:has-text("Oldest")');
   await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload C' && document.querySelectorAll('.grid .card .title')[1]?.innerText === 'Upload B');
   check('Oldest re-orders them again', (await titles()) === 'Upload C,Upload B,Upload A' && p.url().includes('sort=oldest'));

@@ -192,10 +192,16 @@ class Extractor(Protocol):
     async def playlist(self, playlist_id: str, limit: int = 100, *,
                        background: bool = False) -> list[VideoSummary]: ...
 
-    async def channel_page(self, channel_id: str, limit: int = 30, *, sort: str = "newest",
+    async def channel_page(self, channel_id: str, limit: int = 30, *,
                            background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
-        """Channel header + uploads from ONE request. ``sort`` is 'newest', 'oldest' or 'popular'
-        (YouTube's own ordering: the list entries carry neither dates nor view counts to sort by)."""
+        """Channel header + newest uploads from ONE request (the Videos tab: no view counts)."""
+        ...
+
+    async def channel_uploads(self, channel_id: str, limit: int = 500, *,
+                              background: bool = False) -> tuple[list[VideoSummary], int | None]:
+        """Up to ``limit`` of the channel's uploads, newest first, WITH view counts (from its
+        "uploads" playlist), plus the channel's total video count if known. This is what Popular
+        and Oldest are built from: YouTube ignores sort parameters on the Videos tab."""
         ...
 
     async def playlist_page(self, playlist_id: str, limit: int = 100, *,

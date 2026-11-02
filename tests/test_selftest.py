@@ -39,9 +39,13 @@ class FakeExtractor:
              "playlist": {"id": "PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI", "title": "Crash", "playlist_count": 3}}[kind]
         return {"entries": [e]}
 
-    async def raw_channel_videos(self, channel_id, limit=30, *, sort="newest", background=False):
-        ids = {"newest": ["jNQXAC9IVRw", "aaaaaaaaaaa"], "popular": ["bbbbbbbbbbb", "jNQXAC9IVRw"], "oldest": ["aaaaaaaaaaa", "jNQXAC9IVRw"]}
-        return {"entries": [{"id": i, "title": "Zoo", "duration": 19} for i in ids[sort]]}
+    async def raw_channel_videos(self, channel_id, limit=30, *, background=False):
+        return {"entries": [{"id": "jNQXAC9IVRw", "title": "Zoo", "duration": 19}]}
+
+    async def raw_uploads(self, channel_id, limit=500, *, background=False):
+        # newest first; the 5th is the most viewed. Entries carry view counts, like real playlist entries.
+        return {"playlist_count": 900, "entries": [
+            {"id": f"vid{i:08d}", "title": f"Video {i}", "duration": 60, "view_count": 1000 if i == 5 else 10 + i} for i in range(30)]}
 
     async def raw_playlist(self, playlist_id, limit=100, *, background=False):
         return {"entries": [{"id": "jNQXAC9IVRw", "title": "Zoo"}]}
@@ -148,10 +152,16 @@ async def test_exit_ip_says_so_when_the_url_has_no_ip():
     assert not res["exit_ip"].ok and "can't be determined" in res["exit_ip"].detail
 
 
-async def test_channel_sort_check_fails_loudly_when_youtube_ignores_the_sort():
-    class Ignoring(FakeExtractor):
-        async def raw_channel_videos(self, channel_id, limit=30, *, sort="newest", background=False):
-            return {"entries": [{"id": "jNQXAC9IVRw", "title": "Zoo"}, {"id": "aaaaaaaaaaa", "title": "B"}]}
+async def test_channel_sort_check_passes_on_a_realistic_uploads_list_and_names_the_top_video():
     http = OutboundClient(Settings(), RateLimiter(0, 0, 10), transport=httpx.MockTransport(handler))
-    res = {r.name: r for r in await SelfTest(Settings(js_runtime="python3"), Ignoring(), http).run()}
-    assert not res["channel_sort"].ok and "ignored the sort" in res["channel_sort"].detail
+    res = {r.name: r for r in await SelfTest(Settings(js_runtime="python3"), FakeExtractor(), http).run()}
+    assert res["channel_sort"].ok and "30 uploads" in res["channel_sort"].detail and "Video 5" in res["channel_sort"].detail
+
+
+async def test_channel_sort_check_fails_loudly_when_entries_have_no_view_counts():
+    class NoViews(FakeExtractor):
+        async def raw_uploads(self, channel_id, limit=500, *, background=False):
+            return {"entries": [{"id": f"vid{i:08d}", "title": f"V{i}"} for i in range(30)]}
+    http = OutboundClient(Settings(), RateLimiter(0, 0, 10), transport=httpx.MockTransport(handler))
+    res = {r.name: r for r in await SelfTest(Settings(js_runtime="python3"), NoViews(), http).run()}
+    assert not res["channel_sort"].ok and "view count" in res["channel_sort"].detail

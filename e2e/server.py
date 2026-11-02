@@ -122,11 +122,15 @@ class Ex:
                 "playlist": [PlaylistSummary("PLe2eplaylist00", "E2E playlist", "E2E Channel", None,
                                              "https://i.ytimg.com/vi/e2eVIDEO001/hq720.jpg")]}[kind]
 
-    async def channel_page(self, channel_id, limit=30, *, sort="newest", background=False):
-        order = {"newest": ["A", "B", "C"], "popular": ["C", "A", "B"], "oldest": ["C", "B", "A"]}[sort]
-        ids = {"A": "e2eVIDEO001", "B": "e2eMUXED001", "C": "e2eSPONSOR1"}
-        vids = [VideoSummary(ids[k], f"Upload {k}", channel_id, "E2E Channel", 24) for k in order]
+    IDS = {"A": "e2eVIDEO001", "B": "e2eMUXED001", "C": "e2eSPONSOR1"}
+
+    async def channel_page(self, channel_id, limit=30, *, background=False):       # the Videos tab: newest first, no views
+        vids = [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24) for k in "ABC"]
         return (ChannelInfo(channel_id, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", "A test channel", 1200), vids[:limit])
+
+    async def channel_uploads(self, channel_id, limit=500, *, background=False):  # the uploads playlist: with views
+        views = {"A": 100, "B": 5000, "C": 300}
+        return [VideoSummary(self.IDS[k], f"Upload {k}", channel_id, "E2E Channel", 24, views[k]) for k in "ABC"], 3
 
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         cid = "UC" + "a" * 22

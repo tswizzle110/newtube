@@ -22,6 +22,12 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8787
 
+    # Which internet protocol to use towards YouTube: "auto" (what the system prefers: often IPv6 if you
+    # have it), "4" or "6". Matters because YouTube sees the address you connect from, and a stream URL
+    # only works from the address that requested it. Ignored when `outbound_proxy` is set (the proxy
+    # decides).
+    ip_version: str = "auto"
+
     # Optional outbound proxy (e.g. "socks5://127.0.0.1:1080"). Applied to
     # every outbound request, including yt-dlp. Empty = direct.
     outbound_proxy: str = ""
@@ -86,4 +92,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         env_key = f"NEWTUBE_{name.upper()}"
         if env_key in env:
             setattr(s, name, _coerce(env[env_key], typ))
+    s.ip_version = str(s.ip_version)
+    if s.ip_version not in ("auto", "4", "6"):
+        raise ValueError(f"ip_version must be \"auto\", \"4\" or \"6\", not {s.ip_version!r}")
     return s

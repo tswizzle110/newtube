@@ -35,7 +35,7 @@ async def search(q: str = Query(min_length=1, max_length=200), kind: str = "vide
 
 
 @router.get("/channel/{channel_id}")
-async def channel(channel_id: str, sort: str = "newest", limit: int = Query(30, ge=1, le=120),
+async def channel(channel_id: str, sort: str = "newest", limit: int = Query(30, ge=1, le=500),
                   ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
     valid_channel_id(channel_id)
     if sort not in ("newest", "oldest", "popular"):

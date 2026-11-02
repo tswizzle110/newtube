@@ -72,6 +72,14 @@ class _SilentLogger:
     def error(self, msg: str) -> None: ...
 
 
+def source_address(settings: Settings) -> str | None:
+    """The local address that forces IPv4 ("0.0.0.0") or IPv6 ("::"); None = let the system choose.
+    Not used with a proxy, whose own connection decides the address YouTube sees."""
+    if settings.outbound_proxy:
+        return None
+    return {"4": "0.0.0.0", "6": "::"}.get(settings.ip_version)
+
+
 def ytdlp_network_opts(settings: Settings) -> dict[str, Any]:
     """Network-related yt-dlp options, so yt-dlp looks and behaves like the rest of us."""
     opts: dict[str, Any] = {
@@ -83,6 +91,8 @@ def ytdlp_network_opts(settings: Settings) -> dict[str, Any]:
     }
     if settings.outbound_proxy:
         opts["proxy"] = settings.outbound_proxy
+    if src := source_address(settings):
+        opts["source_address"] = src
     return opts
 
 
@@ -99,6 +109,8 @@ class OutboundClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.limiter = limiter
+        if transport is None and (src := source_address(settings)):
+            transport = httpx.AsyncHTTPTransport(local_address=src)
         self._http = httpx.AsyncClient(
             headers=BASE_HEADERS,
             proxy=settings.outbound_proxy or None,

@@ -2,6 +2,7 @@
 port = 8787
 host = "0.0.0.0"              # "127.0.0.1" = this machine only (e.g. behind Tailscale serve / a proxy)
 data_dir = "data"             # SQLite DB, caches, auth.json
+ip_version = "auto"           # "auto", "4" or "6": which IP family to use towards YouTube (ignored with a proxy)
 outbound_proxy = ""           # e.g. "socks5://127.0.0.1:1080": all outbound traffic, incl. yt-dlp
 js_runtime = "deno"           # deno | node | bun | quickjs
 cache_max_bytes = 3221225472  # thumbnail/avatar cache cap (3 GiB)

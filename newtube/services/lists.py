@@ -21,6 +21,7 @@ CACHE_VERSION = 1
 TTL_SEARCH = 3600
 TTL_CHANNEL = 900
 TTL_PLAYLIST = 1800
+SCAN_LIMIT = 500      # uploads read to sort a channel; larger channels get a partial Popular and no Oldest
 
 _KIND = {VideoSummary: "video", ChannelSummary: "channel", PlaylistSummary: "playlist"}
 
@@ -73,18 +74,62 @@ class ListService:
             self._store(key, items, TTL_SEARCH)
         return enrich_videos(self.conn, items)
 
+    async def _header(self, channel_id: str) -> dict[str, Any]:
+        """The channel's name/avatar/description: stored by the newest-first page if that loaded first."""
+        key = f"channel_header:{channel_id}"
+        header = self._cached(key)
+        if header is None:
+            info, _ = await self.extractor.channel_page(channel_id, 1)    # 1 request, just for the header
+            header = dataclasses.asdict(info)
+            self._store(key, header, TTL_CHANNEL * 4)
+        return header
+
+    async def _uploads(self, channel_id: str) -> dict[str, Any]:
+        key = f"uploads:{channel_id}"
+        up = self._cached(key)
+        if up is None:
+            videos, total = await self.extractor.channel_uploads(channel_id, SCAN_LIMIT)
+            up = {"videos": [to_dict(v) for v in videos], "total": total}
+            self._store(key, up, TTL_SEARCH)
+        return up
+
     async def channel(self, channel_id: str, limit: int = 30, sort: str = "newest") -> dict[str, Any]:
-        key = f"channel:{channel_id}:{sort}:{limit}"
-        page = self._cached(key)
-        if page is None:
-            info, videos = await self.extractor.channel_page(channel_id, limit, sort=sort)
-            page = {"channel": dataclasses.asdict(info), "videos": [to_dict(v) for v in videos]}
-            self._store(key, page, TTL_CHANNEL)
-        page["videos"] = enrich_videos(self.conn, page["videos"])
-        page["sort"] = sort
-        page["subscribed"] = self.conn.execute(
-            "SELECT 1 FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone() is not None
-        return page
+        """``newest`` comes straight from the Videos tab. ``popular`` and ``oldest`` are made from the
+        channel's uploads list (read once, cached) because YouTube ignores sort options on the tab and
+        its entries have no view counts; that list has them. Sorting happens here, so switching sort or
+        loading more costs no further requests."""
+        extra: dict[str, Any] = {}
+        if sort == "newest":
+            key = f"channel:{channel_id}:{limit}"
+            page = self._cached(key)
+            if page is None:
+                info, videos = await self.extractor.channel_page(channel_id, limit)
+                page = {"channel": dataclasses.asdict(info), "videos": [to_dict(v) for v in videos]}
+                self._store(key, page, TTL_CHANNEL)
+                self._store(f"channel_header:{channel_id}", page["channel"], TTL_CHANNEL * 4)
+            header, videos_out = page["channel"], page["videos"]
+            extra["has_more"] = len(videos_out) >= limit
+        else:
+            up = await self._uploads(channel_id)
+            header = await self._header(channel_id)
+            videos_out, total, scanned = list(up["videos"]), up["total"], len(up["videos"])
+            partial = (total is not None and total > scanned) or (total is None and scanned >= SCAN_LIMIT)
+            if sort == "popular":
+                videos_out.sort(key=lambda v: v.get("view_count") or -1, reverse=True)   # stable: ties stay newest-first
+                if partial:
+                    extra["notice"] = f"Most viewed among the newest {scanned} of {total or 'many'} videos."
+            elif partial:
+                videos_out = []
+                extra["unavailable"] = (f"Oldest needs the channel's whole upload list, and this channel has "
+                                        f"{total or 'more than ' + str(SCAN_LIMIT)} videos (the limit is {SCAN_LIMIT}).")
+            else:
+                videos_out.reverse()
+            extra["has_more"] = len(videos_out) > limit
+            videos_out = videos_out[:limit]
+        videos_out = enrich_videos(self.conn, [dict(v) for v in videos_out])
+        return {"channel": header, "videos": videos_out, "sort": sort, **extra,
+                "subscribed": self.conn.execute("SELECT 1 FROM subscriptions WHERE channel_id=?",
+                                                (channel_id,)).fetchone() is not None}
 
     async def playlist(self, playlist_id: str, limit: int = 100) -> dict[str, Any]:
         key = f"playlist:{playlist_id}:{limit}"
