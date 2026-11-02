@@ -4,7 +4,9 @@
   import { navigate } from '../lib/router.svelte.js'
 
   // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
-  let { video, surface, position, requestId, extra = '', searchQuery = null } = $props()
+  // why: {score, reasons[{label, points}]} for recommended cards; ondismiss(type): 'not_interested' | 'dont_recommend_channel'
+  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null } = $props()
+  let showWhy = $state(false)
   const href = $derived(`/watch?v=${video.id}&src=${surface}${extra}`)
 
   const pct = $derived(
@@ -43,6 +45,23 @@
     <div class="muted small">
       {[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}
     </div>
+    {#if why}
+      <div class="actions small">
+        <button class="act" aria-expanded={showWhy} onclick={() => (showWhy = !showWhy)}>Why this?</button>
+        {#if ondismiss}
+          <button class="act" onclick={() => ondismiss('not_interested')}>Not interested</button>
+          {#if video.channel_id}<button class="act" onclick={() => ondismiss('dont_recommend_channel')}>Never this channel</button>{/if}
+        {/if}
+      </div>
+      {#if showWhy}
+        <ul class="why small" aria-label="Why this was recommended">
+          {#each why.reasons as r}
+            <li><span>{r.label}</span><b class:neg={r.points < 0}>{r.points > 0 ? '+' : ''}{r.points.toFixed(2)}</b></li>
+          {/each}
+          <li class="total"><span>Score</span><b>{why.score.toFixed(2)}</b></li>
+        </ul>
+      {/if}
+    {/if}
   </div>
 </article>
 
@@ -64,4 +83,13 @@
     overflow: hidden; }
   .chan:hover { color: var(--text); }
   .small { font-size: 13px; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+  .act { background: none; border: 0; padding: 0; color: var(--text-dim); font: inherit; cursor: pointer; }
+  .act:hover { color: var(--text); text-decoration: underline; }
+  .why { list-style: none; margin: 4px 0 0; padding: 8px 10px; background: var(--bg-elev); border-radius: 8px; }
+  .why li { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
+  .why b { font-variant-numeric: tabular-nums; color: #7ee787; }
+  .why b.neg { color: #ff7b72; }
+  .why .total { border-top: 1px solid rgba(128, 128, 128, 0.3); margin-top: 4px; padding-top: 4px; }
+  .why .total b { color: var(--text); }
 </style>

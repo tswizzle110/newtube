@@ -139,6 +139,29 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## "For you" (recommendations)
+
+The **For you** tab next to Subscriptions ranks videos from your subscriptions (last 45 days) and your Watch
+later list. It reads only your own database: it never contacts YouTube. Each video scores the sum of a few
+transparent terms, and **Why this?** under a card shows every term with its points and the total:
+
+| Term | Meaning |
+| --- | --- |
+| You watch *channel* a lot / have watched before | Time-decayed interest from your history, likes and watch-later (half-life 180 days). Opening a video in imported history counts a little; real playback in newtube counts by how much you watched. |
+| Uploaded *N* ago | Newer scores higher (half-life 7 days). |
+| From a channel you subscribe to | A flat bonus. |
+| In your Watch later | A flat bonus. |
+| You started this and did not finish | Videos you stopped partway in newtube come back. |
+| Shown *N* times without a click | A penalty for videos you keep scrolling past (last 14 days). |
+| *N* higher videos from *channel* already shown | Stops one prolific channel filling the page. |
+
+Never shown: videos you finished or watched before (unless you stopped partway in newtube), videos you marked
+**Not interested**, and channels you marked **Never this channel**. Both buttons are on every For-you card and
+are remembered (locally). **Refresh** re-ranks using what you have done since.
+
+The weights are the `Weights` class in `newtube/recommend/baseline.py`. This is the hand-tuned baseline that a
+learned model will later have to beat in the offline evaluation.
+
 ## When YouTube breaks things
 
 Most breakages are fixed by a newer yt-dlp:

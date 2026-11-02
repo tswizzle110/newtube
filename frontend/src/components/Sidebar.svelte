@@ -43,6 +43,7 @@
   </form>
 
   <nav>
+    <a class="item" class:active={is('/for-you')} href="/for-you">For you</a>
     <div class="row" class:active={is('/')}>
       <a class="label" href="/" onclick={openSubscriptions}>Subscriptions</a>
       <button class="chev" aria-expanded={nav.subsOpen} aria-controls="sub-list" title={nav.subsOpen ? 'Hide channels' : 'Show channels'}

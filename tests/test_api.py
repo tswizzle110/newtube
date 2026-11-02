@@ -673,3 +673,18 @@ def test_a_failed_background_refresh_does_not_take_the_stored_list_away(env):
     wait_scans(client, ctx)
     r = client.get(f"/api/channel/{CID}?sort=oldest")
     assert r.status_code == 200 and len(r.json()["videos"]) == 5                           # the error is logged, not shown
+
+
+def test_recommendations_endpoint_returns_cards_with_reasons(env):
+    import time
+    client, ctx, ex, seen = env
+    now = int(time.time())
+    ctx.conn.execute("INSERT INTO channels(id,title,created_at) VALUES (?,?,1)", (CID, "Chan"))
+    ctx.conn.execute("INSERT INTO subscriptions VALUES (?,1)", (CID,))
+    ctx.conn.execute("INSERT INTO videos(id,channel_id,title,published_at,first_seen_at) VALUES (?,?,?,?,1)", (VID, CID, "T", now - 3600))
+    r = client.get("/api/recommendations?limit=5")
+    assert r.status_code == 200
+    (card,) = r.json()
+    assert card["id"] == VID and card["channel_title"] == "Chan" and card["completed"] is False
+    assert card["why"]["score"] > 0 and {x["label"] for x in card["why"]["reasons"]} >= {"From a channel you subscribe to"}
+    assert not [q for q in seen if "youtube" in str(q.url)]          # computed locally: nothing was asked of YouTube

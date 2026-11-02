@@ -5,6 +5,7 @@
   import { nav, setCollapsed, loadSubs } from './lib/nav.svelte.js'
   import Login from './routes/Login.svelte'
   import Feed from './routes/Feed.svelte'
+  import ForYou from './routes/ForYou.svelte'
   import Channels from './routes/Channels.svelte'
   import Watch from './routes/Watch.svelte'
   import Search from './routes/Search.svelte'
@@ -56,6 +57,8 @@
       {#key router.path}
         {#if is('/')}
           <Feed />
+        {:else if is('/for-you')}
+          <ForYou />
         {:else if is('/channels')}
           <Channels />
         {:else if is('/watch')}

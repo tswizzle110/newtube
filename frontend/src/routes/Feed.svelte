@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
   import { uid } from '../lib/tracker.js'
   import VideoCard from '../components/VideoCard.svelte'
+  import HomeTabs from '../components/HomeTabs.svelte'
 
   const PAGE = 48
   let videos = $state([])
@@ -28,7 +29,7 @@
 </script>
 
 <div class="page">
-  <h1>Subscriptions</h1>
+  <HomeTabs />
   {#if error}<p class="error">{error}</p>{/if}
   {#if !loading && !videos.length && !error}
     <p class="muted">Nothing here yet. <a href="/channels" class="link">Add some channels</a> to build your feed.</p>

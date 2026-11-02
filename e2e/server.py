@@ -181,12 +181,25 @@ async def _events():
     return [dict(r) for r in conn.execute("SELECT type, video_id, channel_id, payload FROM events ORDER BY id")]
 
 
+@app.get("/__seed_recommendable")
+async def _seed_recommendable():
+    """Two fresh uploads from a subscribed channel, so 'For you' has something to rank."""
+    import time
+    cid = "UC" + "r" * 22
+    conn.execute("INSERT OR IGNORE INTO channels(id,title,created_at) VALUES (?,?,1)", (cid, "Rec Channel"))
+    conn.execute("INSERT OR IGNORE INTO subscriptions VALUES (?,1)", (cid,))
+    for i, vid in enumerate(("recVIDEO001", "recVIDEO002")):
+        conn.execute("INSERT OR REPLACE INTO videos(id,channel_id,title,published_at,duration,first_seen_at) VALUES (?,?,?,?,60,1)",
+                     (vid, cid, f"Recommended {i + 1}", int(time.time()) - 3600 * (i + 1)))
+    return {"ok": True}
+
+
 @app.get("/__sbposts")
 async def _sbposts():
     return sb_posts
 
 
-for _ in range(4):     # these must come before the app's catch-all route
+for _ in range(5):     # these must come before the app's catch-all route
     app.router.routes.insert(0, app.router.routes.pop())
 
 uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
