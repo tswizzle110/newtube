@@ -25,7 +25,8 @@ def _card(r: Any) -> dict[str, Any]:
     return {"id": r["id"], "title": r["title"], "channel_id": r["channel_id"],
             "channel_title": r["channel_title"], "published_at": r["published_at"],
             "duration": r["duration"], "view_count": r["view_count"],
-            "resume_position": r["resume_position"], "completed": bool(r["completed"])}
+            "resume_position": r["resume_position"], "completed": bool(r["completed"]),
+            "seen": bool(r["seen"])}
 
 
 @router.get("/subscriptions")

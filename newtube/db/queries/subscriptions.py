@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 from .events import log_event
+from .seen import SEEN_SQL
 from ...extract.base import ChannelInfo, VideoSummary
 from ...extract.rss import Feed
 
@@ -122,7 +123,7 @@ def due_for_poll(conn: sqlite3.Connection, interval: int, now: int | None = None
 def get_feed(conn: sqlite3.Connection, *, limit: int = 60,
              before: int | None = None) -> list[sqlite3.Row]:
     sql = ("SELECT v.*, c.title AS channel_title, c.avatar_url AS channel_avatar,"
-           "  p.position AS resume_position, p.completed AS completed"
+           "  p.position AS resume_position, p.completed AS completed, " + SEEN_SQL + " AS seen"
            " FROM videos v JOIN subscriptions s ON s.channel_id = v.channel_id"
            " JOIN channels c ON c.id = v.channel_id"
            " LEFT JOIN video_progress p ON p.video_id = v.id"

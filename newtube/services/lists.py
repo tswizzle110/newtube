@@ -18,6 +18,7 @@ from typing import Any
 import logging
 
 from ..db.queries import cache, uploads as stored
+from ..db.queries.seen import SEEN_SQL
 from ..extract.base import (
     ChannelInfo, ChannelSummary, ExtractionError, Extractor, PlaylistSummary, SearchItem, VideoSummary,
 )
@@ -51,7 +52,7 @@ def enrich_videos(conn: sqlite3.Connection, items: list[dict[str, Any]]) -> list
     marks = ",".join("?" * len(ids))
     rows = {r["id"]: r for r in conn.execute(
         f"SELECT v.id, v.published_at, v.view_count, v.duration, c.title AS channel_title,"
-        f" p.position AS resume_position, p.completed AS completed"
+        f" p.position AS resume_position, p.completed AS completed, {SEEN_SQL} AS seen"
         f" FROM videos v LEFT JOIN channels c ON c.id = v.channel_id"
         f" LEFT JOIN video_progress p ON p.video_id = v.id WHERE v.id IN ({marks})", ids)}
     for i in items:
@@ -63,6 +64,7 @@ def enrich_videos(conn: sqlite3.Connection, items: list[dict[str, Any]]) -> list
                 i[k] = r[k]
         i["resume_position"] = r["resume_position"] if r else None
         i["completed"] = bool(r["completed"]) if r else False
+        i["seen"] = bool(r["seen"]) if r else False
     return items
 
 

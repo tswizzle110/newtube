@@ -29,7 +29,8 @@
       <img src={`/api/thumb/${video.id}/mqdefault`} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
     {/if}
     {#if video.duration}<span class="dur">{duration(video.duration)}</span>{/if}
-    {#if video.completed}<span class="done" title="Watched">✓</span>{/if}
+    {#if video.completed}<span class="done" title="Watched">✓</span>
+    {:else if video.seen}<span class="seen" title="In your watch history (not necessarily finished)">Watched before</span>{/if}
     {#if pct > 0 && !video.completed}<span class="bar"><span style:width={pct + '%'}></span></span>{/if}
   </a>
   <div class="meta">
@@ -54,6 +55,8 @@
     font-size: 12px; padding: 1px 5px; border-radius: 4px; font-variant-numeric: tabular-nums; }
   .done { position: absolute; left: 6px; top: 6px; background: rgba(0, 0, 0, 0.75); color: #7ee787;
     border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  .seen { position: absolute; left: 6px; top: 6px; background: rgba(0, 0, 0, 0.75); color: var(--muted, #aaa);
+    border-radius: 4px; padding: 0 5px; font-size: 11px; }
   .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.25); }
   .bar span { display: block; height: 100%; background: var(--accent); }
   .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

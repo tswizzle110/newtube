@@ -204,3 +204,26 @@ def test_videos_imported_before_the_column_existed_are_adopted_by_the_migration(
     c.execute("INSERT INTO events(ts,type,video_id) VALUES (5,'import_watch','fromfeed0001')")
     c.executescript(next(m for m in migrations if m.name.startswith("004")).read_text())
     assert [r[0] for r in c.execute("SELECT id FROM videos WHERE from_import=1")] == ["imported0001"]
+
+
+# ---- "Watched before" -------------------------------------------------------------------------------
+
+def test_watched_before_comes_from_imports_real_sessions_or_progress_but_is_not_completed(conn):
+    from newtube.services.lists import enrich_videos
+    for vid in ("neverseen001", "imported0001", "sessioned001", "progressed01"):
+        add(conn, vid)
+    conn.execute("INSERT INTO events(ts,type,video_id) VALUES (5,'import_watch','imported0001')")
+    conn.execute("INSERT INTO events(ts,type,video_id) VALUES (5,'import_like','neverseen001')")     # liked != watched
+    conn.execute("INSERT INTO watch_sessions(id,video_id,started_at) VALUES ('s','sessioned001',1)")
+    conn.execute("INSERT INTO video_progress(video_id,position,completed,updated_at) VALUES ('progressed01',5,0,1)")
+    items = enrich_videos(conn, [{"kind": "video", "id": v} for v in ("neverseen001", "imported0001", "sessioned001", "progressed01")])
+    assert [(i["id"], i["seen"], i["completed"]) for i in items] == [
+        ("neverseen001", False, False), ("imported0001", True, False), ("sessioned001", True, False), ("progressed01", True, False)]
+
+
+def test_the_subscriptions_feed_reports_it_too(conn):
+    subs.subscribe(conn, ChannelInfo(CH, "Chan"))
+    for vid, ts in (("seenvideo001", 200), ("freshvideo01", 100)):
+        conn.execute("INSERT INTO videos(id,channel_id,title,published_at,first_seen_at) VALUES (?,?,?,?,1)", (vid, CH, vid, ts))
+    conn.execute("INSERT INTO events(ts,type,video_id) VALUES (5,'import_watch','seenvideo001')")
+    assert [(r["id"], bool(r["seen"])) for r in subs.get_feed(conn)] == [("seenvideo001", True), ("freshvideo01", False)]
