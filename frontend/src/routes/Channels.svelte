@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import { loadSubs } from '../lib/nav.svelte.js'
 
   let channels = $state([])
   let ref = $state('')
@@ -8,7 +9,7 @@
   let error = $state('')
   let note = $state('')
 
-  const load = async () => { channels = await api.get('/api/subscriptions') }
+  const load = async () => { channels = await api.get('/api/subscriptions'); loadSubs() }   // and the sidebar's copy
   onMount(load)
 
   async function add(e) {
@@ -31,7 +32,7 @@
 </script>
 
 <div class="page narrow">
-  <h1>Channels</h1>
+  <h1>Manage channels</h1>
   <form class="add" onsubmit={add}>
     <input class="input" bind:value={ref} placeholder="@handle, channel URL or UC… id" />
     <button class="btn primary" disabled={busy || !ref.trim()}>{busy ? 'Adding…' : 'Subscribe'}</button>

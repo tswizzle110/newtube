@@ -192,9 +192,10 @@ class Extractor(Protocol):
     async def playlist(self, playlist_id: str, limit: int = 100, *,
                        background: bool = False) -> list[VideoSummary]: ...
 
-    async def channel_page(self, channel_id: str, limit: int = 30, *,
+    async def channel_page(self, channel_id: str, limit: int = 30, *, sort: str = "newest",
                            background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
-        """Channel header + newest uploads from ONE request."""
+        """Channel header + uploads from ONE request. ``sort`` is 'newest', 'oldest' or 'popular'
+        (YouTube's own ordering: the list entries carry neither dates nor view counts to sort by)."""
         ...
 
     async def playlist_page(self, playlist_id: str, limit: int = 100, *,

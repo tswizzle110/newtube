@@ -284,6 +284,24 @@ class SelfTest:
             raise RuntimeError(f"no videos parsed from {len(raw.get('entries') or [])} raw entries")
         return f"{len(vids)} videos; newest '{vids[0].title[:40]}', duration {vids[0].duration}s"
 
+    async def channel_sort(self) -> str:
+        """Do 'popular' and 'oldest' really come back in a different order than 'newest'?"""
+        from .extract.ytdlp import parse_entries
+        firsts: dict[str, list[str]] = {}
+        for sort in ("newest", "popular", "oldest"):
+            raw = await self.extractor.raw_channel_videos(TEST_CHANNEL_ID, 8, sort=sort)  # type: ignore[attr-defined]
+            self._dump(f"channel_{sort}", raw)
+            vids = [i for i in parse_entries(raw) if isinstance(i, VideoSummary)]
+            if not vids:
+                raise RuntimeError(f"sort={sort}: no videos came back")
+            firsts[sort] = [v.id for v in vids]
+        problems = [f"'{s}' has the same order as 'newest'" for s in ("popular", "oldest") if firsts[s] == firsts["newest"]]
+        if firsts["popular"][0] == firsts["oldest"][0]:
+            problems.append("'popular' and 'oldest' start with the same video")
+        if problems:
+            raise RuntimeError("YouTube ignored the sort: " + "; ".join(problems))
+        return "newest / popular / oldest start with " + ", ".join(f"{s[0]}={firsts[s][0]}" for s in firsts)
+
     async def playlist_videos(self) -> str:
         if not self.playlist_id:
             raise RuntimeError("skipped: playlist search found no playlist")
@@ -347,7 +365,7 @@ class SelfTest:
             ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("video_hd", self.video_hd), ("thumbnail", self.thumbnail),
             ("channel", self.channel), ("search_video", self.search_video),
             ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
-            ("channel_videos", self.channel_videos), ("playlist", self.playlist_videos),
+            ("channel_videos", self.channel_videos), ("channel_sort", self.channel_sort), ("playlist", self.playlist_videos),
             ("comments_top", self.comments_top), ("comment_replies", self.comment_replies),
             ("sponsorblock", self.sponsorblock),
         ]:

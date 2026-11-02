@@ -65,6 +65,18 @@ uv sync && (cd frontend && npm install && npm run build)
 systemctl --user restart newtube
 ```
 
+## Using it
+
+- **Sidebar:** the navigation is on the left. Click **Subscriptions** to see your feed and open your
+  channel list underneath it (the arrow ▸ opens/closes the list without leaving the page). Click a channel
+  to open its page, where you can sort by **Newest / Popular / Oldest** (YouTube's own ordering).
+  The ☰ button hides the sidebar; `/` brings it back and focuses the search box.
+- **Quality:** the quality button offers every resolution the video has, up to 2160p (4K). Above 1080p
+  YouTube only serves VP9/AV1, which need more computer power than H.264: **Settings → Playback** lets you
+  choose the codec and cap the highest resolution (e.g. 1080p if 4K stutters on your machine).
+- **Keys:** `?` in the player lists every shortcut (space/k, j/l, arrows, `f`, `c`, `<` `>`, `{` `}` for
+  chapters, `[` `]` to mark a SponsorBlock segment, `u` to undo a skip).
+
 ## When YouTube breaks things
 
 Most breakages are fixed by a newer yt-dlp:

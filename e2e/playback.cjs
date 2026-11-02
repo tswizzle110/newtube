@@ -17,7 +17,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
 
   await p.goto(BASE + '/');
   await p.fill('input[type=password]', 'e2e-password'); await p.click('button.primary');
-  await p.waitForSelector('header');
+  await p.waitForSelector('aside.side');
 
   // ---- DASH playback
   await p.goto(BASE + '/watch?v=e2eVIDEO001&src=subs');
@@ -84,7 +84,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.waitForTimeout(500);
   const pos = (await state(p)).t;
   await p.goto(BASE + '/');                     // leaving flushes the session
-  await p.waitForSelector('header'); await p.waitForTimeout(1200);
+  await p.waitForSelector('aside.side'); await p.waitForTimeout(1200);
   const info = await p.evaluate(async () => (await fetch('/api/video/e2eVIDEO001')).json());
   check('resume position saved', info.resume_position > 5, 'resume=' + info.resume_position + ' last=' + pos.toFixed(1));
   await p.goto(BASE + '/watch?v=e2eVIDEO001');
@@ -270,7 +270,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
 
   await p.setViewportSize({ width: 1400, height: 900 });
   // ---- search, channel and playlist pages
-  await p.goto(BASE + '/'); await p.waitForSelector('header');
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
   await p.keyboard.press('/');
   check('/ focuses the search box', await V(p, () => document.activeElement?.getAttribute('aria-label') === 'Search'));
   await p.keyboard.type('zoo'); await p.keyboard.press('Enter');
@@ -278,10 +278,11 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('search shows video results', p.url().includes('/search?q=zoo') && (await p.locator('.card .title').first().innerText()).includes('Search result video'));
   await p.waitForTimeout(500);
   check('result thumbnails load through our proxy', await V(p, () => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }));
-  await p.click('.tabs a:has-text("Channels")'); await p.waitForSelector('.row');
-  check('channel result avatar loads via /api/img (protocol-relative url handled)', await V(p, () => { const i = document.querySelector('.row img'); return !!i && i.complete && i.naturalWidth > 0 && i.src.includes('/api/img'); }));
-  await p.click('.row'); await p.waitForSelector('.head');
-  check('channel page: header and uploads', (await p.locator('.head h1').innerText()) === 'E2E Channel' && (await p.locator('.grid .card').count()) === 2);
+  await p.click('.tabs a:has-text("Channels")'); await p.waitForSelector('main .row');
+  await p.waitForFunction(() => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});
+  check('channel result avatar loads via /api/img (protocol-relative url handled)', await V(p, () => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0 && i.src.includes('/api/img'); }));
+  await p.click('main .row'); await p.waitForSelector('.head');
+  check('channel page: header and uploads', (await p.locator('.head h1').innerText()) === 'E2E Channel' && (await p.locator('.grid .card').count()) === 3);
   await p.click('.head button'); await p.waitForFunction(() => document.querySelector('.head button')?.innerText.includes('Subscribed'));
   const subs = await V(p, async () => (await (await fetch('/api/subscriptions')).json()));
   check('Subscribe button subscribes', subs.some(x => x.id === 'UC' + 'a'.repeat(22)));
@@ -304,6 +305,54 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const sclick = evs.filter(e => e.type === 'search_click' && e.video_id === 'e2eVIDEO001');
   check('search queries are logged (server side, per kind)', searches.length >= 2, searches.map(e => JSON.parse(e.payload).kind).join(','));
   check('search_click logged with query and position', sclick.length >= 1 && JSON.parse(sclick[0].payload).q === 'zoo' && JSON.parse(sclick[0].payload).position === 0, JSON.stringify(sclick[0]?.payload));
+
+  // ---- sidebar: subscriptions list under the Subscriptions button, channel pages with sorting
+  await p.evaluate(() => { try { localStorage.removeItem('subsOpen'); localStorage.removeItem('sidebarCollapsed'); } catch {} });
+  await p.setViewportSize({ width: 1400, height: 900 });
+  await p.goto(BASE + '/watch?v=e2eMUXED001');                         // somewhere other than the feed
+  await p.waitForSelector('aside.side');
+  check('the navigation is a left sidebar and there is no top bar', (await p.locator('aside.side').count()) === 1 &&
+    (await p.evaluate(() => document.querySelector('aside.side').getBoundingClientRect().left)) === 0 && (await p.locator('body > div > header, #app > header').count()) === 0);
+  check('subscribed channels are NOT listed until you click Subscriptions', (await p.locator('ul.subs').count()) === 0);
+  await p.click('aside.side .row .label');                             // the "Subscriptions" button
+  await p.waitForSelector('ul.subs li a');
+  const listed = await p.locator('ul.subs li a .name').allInnerTexts();
+  // (the fake data names this channel differently on different pages, so check the entry, not its spelling)
+  check('clicking Subscriptions opens the channel list under it', listed.length === 1, JSON.stringify(listed));
+  check('...and takes you to the subscriptions feed', new URL(p.url()).pathname === '/');
+  check('the channel list shows an avatar (served by our proxy)', await V(p, () => { const i = document.querySelector('ul.subs img'); return !!i && i.src.includes('/api/avatar/'); }));
+  await p.click('aside.side .chev'); await p.waitForTimeout(150);
+  check('the arrow collapses the list without leaving the page', (await p.locator('ul.subs').count()) === 0 && new URL(p.url()).pathname === '/');
+  await p.click('aside.side .chev'); await p.waitForSelector('ul.subs li a');
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+  check('the open/closed state is remembered', (await p.locator('ul.subs').count()) === 1);
+  await p.click('ul.subs li a');                                       // click the channel
+  await p.waitForSelector('.head');
+  check('clicking a channel opens its page, highlighted in the list', p.url().includes('/channel/UC') && (await p.locator('ul.subs a.active').count()) === 1);
+  const titles = async () => (await p.locator('.grid .card .title').allInnerTexts()).join(',');
+  check('default order is newest first', (await titles()) === 'Upload A,Upload B,Upload C' && (await p.locator('.sorts a.on').innerText()) === 'Newest');
+  await p.click('.sorts a:has-text("Popular")'); await p.waitForSelector('.sorts a.on:has-text("Popular")');
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload C');
+  check('Popular re-orders the videos and the URL records it', (await titles()) === 'Upload C,Upload A,Upload B' && p.url().includes('sort=popular'));
+  await p.click('.sorts a:has-text("Oldest")');
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload C' && document.querySelectorAll('.grid .card .title')[1]?.innerText === 'Upload B');
+  check('Oldest re-orders them again', (await titles()) === 'Upload C,Upload B,Upload A' && p.url().includes('sort=oldest'));
+  await p.reload(); await p.waitForSelector('.sorts a.on:has-text("Oldest")');
+  check('a reload keeps the chosen sort', (await titles()) === 'Upload C,Upload B,Upload A');
+  await p.click('.sorts a:has-text("Newest")');
+  await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Upload A');
+  await p.click('.head button');                                       // unsubscribe from the channel page
+  await p.waitForFunction(() => document.querySelector('.head button')?.innerText.includes('Subscribe') && !document.querySelector('.head button').innerText.includes('✓'));
+  check('unsubscribing removes the channel from the sidebar straight away', (await p.locator('ul.subs li a').count()) === 0);
+  await p.click('.head button'); await p.waitForFunction(() => document.querySelectorAll('ul.subs li a').length === 1);
+  check('subscribing adds it back', (await p.locator('ul.subs li a .name').innerText()) === 'E2E Channel');
+  // hide / show the sidebar, and `/` brings it back with the search box focused
+  await p.click('aside.side .icon');
+  check('the sidebar can be hidden', (await p.locator('aside.side').count()) === 0 && (await p.locator('.reopen').count()) === 1);
+  await p.keyboard.press('/');
+  await p.waitForSelector('aside.side');
+  check('/ shows the sidebar again with the search box focused', await V(p, () => document.activeElement?.getAttribute('aria-label') === 'Search'));
+  await p.keyboard.press('Escape');
 
   const hits = await (await ctx.request.get(BASE + '/__hits')).json();
   const gv = hits.filter(h => /^\/(v360|v180|aud|mux)$/.test(h[0]));

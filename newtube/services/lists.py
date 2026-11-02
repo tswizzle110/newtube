@@ -73,14 +73,15 @@ class ListService:
             self._store(key, items, TTL_SEARCH)
         return enrich_videos(self.conn, items)
 
-    async def channel(self, channel_id: str, limit: int = 30) -> dict[str, Any]:
-        key = f"channel:{channel_id}:{limit}"
+    async def channel(self, channel_id: str, limit: int = 30, sort: str = "newest") -> dict[str, Any]:
+        key = f"channel:{channel_id}:{sort}:{limit}"
         page = self._cached(key)
         if page is None:
-            info, videos = await self.extractor.channel_page(channel_id, limit)
+            info, videos = await self.extractor.channel_page(channel_id, limit, sort=sort)
             page = {"channel": dataclasses.asdict(info), "videos": [to_dict(v) for v in videos]}
             self._store(key, page, TTL_CHANNEL)
         page["videos"] = enrich_videos(self.conn, page["videos"])
+        page["sort"] = sort
         page["subscribed"] = self.conn.execute(
             "SELECT 1 FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone() is not None
         return page

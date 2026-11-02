@@ -73,11 +73,14 @@ class FakeExtractor:
                                          "https://i.ytimg.com/vi/Yocja_N5s1I/hq720.jpg")],
         }[kind]
 
-    async def channel_page(self, channel_id, limit=30, *, background=False):
+    async def channel_page(self, channel_id, limit=30, *, sort="newest", background=False):
         self.list_calls += 1
+        self.channel_calls = getattr(self, "channel_calls", []) + [(sort, limit)]
         # like the real channel tab: entries carry no views / date / channel name
-        return (ChannelInfo(channel_id, "YouTube", "@YouTube", "https://yt3.ggpht.com/av", "official", 46600000),
-                [VideoSummary(VID, "Upload one", channel_id, "YouTube", 607), VideoSummary("bbbbbbbbbbb", "Upload two", channel_id, "YouTube", 60)])
+        vids = [VideoSummary(VID, "Upload one", channel_id, "YouTube", 607), VideoSummary("bbbbbbbbbbb", "Upload two", channel_id, "YouTube", 60)]
+        if sort != "newest":
+            vids.reverse()                       # a different order, as YouTube would give
+        return (ChannelInfo(channel_id, "YouTube", "@YouTube", "https://yt3.ggpht.com/av", "official", 46600000), vids[:limit])
 
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         self.list_calls += 1
@@ -396,3 +399,26 @@ def test_comments_require_login_and_surface_extractor_failures(env):
         raise BotCheck("Sign in to confirm you're not a bot")
     ex.comments = boom
     assert client.get(f"/api/comments/{V}?sort=new").status_code == 503
+
+
+def test_channel_page_sorting_is_validated_cached_per_sort_and_reported(env):
+    client, ctx, ex, _ = env
+    new = client.get(f"/api/channel/{CID}").json()
+    old = client.get(f"/api/channel/{CID}?sort=oldest").json()
+    pop = client.get(f"/api/channel/{CID}?sort=popular").json()
+    assert (new["sort"], old["sort"], pop["sort"]) == ("newest", "oldest", "popular")
+    assert [v["title"] for v in new["videos"]] == ["Upload one", "Upload two"]
+    assert [v["title"] for v in old["videos"]] == ["Upload two", "Upload one"]
+    assert ex.channel_calls == [("newest", 30), ("oldest", 30), ("popular", 30)]
+    client.get(f"/api/channel/{CID}?sort=oldest")                        # each sort is cached on its own
+    assert len(ex.channel_calls) == 3
+    assert client.get(f"/api/channel/{CID}?sort=best").status_code == 400
+    assert client.get(f"/api/channel/{CID}?limit=0").status_code == 422
+    assert client.get(f"/api/channel/{CID}?limit=121").status_code == 422
+
+
+def test_channel_page_limit_is_part_of_the_cache_key(env):
+    client, ctx, ex, _ = env
+    assert len(client.get(f"/api/channel/{CID}?limit=1").json()["videos"]) == 1
+    assert len(client.get(f"/api/channel/{CID}?limit=30").json()["videos"]) == 2
+    assert ex.channel_calls == [("newest", 1), ("newest", 30)]

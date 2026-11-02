@@ -258,3 +258,24 @@ async def test_comments_request_builds_yt_dlp_limits(monkeypatch):
             await ex.comments("jNQXAC9IVRw", **bad)
     with pytest.raises(ExtractionError):
         await ex.comments("bad id")
+
+
+async def test_channel_sort_urls_and_validation(monkeypatch):
+    from newtube.config import Settings
+    from newtube.extract.ytdlp import YtDlpExtractor
+    from newtube.net.ratelimit import RateLimiter
+    ex = YtDlpExtractor(Settings(), RateLimiter(0, 0, 10))
+    urls = []
+
+    async def fake(url, extra, background):
+        urls.append((url, extra["playlistend"]))
+        return {"entries": []}
+    monkeypatch.setattr(ex, "_extract", fake)
+    for sort in ("newest", "popular", "oldest"):
+        await ex.raw_channel_videos(UC, 40, sort=sort)
+    base = f"https://www.youtube.com/channel/{UC}/videos"
+    assert urls == [(base, 40), (base + "?view=0&sort=p&flow=grid", 40), (base + "?view=0&sort=da&flow=grid", 40)]
+    await ex.raw_channel_videos(UC, 9999)
+    assert urls[-1][1] == 150                                              # clamped
+    with pytest.raises(ExtractionError):
+        await ex.raw_channel_videos(UC, 10, sort="random")

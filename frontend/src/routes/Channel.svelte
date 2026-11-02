@@ -4,30 +4,43 @@
   import { router } from '../lib/router.svelte.js'
   import { subscribers, img } from '../lib/format.js'
   import { uid } from '../lib/tracker.js'
+  import { loadSubs } from '../lib/nav.svelte.js'
   import VideoCard from '../components/VideoCard.svelte'
 
   const id = router.pathname.split('/')[2]
+  const SORTS = [['newest', 'Newest'], ['popular', 'Popular'], ['oldest', 'Oldest']]
+  const sort = SORTS.some(([k]) => k === router.query.get('sort')) ? router.query.get('sort') : 'newest'
   const requestId = uid()
   let page = $state(null)
   let subscribed = $state(false)
   let error = $state('')
   let busy = $state(false)
+  let limit = $state(30)
+  let loading = $state(false)
 
-  onMount(async () => {
+  async function load() {
+    loading = true; error = ''
     try {
-      page = await api.get(`/api/channel/${id}`)
+      page = await api.get(`/api/channel/${id}?sort=${sort}&limit=${limit}`)
       subscribed = page.subscribed
       document.title = `${page.channel.title} · newtube`
     } catch (e) {
       error = e.message
+    } finally {
+      loading = false
     }
-  })
+  }
+  onMount(load)
+
+  // YouTube's lists can't be paged here, so "load more" asks for a longer list (the sidebar's cost is tiny).
+  function more() { limit = Math.min(limit + 30, 120); load() }
 
   async function toggleSub() {
     busy = true
     try {
       if (subscribed) { await api.del(`/api/subscriptions/${id}`); subscribed = false }
       else { await api.post('/api/subscriptions', { ref: id }); subscribed = true }
+      loadSubs()                                     // keep the sidebar list in step
     } catch (e) {
       error = e.message
     } finally {
@@ -55,13 +68,24 @@
         {subscribed ? 'Subscribed ✓' : 'Subscribe'}
       </button>
     </header>
-    <h2>Videos</h2>
+    <div class="sorts" role="group" aria-label="Sort videos">
+      {#each SORTS as [k, label]}
+        <a href={`/channel/${id}${k === 'newest' ? '' : '?sort=' + k}`} class:on={k === sort}>{label}</a>
+      {/each}
+    </div>
     <div class="grid">
       {#each page.videos as v, i (v.id)}
         <VideoCard video={v} surface="channel" position={i} {requestId} />
       {/each}
     </div>
-    {#if !page.videos.length}<p class="muted">No videos found.</p>{/if}
+    {#if !page.videos.length && !loading}<p class="muted">No videos found.</p>{/if}
+    {#if loading}<p class="muted">Loading…</p>{/if}
+    {#if !loading && page.videos.length >= limit && limit < 120}
+      <p><button class="btn" onclick={more}>Load more videos</button></p>
+    {/if}
+    {#if sort !== 'newest'}
+      <p class="muted small">Ordered by YouTube ({sort}). Upload dates and view counts appear for videos this app has seen before.</p>
+    {/if}
   {/if}
 </div>
 
@@ -71,7 +95,11 @@
   .ph { background: var(--bg-hover); display: grid; place-items: center; font-size: 40px; font-weight: 700; }
   .meta { flex: 1; min-width: 0; }
   h1 { margin: 0 0 4px; font-size: 26px; }
-  h2 { font-size: 16px; margin: 0 0 14px; }
+  .sorts { display: flex; gap: 6px; margin-bottom: 18px; }
+  .sorts a { padding: 6px 14px; border-radius: 999px; background: var(--bg-elev); color: var(--text-dim); }
+  .sorts a:hover { background: var(--bg-hover); color: var(--text); }
+  .sorts a.on { background: var(--text); color: var(--bg); }
+  .small { font-size: 13px; }
   .desc { margin: 8px 0 0; max-width: 70ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 18px; }
 </style>

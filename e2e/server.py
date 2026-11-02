@@ -122,10 +122,11 @@ class Ex:
                 "playlist": [PlaylistSummary("PLe2eplaylist00", "E2E playlist", "E2E Channel", None,
                                              "https://i.ytimg.com/vi/e2eVIDEO001/hq720.jpg")]}[kind]
 
-    async def channel_page(self, channel_id, limit=30, *, background=False):
-        return (ChannelInfo(channel_id, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", "A test channel", 1200),
-                [VideoSummary("e2eVIDEO001", "Upload A", channel_id, "E2E Channel", 24),
-                 VideoSummary("e2eMUXED001", "Upload B", channel_id, "E2E Channel", 24)])
+    async def channel_page(self, channel_id, limit=30, *, sort="newest", background=False):
+        order = {"newest": ["A", "B", "C"], "popular": ["C", "A", "B"], "oldest": ["C", "B", "A"]}[sort]
+        ids = {"A": "e2eVIDEO001", "B": "e2eMUXED001", "C": "e2eSPONSOR1"}
+        vids = [VideoSummary(ids[k], f"Upload {k}", channel_id, "E2E Channel", 24) for k in order]
+        return (ChannelInfo(channel_id, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", "A test channel", 1200), vids[:limit])
 
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         cid = "UC" + "a" * 22
