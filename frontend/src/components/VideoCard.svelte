@@ -5,7 +5,7 @@
 
   // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
   // why: {score, reasons[{label, points}]} for recommended cards; ondismiss(type): 'not_interested' | 'dont_recommend_channel'
-  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '', onup = null, ondown = null, compact = false } = $props()
+  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '', onup = null, ondown = null, compact = false, showSeen = true } = $props()
   let showWhy = $state(false)
   const href = $derived(`/watch?v=${video.id}&src=${surface}${extra}`)
 
@@ -32,7 +32,7 @@
     {/if}
     {#if video.duration}<span class="dur">{duration(video.duration)}</span>{/if}
     {#if video.completed}<span class="done" title="Watched">✓</span>
-    {:else if video.seen}<span class="seen" title="In your watch history (not necessarily finished)">Watched before</span>{/if}
+    {:else if video.seen && showSeen && !(pct > 0)}<span class="seen" title="In your watch history (not necessarily finished)">Watched before</span>{/if}
     {#if pct > 0 && !video.completed}<span class="bar"><span style:width={pct + '%'}></span></span>{/if}
   </a>
   <div class="meta">

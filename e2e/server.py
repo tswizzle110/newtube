@@ -199,12 +199,21 @@ async def _seed_recommendable():
     return {"ok": True}
 
 
+@app.get("/__seed_import_watch")
+async def _seed_import_watch():
+    """One history entry that came from a Takeout: we know only that it was opened."""
+    import time
+    conn.execute("INSERT OR IGNORE INTO videos(id,title,first_seen_at,from_import) VALUES ('e2eIMPORT01','Imported watch',1,1)")
+    conn.execute("INSERT INTO events(ts,type,video_id) VALUES (?,'import_watch','e2eIMPORT01')", (int(time.time()),))
+    return {"ok": True}
+
+
 @app.get("/__sbposts")
 async def _sbposts():
     return sb_posts
 
 
-for _ in range(5):     # these must come before the app's catch-all route
+for _ in range(6):     # these must come before the app's catch-all route
     app.router.routes.insert(0, app.router.routes.pop())
 
 uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

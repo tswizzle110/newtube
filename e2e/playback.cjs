@@ -515,6 +515,19 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.goto(BASE + '/list/liked'); await p.waitForSelector('.page h1');
   check('Liked videos cannot be renamed or deleted', (await p.locator('button:has-text("Rename")').count()) === 0 && (await p.locator('button:has-text("Delete playlist")').count()) === 0);
 
+  // ---- History says what actually happened: finished, stopped part-way, or only "opened" (imported)
+  const beat = (id, pos, dur, ivs) => ctx.request.post(BASE + '/api/events', { data: { watch: [{ session_id: 's' + id, video_id: id, source: 'direct', position: pos, duration: dur, intervals: ivs, ended: true }] } });
+  await beat('e2eHALF0001', 600, 1200, [[0, 600]]);          // half of a 20-minute video
+  await beat('e2eDONE0001', 1195, 1200, [[0, 1195]]);        // all of it
+  await ctx.request.get(BASE + '/__seed_import_watch');
+  await p.goto(BASE + '/history'); await p.waitForSelector('.grid .card');
+  const noteOf = async (id) => p.locator('.card', { has: p.locator(`a.title[href*="${id}"]`) }).locator('.meta .muted.small').last().innerText();
+  const half = await noteOf('e2eHALF0001'), done = await noteOf('e2eDONE0001'), imp = await noteOf('e2eIMPORT01');
+  check('History: a half-watched video says where you stopped, not "watched"', /^Stopped at 10:00 of 20:00 \(50%\)/.test(half), half);
+  check('History: a video you finished says so', /^Finished/.test(done), done);
+  check('History: an imported entry only claims it was opened', /^Opened/.test(imp), imp);
+  check('History: no "Watched before" tags (every entry is in your history)', (await p.locator('.card .seen').count()) === 0);
+
   // ---- History: what you watched, searchable, removable, and it stays removed
   await p.goto(BASE + '/history'); await p.waitForSelector('.grid .card');
   const hBefore = await p.locator('.grid .card').count();

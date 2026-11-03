@@ -142,3 +142,22 @@ def test_history_api(env):
     assert client.delete(f"/api/history/{V1}").json() == {"removed": True}
     assert client.get("/api/history").json() == []
     assert client.delete("/api/history/bad").status_code == 400
+
+
+def test_history_knows_the_length_from_progress_when_the_video_itself_is_not_stored(conn):
+    watch(conn, V1, 100, kind="session")                                  # no videos row at all
+    conn.execute("INSERT INTO video_progress(video_id,position,duration,completed,updated_at) VALUES (?,600,1200,0,1)", (V1,))
+    (r,) = history.page(conn)
+    assert (r["duration"], r["resume_position"], r["completed"]) == (1200, 600, False)
+
+
+def test_a_half_watched_video_is_not_marked_finished(conn):
+    from newtube import tracking
+    video(conn, V1, "Long one")
+    tracking.record_watch(conn, session_id="s1", video_id=V1, source="direct", position=600.0, duration=1200.0,
+                          intervals=[(0.0, 600.0)], ended=True)
+    (r,) = history.page(conn)
+    assert r["completed"] is False and r["resume_position"] == 600
+    tracking.record_watch(conn, session_id="s2", video_id=V1, source="direct", position=1195.0, duration=1200.0,
+                          intervals=[(600.0, 1195.0)], ended=True)
+    assert history.page(conn)[0]["completed"] is True

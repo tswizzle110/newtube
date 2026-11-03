@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
   import { uid } from '../lib/tracker.js'
   import VideoCard from '../components/VideoCard.svelte'
+  import { historyNote } from '../lib/historyNote.js'
 
   const PAGE = 60
   const requestId = uid()
@@ -76,7 +77,7 @@
     <div class="grid">
       {#each g.videos as v (v.id)}
         <VideoCard video={{ ...v, title: v.title || v.id }} surface="history" position={items.indexOf(v)} {requestId}
-                   note={`Watched ${timeOf(v.watched_at)}`} onremove={() => remove(v)} removeLabel="Remove from history" />
+                   note={historyNote(v, timeOf)} showSeen={false} onremove={() => remove(v)} removeLabel="Remove from history" />
       {/each}
     </div>
   {/each}

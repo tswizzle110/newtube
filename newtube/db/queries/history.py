@@ -17,7 +17,7 @@ WITH h AS (
     SELECT w.video_id, w.started_at FROM watch_sessions w WHERE {not_hidden('w.video_id', 'w.started_at')}
 )
 SELECT h.video_id AS id, max(h.ts) AS watched_at, COALESCE(v.title, '') AS title, v.channel_id,
-       COALESCE(c.title, '') AS channel_title, v.published_at, v.duration, v.view_count,
+       COALESCE(c.title, '') AS channel_title, v.published_at, COALESCE(v.duration, p.duration) AS duration, v.view_count,
        p.position AS resume_position, p.completed AS completed
 FROM h
 LEFT JOIN videos v ON v.id = h.video_id
