@@ -11,7 +11,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  p.on('console', m => { if (m.type() === 'error' && !/status of (404|409)/.test(m.text())) problems.push('console: ' + m.text()); });
+  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409)/.test(m.text())) problems.push('console: ' + m.text()); });
   p.on('response', async r => { if (r.url().endsWith('/api/events')) console.log('EVENTS', r.status(), (r.status()!==200 ? (await r.text()).slice(0,300) + ' | body: ' + (r.request().postData()||'').slice(0,400) : (r.request().postData()||'').match(/"watch":\[[^\]]*\]/)?.[0]?.slice(0,160) ?? '')); });
   p.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL: ' + r.url()); });
 
@@ -277,6 +277,13 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.waitForSelector('.card');
   check('search shows video results', p.url().includes('/search?q=zoo') && (await p.locator('.card .title').first().innerText()).includes('Search result video'));
   await p.waitForTimeout(500);
+  // if the sharp thumbnail cannot be had (an older server, a missing size...) cards fall back to the small one, never blank
+  await p.route('**/api/thumb/*/best', (r) => r.fulfill({ status: 400, contentType: 'application/json', body: '{"detail":"bad thumbnail name"}' }));
+  await p.goto(BASE + '/search?q=zoo&kind=video'); await p.waitForSelector('.card img');
+  const fellBack = await p.waitForFunction(() => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0 && i.src.includes('mqdefault'); }, null, { timeout: 8000 }).then(() => true).catch(() => false);
+  check('thumbnails fall back to the small picture when the sharp one fails, instead of going blank', fellBack);
+  await p.unroute('**/api/thumb/*/best');
+  await p.goto(BASE + '/search?q=zoo&kind=video'); await p.waitForSelector('.card img');
   check('result thumbnails load through our proxy', await V(p, () => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }));
   await p.click('.tabs a:has-text("Channels")'); await p.waitForSelector('main .row');
   await p.waitForFunction(() => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});

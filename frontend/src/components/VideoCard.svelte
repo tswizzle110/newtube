@@ -12,7 +12,11 @@
   const pct = $derived(
     video.duration && video.resume_position ? Math.min(100, (video.resume_position / video.duration) * 100) : 0,
   )
+  // The sharp picture first; if it cannot be had for any reason (an older server, a missing size, a network hiccup)
+  // fall back to the small one rather than showing nothing.
+  let thumbSize = $state(compact ? 'mqdefault' : 'best')
   let imgFailed = $state(false)
+  const thumbFailed = () => (thumbSize === 'best' ? (thumbSize = 'mqdefault') : (imgFailed = true))
 
   function open(e) {
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
@@ -28,7 +32,7 @@
 <article class="card" class:compact use:impression={{ videoId: video.id, surface, position, requestId }}>
   <a class="thumb" {href} onclick={open} tabindex="-1" aria-hidden="true">
     {#if !imgFailed}
-      <img src={`/api/thumb/${video.id}/${compact ? 'mqdefault' : 'best'}`} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
+      <img src={`/api/thumb/${video.id}/${thumbSize}`} alt="" loading="lazy" onerror={thumbFailed} />
     {/if}
     {#if video.duration}<span class="dur">{duration(video.duration)}</span>{/if}
     {#if video.completed}<span class="done" title="Watched">✓</span>

@@ -25,8 +25,8 @@ from .deps import get_ctx, valid_channel_id, valid_video_id
 router = APIRouter(prefix="/api")
 
 THUMB_NAMES = {"default", "mqdefault", "hqdefault", "sddefault", "maxresdefault", "best"}
-# "best" = the sharpest picture the video has: the 1280x720 one when it exists, else the 480x360 one (always there).
-BEST_ORDER = ("maxresdefault", "hqdefault")
+# "best" = the sharpest picture the video has: 1280x720 when it exists, else 480x360, else the small 320x180 one.
+BEST_ORDER = ("maxresdefault", "hqdefault", "mqdefault")
 # For a size a video does not have, YouTube answers with a tiny grey placeholder: never keep one of those.
 MIN_REAL_IMAGE = 2000
 PASS_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges")
