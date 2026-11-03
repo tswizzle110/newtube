@@ -28,7 +28,7 @@
 <article class="card" class:compact use:impression={{ videoId: video.id, surface, position, requestId }}>
   <a class="thumb" {href} onclick={open} tabindex="-1" aria-hidden="true">
     {#if !imgFailed}
-      <img src={`/api/thumb/${video.id}/mqdefault`} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
+      <img src={`/api/thumb/${video.id}/${compact ? 'mqdefault' : 'best'}`} alt="" loading="lazy" onerror={() => (imgFailed = true)} />
     {/if}
     {#if video.duration}<span class="dur">{duration(video.duration)}</span>{/if}
     {#if video.completed}<span class="done" title="Watched">✓</span>

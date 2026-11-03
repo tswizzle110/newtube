@@ -24,7 +24,11 @@ from .deps import get_ctx, valid_channel_id, valid_video_id
 
 router = APIRouter(prefix="/api")
 
-THUMB_NAMES = {"default", "mqdefault", "hqdefault", "sddefault", "maxresdefault"}
+THUMB_NAMES = {"default", "mqdefault", "hqdefault", "sddefault", "maxresdefault", "best"}
+# "best" = the sharpest picture the video has: the 1280x720 one when it exists, else the 480x360 one (always there).
+BEST_ORDER = ("maxresdefault", "hqdefault")
+# For a size a video does not have, YouTube answers with a tiny grey placeholder: never keep one of those.
+MIN_REAL_IMAGE = 2000
 PASS_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges")
 
 
@@ -38,8 +42,13 @@ async def thumbnail(video_id: str, name: str, ctx: Context = Depends(get_ctx)) -
     if hit:
         body, ctype = hit
     else:
-        r = await ctx.http.get_media(f"https://i.ytimg.com/vi/{video_id}/{name}.jpg")
-        if r.status_code != 200:
+        r = None
+        for size in (BEST_ORDER if name == "best" else (name,)):
+            got = await ctx.http.get_media(f"https://i.ytimg.com/vi/{video_id}/{size}.jpg")
+            if got.status_code == 200 and (name != "best" or len(got.content) >= MIN_REAL_IMAGE):
+                r = got
+                break
+        if r is None:
             raise HTTPException(404, "no thumbnail")
         body, ctype = r.content, r.headers.get("content-type", "image/jpeg")
         ctx.images.put(key, body, ctype)

@@ -737,3 +737,45 @@ def test_playlists_through_the_api(env):
     assert client.put(f"/api/mylists/{pid}/order", json={"video_ids": ["bad"]}).status_code == 400
     assert client.delete(f"/api/mylists/{pid}").json() == {"deleted": True}
     assert client.get(f"/api/mylists/{pid}").status_code == 404
+
+
+# ---- sharper thumbnails ("best": the 1280x720 picture when the video has one) -------------------------
+
+def _thumb_env(tmp_path, available):
+    """An app whose image host has only the named sizes (others 404); returns the requests it saw."""
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        for size, body in available.items():
+            if f"/{size}.jpg" in str(req.url):
+                return httpx.Response(200, content=body, headers={"content-type": "image/jpeg"})
+        return httpx.Response(404)
+    return seen, make_client(tmp_path, handler, FakeExtractor())
+
+
+def test_best_thumbnail_prefers_the_big_picture_and_fetches_it_once(tmp_path):
+    seen, cm = _thumb_env(tmp_path, {"maxresdefault": b"M" * 5000, "hqdefault": b"H" * 5000})
+    with cm as (client, ctx):
+        for _ in range(3):
+            r = client.get(f"/api/thumb/{VID}/best")
+            assert r.status_code == 200 and r.content == b"M" * 5000
+        assert [u.rsplit("/", 1)[1] for u in seen] == ["maxresdefault.jpg"]          # one request, then the cache
+
+
+def test_best_thumbnail_falls_back_when_the_big_one_is_missing_or_a_placeholder(tmp_path):
+    seen, cm = _thumb_env(tmp_path, {"hqdefault": b"H" * 5000})
+    with cm as (client, ctx):
+        assert client.get(f"/api/thumb/{VID}/best").content == b"H" * 5000
+        assert [u.rsplit("/", 1)[1] for u in seen] == ["maxresdefault.jpg", "hqdefault.jpg"]
+    seen, cm = _thumb_env(tmp_path / "b", {"maxresdefault": b"grey", "hqdefault": b"H" * 5000})   # 200 but a tiny placeholder
+    with cm as (client, ctx):
+        assert client.get(f"/api/thumb/{VID}/best").content == b"H" * 5000
+
+
+def test_best_thumbnail_is_a_404_when_nothing_real_exists_and_other_sizes_are_unchanged(tmp_path):
+    seen, cm = _thumb_env(tmp_path, {"mqdefault": b"tiny"})
+    with cm as (client, ctx):
+        assert client.get(f"/api/thumb/{VID}/best").status_code == 404
+        r = client.get(f"/api/thumb/{VID}/mqdefault")
+        assert r.status_code == 200 and r.content == b"tiny"                         # explicit sizes behave exactly as before

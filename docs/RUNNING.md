@@ -173,6 +173,14 @@ position. Hover it for a title bar with **⤢** (back to the full video page, st
 Opening any other video replaces it. The mini-player ignores keyboard shortcuts, so Space and the arrow keys still
 scroll the page you are on. A playlist or list keeps advancing to the next video in the mini-player too.
 
+## Thumbnails
+
+Video cards use the sharpest picture YouTube has for each video: the 1280x720 one when it exists, otherwise the
+480x360 one (the small Up next thumbnails stay small). Each is fetched once from `i.ytimg.com` by your server and
+kept in the image cache (`cache_max_bytes`, 3 GiB by default, roughly 20,000 thumbnails at this quality), so your
+browser never contacts YouTube. If you are on a slow or metered connection and want the old small thumbnails
+back, change `'best'` to `'mqdefault'` in `frontend/src/components/VideoCard.svelte` and rebuild.
+
 ## Search filters
 
 A video search has three filters under the tabs: **Uploaded** (last hour, today, this week, this month, this year),

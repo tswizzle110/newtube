@@ -74,6 +74,11 @@ def handler(req: httpx.Request) -> httpx.Response:
 
 
 PNG = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cfc0f01f0005000201a2a3c2a40000000049454e44ae426082")
+# A real thumbnail is thousands of bytes (the app treats a tiny image as YouTube's "no such size" placeholder), so pad
+# the 1x1 PNG with a harmless text chunk before its end marker: browsers still decode it as an image.
+import struct, zlib
+_pad = b"tEXt" + b"Comment\x00" + b"x" * 3000
+PNG = PNG[:-12] + struct.pack(">I", len(_pad) - 4) + _pad + struct.pack(">I", zlib.crc32(_pad)) + PNG[-12:]
 
 
 class Ex:
