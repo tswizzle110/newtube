@@ -535,6 +535,31 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('History: an imported entry only claims it was opened', /^Opened/.test(imp), imp);
   check('History: no "Watched before" tags (every entry is in your history)', (await p.locator('.card .seen').count()) === 0);
 
+  // ---- Watch time: totals and days from real playback, from a start date you control
+  const statsNow = async () => (await (await ctx.request.get(BASE + '/api/stats/watch?tz=UTC')).json());
+  const statsBefore = await statsNow();
+  await beat('e2eSTAT0001', 600, 1200, [[0, 600]]);                      // exactly ten more minutes, today
+  const statsAfter = await statsNow();
+  check('stats: ten minutes of playback adds exactly ten minutes (no double counting)', statsAfter.total_seconds - statsBefore.total_seconds === 600, JSON.stringify([statsBefore.total_seconds, statsAfter.total_seconds]));
+  await p.goto(BASE + '/stats'); await p.waitForSelector('.hero .big');
+  const shown = await p.locator('.hero .big').innerText();
+  const spentTxt = (sec) => { sec = Math.round(sec); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60; return h ? `${h}h ${String(m).padStart(2, '0')}m` : m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`; };
+  const apiTz = await (await ctx.request.get(BASE + '/api/stats/watch?tz=' + encodeURIComponent(await p.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)))).json();
+  check('stats: the page total is the API total, formatted', shown === spentTxt(apiTz.total_seconds), shown + ' vs ' + spentTxt(apiTz.total_seconds));
+  check('stats: today is listed as "Today" with the time, and the days add up to the total',
+    (await p.locator('.days tbody tr:first-child th').innerText()) === 'Today' &&
+    (await p.locator('.days tfoot .num').innerText()) === shown && (await p.locator('aside.side a.active:has-text("Watch time")').count()) === 1);
+  const todayIso = await p.locator('input[aria-label="Counting from"]').getAttribute('max');
+  await p.fill('input[aria-label="Counting from"]', todayIso);
+  await p.click('.since .btn:has-text("Use this date")');
+  await p.waitForSelector('.since .btn:has-text("Back to automatic")');
+  check('stats: choosing a start date is remembered and shown as set by you', (await p.locator('.since .small').innerText()).startsWith('Set by you') && (await p.locator('.hero .muted').innerText()).includes('since'));
+  await p.reload(); await p.waitForSelector('.since');
+  check('stats: ...and survives a reload', (await p.locator('input[aria-label="Counting from"]').inputValue()) === todayIso && (await p.locator('.since .btn:has-text("Back to automatic")').count()) === 1);
+  await p.click('.since .btn:has-text("Back to automatic")');
+  await p.waitForFunction(() => /^Automatic/.test(document.querySelector('.since .small')?.innerText ?? ''));
+  check('stats: "Back to automatic" counts from your first watch again', (await p.locator('.hero .big').innerText()) === shown);
+
   // ---- History: what you watched, searchable, removable, and it stays removed
   await p.goto(BASE + '/history'); await p.waitForSelector('.grid .card');
   const hBefore = await p.locator('.grid .card').count();

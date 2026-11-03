@@ -99,6 +99,7 @@
       </form>
     {/if}
     <a class="item" class:active={is('/history')} href="/history">History</a>
+    <a class="item" class:active={is('/stats')} href="/stats">Watch time</a>
     {#each mylists.list as l (l.id)}
       <a class="item" class:active={activeList === listRef(l)} href={`/list/${listRef(l)}`}>
         <span class="lname">{l.name}</span>{#if l.count}<span class="count muted">{l.count.toLocaleString()}</span>{/if}

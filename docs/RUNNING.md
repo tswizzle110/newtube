@@ -206,6 +206,19 @@ lookup, to `www.youtube.com`, the same kind of request as opening a playlist), s
 `uv run newtube selftest` has a new **related** check; if it fails, send me the output (and
 `selftest --dump DIR` output) so the parser can be fixed against real data.
 
+## Watch time
+
+**Watch time** (sidebar, Library) shows how much you have actually watched in newtube: a total, the average per day,
+your longest day, a bar for every day (days you did not watch are listed as "–"), and your most-watched channels and
+videos. It counts only real playback, as *video* time (at 2x speed an hour of video takes half an hour of your day but
+counts as an hour); skipped parts are not counted, and replaying the same minute inside one viewing is not counted
+twice. Two separate viewings of the same video both count. Your imported Google history is **not** included (it only
+says a video was opened, not for how long), and watches you remove from History are removed from the totals too.
+
+It counts from your **first recorded watch** unless you set **Counting from** to a date (for example the day you
+started), which is remembered; **Back to automatic** undoes that. "A day" is a calendar day in your browser's time
+zone, and a viewing counts on the day it started.
+
 ## History
 
 **History** (sidebar, Library) lists every video you watched, newest first and grouped by day: your imported

@@ -8,6 +8,7 @@
   import Home from './routes/Home.svelte'
   import MyList from './routes/MyList.svelte'
   import History from './routes/History.svelte'
+  import Stats from './routes/Stats.svelte'
   import Channels from './routes/Channels.svelte'
   import Watch from './routes/Watch.svelte'
   import Search from './routes/Search.svelte'
@@ -101,6 +102,8 @@
           <Home />
         {:else if is('/subscriptions')}
           <Feed />
+        {:else if is('/stats')}
+          <Stats />
         {:else if is('/history')}
           <History />
         {:else if router.pathname.startsWith('/list/')}

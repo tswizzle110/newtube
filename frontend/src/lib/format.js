@@ -51,3 +51,12 @@ export function linkify(text) {
   if (last < text.length) out.push({ t: 'text', v: text.slice(last) })
   return out
 }
+
+/** A length of time spent, for statistics: "3h 42m", "42m 10s", "35s", "0s". */
+export function spent(sec) {
+  sec = Math.max(0, Math.round(sec ?? 0))
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`
+  if (m) return `${m}m ${String(s).padStart(2, '0')}s`
+  return `${s}s`
+}
