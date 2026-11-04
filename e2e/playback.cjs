@@ -11,7 +11,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED/.test(m.text())) problems.push('console: ' + m.text()); });
+  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409|503)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED/.test(m.text())) problems.push('console: ' + m.text()); });
   p.on('response', async r => { if (r.url().endsWith('/api/events')) console.log('EVENTS', r.status(), (r.status()!==200 ? (await r.text()).slice(0,300) + ' | body: ' + (r.request().postData()||'').slice(0,400) : (r.request().postData()||'').match(/"watch":\[[^\]]*\]/)?.[0]?.slice(0,160) ?? '')); });
   p.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL: ' + r.url()); });
 
@@ -598,6 +598,48 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.unroute('**/api/dash/**'); await p.unroute('**/api/stream/**');
   const back2 = await p.waitForFunction(() => { const v = document.querySelector('video'); return !!v && v.currentTime > 302 && !v.paused && v.dataset.mark === 'long'; }, null, { timeout: 60000 }).then(() => true).catch(() => false);
   check('...and resumes once requests get through again', back2, JSON.stringify(await p.evaluate(() => { const v = document.querySelector('video'); return v ? { t: v.currentTime, paused: v.paused } : null; })));
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+
+  // ---- Pages load through trouble: offline, a server hiccup, a long outage, and a long sleep
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+  await ctx.setOffline(true);
+  await p.click('aside.side a:has-text("History")');
+  await p.waitForSelector('.netbar', { timeout: 10000 });
+  check('offline: a banner says so while the page waits', /offline/i.test(await p.locator('.netbar').innerText()) && (await p.locator('.page .error').count()) === 0);
+  await p.waitForTimeout(1500);
+  await ctx.setOffline(false);
+  await p.waitForFunction(() => !document.querySelector('.netbar') && document.querySelector('.page h1')?.innerText === 'Watch history' && !document.querySelector('.page .error') && !document.body.innerText.includes('Loading'), null, { timeout: 20000 }).catch(() => {});
+  check('offline: the page loads by itself when the connection returns, with no error shown', (await p.locator('.netbar').count()) === 0 && (await p.locator('.page .error').count()) === 0 && (await p.locator('.page h1').innerText()) === 'Watch history');
+  // a server hiccup (restart): two 503s, then fine. The page should just load.
+  let hiccups = 0;
+  await p.route('**/api/history?*', async (route) => { if (hiccups < 2) { hiccups++; await route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"restarting"}' }); } else await route.continue(); });
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+  await p.click('aside.side a:has-text("History")');
+  await p.waitForFunction(() => document.querySelector('.page h1')?.innerText === 'Watch history' && !document.body.innerText.includes('Loading') && (document.querySelector('.grid .card') || document.body.innerText.includes('Nothing in your history')), null, { timeout: 25000 });
+  check('a server hiccup (two 503s) is retried and the page loads without an error', hiccups === 2 && (await p.locator('.page .error').count()) === 0, String(hiccups));
+  await p.unroute('**/api/history?*');
+  // a longer outage: the page gives up with a clear message, and recovers by itself once the server answers again
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+  await p.route('**/api/history?*', (route) => route.abort('connectionrefused'));
+  await p.route('**/api/auth/status', (route) => route.abort('connectionrefused'));
+  await p.click('aside.side a:has-text("History")');
+  await p.waitForSelector('.page .error', { timeout: 30000 });
+  check('an outage: the page says it cannot reach the server (and the banner says it is trying)', /reach the server/i.test(await p.locator('.page .error').innerText()) && /Can't reach/i.test(await p.locator('.netbar').innerText()));
+  await p.unroute('**/api/history?*'); await p.unroute('**/api/auth/status');
+  await p.waitForFunction(() => !document.querySelector('.netbar') && !document.querySelector('.page .error'), null, { timeout: 20000 }).catch(() => {});
+  check('...and when the server answers again the banner clears and the page reloads itself', (await p.locator('.netbar').count()) === 0 && (await p.locator('.page .error').count()) === 0);
+  // the laptop slept for 40 minutes: the page is stale, so it loads again
+  let fetches = 0;
+  await p.route('**/api/history?*', async (route) => { fetches++; await route.continue(); });
+  await p.evaluate(() => {
+    const realNow = Date.now.bind(Date); let offset = 0;
+    Date.now = () => realNow() + offset;
+    const vis = (s) => { Object.defineProperty(document, 'visibilityState', { get: () => s, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); };
+    vis('hidden'); offset = 40 * 60 * 1000; vis('visible');
+  });
+  await p.waitForFunction(() => true); await p.waitForTimeout(1500);
+  check('waking after a long sleep reloads what the page shows', fetches >= 1, String(fetches));
+  await p.unroute('**/api/history?*');
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
 
   // ---- Watch time: totals and days from real playback, from a start date you control

@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick, untrack } from 'svelte'
   import { router, navigate, interceptLinks } from './lib/router.svelte.js'
+  import { net } from './lib/net.svelte.js'
   import { auth, checkAuth, logout } from './lib/auth.svelte.js'
   import { nav, setCollapsed, loadSubs, loadLists } from './lib/nav.svelte.js'
   import Login from './routes/Login.svelte'
@@ -84,6 +85,12 @@
 
 <svelte:window onclick={interceptLinks} onkeydown={onKey} />
 
+{#if net.offline || net.unreachable}
+  <div class="netbar" role="status">
+    {net.offline ? "You're offline. Pages will load, and playback and your history will catch up, when the connection is back." : "Can't reach newtube right now. Trying again…"}
+  </div>
+{/if}
+
 {#if !auth.ready}
   <!-- checking session -->
 {:else if !auth.loggedIn}
@@ -97,7 +104,7 @@
       <button class="reopen" title="Show the sidebar" aria-label="Show the sidebar" onclick={() => setCollapsed(false)}>☰</button>
     {/if}
     <main>
-      {#key router.path}
+      {#key router.path + ':' + net.epoch}
         {#if is('/')}
           <Home />
         {:else if is('/subscriptions')}
@@ -144,6 +151,9 @@
   .watchhost.mini { position: fixed; right: 16px; bottom: 16px; z-index: 60; width: min(400px, calc(100vw - 32px));
     border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
   main { min-width: 0; }
+  .netbar { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 90; max-width: min(92vw, 640px);
+    background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 7px 16px; font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
   .backdrop { display: none; }
   @media (max-width: 899px) {
     .layout, .layout.collapsed { grid-template-columns: minmax(0, 1fr); }
