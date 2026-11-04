@@ -26,6 +26,7 @@ from typing import Any
 import yt_dlp
 
 from ..config import Settings
+from .botgate import BotGate
 from .searchfilter import KINDS, BadFilter, SearchFilter, build_sp
 from ..net.http import absolute_url, ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
@@ -328,6 +329,7 @@ class YtDlpExtractor:
         # Separate sessions so a slow background job can never block something you clicked.
         self._sessions = {False: _Session(self._base_opts), True: _Session(self._base_opts)}
         self._scan_session = _ScanSession(self._base_opts)
+        self.gate = BotGate()                # see botgate.py: what to do after YouTube's 'not a bot' answer
 
     def _base_opts(self) -> dict[str, Any]:
         s = self._settings
@@ -341,11 +343,17 @@ class YtDlpExtractor:
         }
 
     async def _extract(self, url: str, extra: dict[str, Any], background: bool) -> dict[str, Any]:
+        self.gate.check(background)                  # after a bot check: fail at once, do not ask YouTube again
         await self._limiter.acquire(Lane.BACKGROUND if background else Lane.INTERACTIVE)
         try:
-            return await asyncio.to_thread(self._sessions[background].run, url, extra)
+            result = await asyncio.to_thread(self._sessions[background].run, url, extra)
         except yt_dlp.utils.DownloadError as e:
-            raise classify_error(str(e)) from e
+            err = classify_error(str(e))
+            if isinstance(err, BotCheck):
+                self.gate.trip(background)
+            raise err from e
+        self.gate.ok()
+        return result
 
     async def raw_video_info(self, video_id: str, *, background: bool = False) -> dict[str, Any]:
         """The unparsed yt-dlp info dict. yt-dlp specific; used by selftest --dump."""
@@ -417,13 +425,19 @@ class YtDlpExtractor:
         arrive, from a worker thread."""
         if not CHANNEL_ID_RE.match(channel_id):
             raise ExtractionError("bad channel request")
+        self.gate.check(background)
         await self._limiter.acquire(Lane.BACKGROUND if background else Lane.INTERACTIVE)
         url = f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}"
         extra = {"extract_flat": "in_playlist", "sleep_interval_requests": self._settings.min_request_interval}
         try:
-            return await asyncio.to_thread(self._scan_session.scan, url, extra, max(1, min(limit, MAX_UPLOADS)), progress)
+            result = await asyncio.to_thread(self._scan_session.scan, url, extra, max(1, min(limit, MAX_UPLOADS)), progress)
         except yt_dlp.utils.DownloadError as e:
-            raise classify_error(str(e)) from e
+            err = classify_error(str(e))
+            if isinstance(err, BotCheck):
+                self.gate.trip(background)
+            raise err from e
+        self.gate.ok()
+        return result
 
     async def channel_uploads(self, channel_id: str, limit: int = MAX_UPLOADS,
                               progress: Callable[[int, int | None], None] | None = None, *,

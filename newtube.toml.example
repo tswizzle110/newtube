@@ -9,10 +9,10 @@ cache_max_bytes = 3221225472  # thumbnail/avatar cache cap (3 GiB)
 min_request_interval = 0.8    # seconds between YouTube requests (plus jitter)
 request_jitter = 0.6
 background_daily_cap = 2000   # background YouTube requests per day (RSS polling now; backfill later)
-backfill_daily_cap = 300      # imported (Takeout) videos whose details are fetched per 24 h; 0 = off
+backfill_daily_cap = 100      # imported (Takeout) videos whose details are fetched per 24 h; 0 = off
 egress_mode = "record"        # "record" (note every outside host), "enforce" (block off-allowlist), "off"
 embedding_model = ""          # "" = built-in simple embedder; or a folder name under data/models/ (needs `uv sync --extra ml`)
 embedding_device = "auto"     # "auto" (GPU if there is one), "cuda" or "cpu"
-related_daily_cap = 40        # background "related videos" lookups per 24 h for the recommender; 0 = off
+related_daily_cap = 20        # background "related videos" lookups per 24 h for the recommender; 0 = off
 backup_dir = ""               # where `newtube backup` writes ("" = data/backups)
 backup_keep = 14              # how many copies to keep

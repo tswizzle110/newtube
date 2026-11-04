@@ -11,7 +11,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409|503)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED/.test(m.text())) problems.push('console: ' + m.text()); });
+  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409|429|503)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED/.test(m.text())) problems.push('console: ' + m.text()); });
   p.on('response', async r => { if (r.url().endsWith('/api/events')) console.log('EVENTS', r.status(), (r.status()!==200 ? (await r.text()).slice(0,300) + ' | body: ' + (r.request().postData()||'').slice(0,400) : (r.request().postData()||'').match(/"watch":\[[^\]]*\]/)?.[0]?.slice(0,160) ?? '')); });
   p.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL: ' + r.url()); });
 
@@ -284,6 +284,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('thumbnails fall back to the small picture when the sharp one fails, instead of going blank', fellBack);
   await p.unroute('**/api/thumb/*/best');
   await p.goto(BASE + '/search?q=zoo&kind=video'); await p.waitForSelector('.card img');
+  await p.waitForFunction(() => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});
   check('result thumbnails load through our proxy', await V(p, () => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }));
   await p.click('.tabs a:has-text("Channels")'); await p.waitForSelector('main .row');
   await p.waitForFunction(() => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});
@@ -598,6 +599,25 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.unroute('**/api/dash/**'); await p.unroute('**/api/stream/**');
   const back2 = await p.waitForFunction(() => { const v = document.querySelector('video'); return !!v && v.currentTime > 302 && !v.paused && v.dataset.mark === 'long'; }, null, { timeout: 60000 }).then(() => true).catch(() => false);
   check('...and resumes once requests get through again', back2, JSON.stringify(await p.evaluate(() => { const v = document.querySelector('video'); return v ? { t: v.currentTime, paused: v.paused } : null; })));
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+
+  // ---- YouTube's bot check: a plain message, no hammering
+  let manifestAsks = 0;
+  await p.route('**/api/dash/**', async (route) => { manifestAsks++; await route.fulfill({ status: 429, contentType: 'application/json', headers: { 'retry-after': '60' }, body: JSON.stringify({ detail: 'YouTube is asking this server to prove it is not a bot', retry_after: 60 }) }); });
+  await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+  await p.waitForSelector('.player .errbox', { timeout: 20000 });
+  await p.waitForTimeout(3000);
+  const botText = await p.locator('.player .errbox').innerText();
+  check('bot check: the player says so in plain words, with Try again (and no talk of cookies)', /not a bot/i.test(botText) && /Try again/.test(botText) && !/cookie/i.test(botText), botText.slice(0, 80));
+  check('bot check: it did not keep asking (the early warm-up plus Shaka\'s two tries, not six; and no fallback stream)', manifestAsks <= 3, String(manifestAsks));
+  await p.unroute('**/api/dash/**');
+  let videoAsks = 0;
+  await p.route('**/api/video/**', async (route) => { videoAsks++; await route.fulfill({ status: 429, contentType: 'application/json', headers: { 'retry-after': '60' }, body: JSON.stringify({ detail: 'YouTube is asking this server to prove it is not a bot, so this can\'t be fetched right now.' }) }); });
+  await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+  await p.waitForSelector('.watch .error', { timeout: 15000 });
+  await p.waitForTimeout(2500);
+  check('bot check: the page shows the message once, with a Try again button, and does not retry on its own', /not a bot/i.test(await p.locator('.watch .error').innerText()) && (await p.locator('.watch button:has-text("Try again")').count()) === 1 && videoAsks === 1, String(videoAsks));
+  await p.unroute('**/api/video/**');
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
 
   // ---- Pages load through trouble: offline, a server hiccup, a long outage, and a long sleep

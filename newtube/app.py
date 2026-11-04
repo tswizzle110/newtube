@@ -10,13 +10,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .auth import Auth
 from .config import Settings, load_settings
 from .db.connection import connect, migrate
-from .extract.base import Extractor
+from .extract.base import BotCheck, Extractor
 from .jobs.scheduler import Scheduler
 from .media.diskcache import DiskCache
 from .net.http import OutboundClient
@@ -103,6 +103,12 @@ def create_app(ctx: Context | None = None) -> FastAPI:
             await c.http.aclose()
 
     app = FastAPI(title="newtube", lifespan=lifespan, docs_url=None, redoc_url=None)
+
+    @app.exception_handler(BotCheck)
+    async def _bot_check(request: Request, exc: BotCheck):
+        # Whatever endpoint hit it (video info, stream, manifest, comments, search...): same plain answer, never a 500.
+        from .api.deps import bot_check_response
+        return bot_check_response(request.app.state.ctx)
     if ctx:  # tests construct the context themselves; make it available without lifespan too
         app.state.ctx = ctx
     app.add_middleware(GuardMiddleware)

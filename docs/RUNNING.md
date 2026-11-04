@@ -128,7 +128,7 @@ the title and channel the history gave); the full details are filled in later, s
 
 Imported videos start with just an id. While `newtube serve` is running, it fetches the details (title, channel,
 length, date) slowly in the background: about one video a minute, never more than `backfill_daily_cap` (default
-300) in any 24 hours, and only when no subscribed channel is waiting for its update. Liked videos go first, then
+100) in any 24 hours, and only when no subscribed channel is waiting for its update. Liked videos go first, then
 watch later, then videos you watched more than once, then the rest, newest first. Private or deleted videos are
 remembered and not asked for again. If YouTube ever asks for a bot check, the backfill pauses for 6 hours.
 
@@ -138,6 +138,31 @@ uv run newtube backfill status
 
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
+
+## If YouTube says "Sign in to confirm you're not a bot"
+
+YouTube sometimes decides that the address a request comes from (your server's IP) looks automated, and refuses to hand
+out videos until it calms down. It has nothing to do with your login (newtube has none). What newtube does now:
+
+* After the first refusal it **stops asking** instead of making it worse. Background work (backfill, related videos,
+  channel-page checks) stays away for 6 hours, then 12, then 24 if it is refused again; what you click gets a single
+  attempt about once a minute, and in between fails instantly with a plain message and **Try again** (nothing retries a
+  bot check by itself). The moment YouTube relents, playback works again and background work resumes.
+* The background defaults are gentler (`backfill_daily_cap = 100`, `related_daily_cap = 20`).
+
+**What to do about it, in this order:**
+
+1. **Give it time and quiet.** Turn the background lookups off while it clears (often hours, sometimes a day or two):
+   set `backfill_daily_cap = 0` and `related_daily_cap = 0` in `newtube.toml`, restart newtube, and avoid hammering Try again.
+2. **Update yt-dlp**, which tracks YouTube's changes (it is often the actual fix):
+   `uv lock --upgrade-package yt-dlp && uv sync && uv run newtube selftest`, then restart newtube.
+3. **Change the address YouTube sees:** send the server's traffic through a VPN/proxy (the gluetun route in "Hiding your
+   home IP"). A fresh address is not flagged. This is the most reliable fix for a persistent flag.
+4. **Slow down** a little more (`min_request_interval = 2.0`, `request_jitter = 1.5`) if it keeps coming back.
+
+**Not offered, on purpose:** logging in or passing browser cookies, which is what yt-dlp's message suggests. It would
+tie every request to your Google account, which is exactly what newtube exists to avoid. (An optional "PO token"
+helper program for yt-dlp is another route; it is an extra program to install and trust, so ask me before adding it.)
 
 ## Closing the laptop, switching wifi, and other interruptions
 
@@ -221,7 +246,7 @@ playback, kept in your database for 3 days, and a failed lookup just shows nothi
 The same lists feed **For you**. A slow background job fetches the related list of the videos you like most
 (liked, watched often and recently, on your Watch later) so that videos from channels you do **not** subscribe to
 can be recommended, with the reason "Related to videos you have watched". It makes at most `related_daily_cap`
-lookups per 24 hours (default 40; 0 turns it off), one a minute at most, only when nothing else is waiting, and
+lookups per 24 hours (default 20; 0 turns it off), one a minute at most, only when nothing else is waiting, and
 never when YouTube has asked for a bot check. This is extra traffic to YouTube from your IP (one request per
 lookup, to `www.youtube.com`, the same kind of request as opening a playlist), so it is yours to turn down.
 

@@ -15,8 +15,10 @@ from .deps import get_ctx, valid_channel_id, valid_playlist_id
 router = APIRouter(prefix="/api")
 
 
-def _fail(e: ExtractionError) -> HTTPException:
-    return HTTPException(503 if isinstance(e, BotCheck) else 502, str(e))
+def _fail(e: ExtractionError) -> Exception:
+    if isinstance(e, BotCheck):
+        return e                                # re-raised as is: the app answers every bot check the same way
+    return HTTPException(502, str(e))
 
 
 @router.get("/search")

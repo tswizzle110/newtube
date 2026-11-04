@@ -8,7 +8,7 @@ import yt_dlp
 
 from newtube.config import Settings
 from newtube.extract import ytdlp
-from newtube.extract.base import BotCheck
+from newtube.extract.base import ExtractionError
 from newtube.net.ratelimit import RateLimiter
 
 
@@ -90,8 +90,8 @@ async def test_background_work_does_not_block_interactive(ex):
 
 async def test_a_failed_extraction_does_not_poison_the_session(ex):
     await ex._extract("u", {}, False)
-    FakeYDL.instances[0].fail_next = yt_dlp.utils.DownloadError("Sign in to confirm you’re not a bot")
-    with pytest.raises(BotCheck):
+    FakeYDL.instances[0].fail_next = yt_dlp.utils.DownloadError("HTTP Error 500: Internal Server Error")
+    with pytest.raises(ExtractionError):
         await ex._extract("u", {"getcomments": True}, False)
     assert (await ex._extract("u", {}, False)) == {"url": "u"}
     assert "getcomments" not in FakeYDL.instances[0].seen[-1]
@@ -108,7 +108,7 @@ def entries(n, pulled=None, fail_at=None):
             if pulled is not None:
                 pulled.append(i)
             if fail_at == i:
-                raise yt_dlp.utils.DownloadError("Sign in to confirm you’re not a bot")
+                raise yt_dlp.utils.DownloadError("HTTP Error 500: Internal Server Error")
             yield {"id": f"vid{i:08d}", "title": f"V{i}", "view_count": i, "duration": 60}
     return gen
 
@@ -144,7 +144,7 @@ async def test_a_scan_does_not_block_interactive_extractions(ex):
 
 async def test_a_failure_halfway_is_classified_and_the_session_stays_usable(ex):
     FakeYDL.entries_factory = entries(10, fail_at=4)
-    with pytest.raises(BotCheck):
+    with pytest.raises(ExtractionError):
         await ex.channel_uploads(UC, 10)
     FakeYDL.entries_factory = entries(3)
     videos, _ = await ex.channel_uploads(UC, 10)

@@ -178,7 +178,9 @@
         syncQualities()
         el.play().catch(() => {})
       } catch (e) {
-        if (!gone) fallback(e)
+        if (gone) return
+        if (e?.code === 1001 && e.data?.[1] === 429) botBlocked()      // YouTube's bot check: say so, do not try other ways
+        else fallback(e)
       }
     })()
     watchdog = setInterval(watch, 1000)
@@ -200,7 +202,8 @@
     if (e?.category !== 1) return false                         // 1 = network
     if (e.code !== 1001) return true                            // 1001 = the server answered with an error status...
     const status = e.data?.[1]
-    return status === 0 || status === 429 || status >= 500      // ...which only matters if it can pass (a proxy hiccup, a restart)
+    return status === 0 || status >= 500                        // ...which only matters if it can pass (a proxy hiccup, a restart).
+    // (429 is NOT here: that is YouTube's bot check, and asking again only makes it worse. See botBlocked.)
   }
   async function loadManifest(from) {
     for (let attempt = 0; ; attempt++) {
@@ -284,6 +287,13 @@
   function tryAgain() { gaveUp = false; recoverTries = 0; stuckFor = STUCK_AFTER; netNote = 'Connection problem: reconnecting…' }
   // The network is back: do not wait for the next tick.
   function backOnline() { if (netNote) { stuckFor = STUCK_AFTER; recoverTries = Math.min(recoverTries, 3) } }
+
+  let botBlock = $state(false)
+  function botBlocked() {
+    mode = 'error'
+    botBlock = true
+    error = "YouTube is asking this server to prove it is not a bot, so this video can't be fetched right now. newtube has paused its background fetching to help. Try again in a minute or two."
+  }
 
   // No DASH (404 from manifest, unsupported browser...): play the best muxed stream directly.
   async function fallback(cause) {
@@ -555,7 +565,9 @@
     onerror={() => mode === 'muxed' && (stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000))}></video>
 
   {#if mode === 'loading'}<div class="center muted">Loading…</div>{/if}
-  {#if mode === 'error' || error}<div class="center error">{error}</div>{/if}
+  {#if mode === 'error' || error}
+    <div class="center error"><div class="errbox">{error}{#if botBlock} <button class="errbtn" onclick={() => location.reload()}>Try again</button>{/if}</div></div>
+  {/if}
   {#if paused && mode !== 'loading' && mode !== 'error'}
     <button class="bigplay" onclick={toggle} aria-label="Play">▶</button>
   {/if}
@@ -728,6 +740,8 @@
   video { width: 100%; height: 100%; display: block; background: #000; }
   video::cue { font-size: 1.4em; background: rgba(0, 0, 0, 0.7); }
   .center { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .errbox { max-width: 34em; padding: 0 16px; text-align: center; pointer-events: auto; }
+  .errbtn { margin-left: 8px; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; padding: 4px 12px; font-weight: 600; }
   .bigplay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 76px; height: 76px;
     border-radius: 50%; border: 0; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 30px; padding-left: 6px; }
   .bigplay:hover { background: var(--accent); color: var(--accent-fg); }

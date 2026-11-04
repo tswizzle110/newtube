@@ -429,7 +429,8 @@ def test_comments_require_login_and_surface_extractor_failures(env):
     async def boom(*a, **k):
         raise BotCheck("Sign in to confirm you're not a bot")
     ex.comments = boom
-    assert client.get(f"/api/comments/{V}?sort=new").status_code == 503
+    r = client.get(f"/api/comments/{V}?sort=new")
+    assert r.status_code == 429 and "not a bot" in r.json()["detail"] and int(r.headers["retry-after"]) >= 1   # one answer for every bot check
 
 
 

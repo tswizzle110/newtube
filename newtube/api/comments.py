@@ -29,7 +29,7 @@ async def comments(video_id: str, sort: str = "top", limit: int = Query(20, ge=1
     try:
         return await ctx.comments.top(video_id, _sort(sort), limit)
     except ExtractionError as e:
-        raise HTTPException(503 if isinstance(e, BotCheck) else 502, str(e)) from e
+        raise (e if isinstance(e, BotCheck) else HTTPException(502, str(e))) from e
 
 
 @router.get("/comments/{video_id}/replies/{comment_id}")
@@ -45,4 +45,4 @@ async def replies(video_id: str, comment_id: str, sort: str = "top",
     except RepliesUnavailable as e:
         raise HTTPException(409, "Replies are only available for the first 10 comments") from e
     except ExtractionError as e:
-        raise HTTPException(503 if isinstance(e, BotCheck) else 502, str(e)) from e
+        raise (e if isinstance(e, BotCheck) else HTTPException(502, str(e))) from e

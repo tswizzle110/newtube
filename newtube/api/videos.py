@@ -24,8 +24,8 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
         raise HTTPException(451, f"age-restricted (not supported yet): {e}") from e
     except VideoUnavailable as e:
         raise HTTPException(404, str(e)) from e
-    except BotCheck as e:
-        raise HTTPException(503, f"YouTube bot check: {e}") from e
+    except BotCheck:
+        raise                                   # answered the same way everywhere (see app.py), never a vague error
     except ExtractionError as e:
         raise HTTPException(502, str(e)) from e
     prog = ctx.conn.execute("SELECT position, completed FROM video_progress WHERE video_id=?",

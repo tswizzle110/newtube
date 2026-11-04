@@ -61,7 +61,7 @@
 <div class="watch" class:theater class:mini>
   {#if error}
     <p class="error">{error}</p>
-    {#if mini}<button class="btn" onclick={onclose}>Close</button>{:else}<a href="/" class="muted">Back home</a>{/if}
+    {#if mini}<button class="btn" onclick={onclose}>Close</button>{:else}<p><button class="btn" onclick={() => location.reload()}>Try again</button> <a href="/" class="muted">Back home</a></p>{/if}
   {:else if !video}
     <p class="muted">Loading…</p>
   {:else}

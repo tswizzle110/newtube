@@ -39,10 +39,10 @@ class Settings:
     request_jitter: float = 0.6         # extra random 0..jitter seconds
     background_daily_cap: int = 2000    # background-lane requests per day
     # Takeout backfill: videos whose details are fetched per rolling 24 hours (0 = never). See jobs/backfill.py.
-    backfill_daily_cap: int = 300
+    backfill_daily_cap: int = 100
     # Related-video lists fetched in the background per rolling 24 h, to find videos from channels you do not
     # subscribe to for the recommender (0 = never; opening a video still fetches its own list).
-    related_daily_cap: int = 40
+    related_daily_cap: int = 20
 
     # Watch every outside connection this server makes (`newtube privacy-check --log` shows them).
     # "record" (default): note everything, block nothing. "enforce": refuse anything off the allowlist,
