@@ -50,8 +50,9 @@ def sanitize(raw: list[list[float]] | list[Interval], duration: float | None) ->
 
 def record_watch(conn: sqlite3.Connection, *, session_id: str, video_id: str, source: str | None,
                  position: float, duration: float | None, intervals: list[list[float]],
-                 ended: bool, now: int | None = None) -> None:
-    """Upsert a watch session and the per-video resume point."""
+                 ended: bool, now: int | None = None, started_at: int | None = None) -> None:
+    """Upsert a watch session and the per-video resume point. ``started_at`` is when the viewing really began (a
+    report that was held back while you were offline arrives later); it is used only when the session is new."""
     now = now if now is not None else int(time.time())
     new = sanitize(intervals, duration)
     row = conn.execute("SELECT intervals, max_position FROM watch_sessions WHERE id=?",
@@ -66,7 +67,7 @@ def record_watch(conn: sqlite3.Connection, *, session_id: str, video_id: str, so
     else:
         conn.execute("INSERT INTO watch_sessions(id,video_id,started_at,ended_at,source,intervals,"
                      " max_position,duration) VALUES (?,?,?,?,?,?,?,?)",
-                     (session_id, video_id, now, now if ended else None, source,
+                     (session_id, video_id, started_at if started_at is not None else now, now if ended else None, source,
                       json.dumps(merged), max_pos, duration))
     # Resume point is based on *all* of this video's sessions, not just this one.
     completed = 0

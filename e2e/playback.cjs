@@ -11,7 +11,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409)/.test(m.text())) problems.push('console: ' + m.text()); });
+  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET/.test(m.text())) problems.push('console: ' + m.text()); });
   p.on('response', async r => { if (r.url().endsWith('/api/events')) console.log('EVENTS', r.status(), (r.status()!==200 ? (await r.text()).slice(0,300) + ' | body: ' + (r.request().postData()||'').slice(0,400) : (r.request().postData()||'').match(/"watch":\[[^\]]*\]/)?.[0]?.slice(0,160) ?? '')); });
   p.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL: ' + r.url()); });
 
@@ -534,6 +534,44 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('History: a video you finished says so', /^Finished/.test(done), done);
   check('History: an imported entry only claims it was opened', /^Opened/.test(imp), imp);
   check('History: no "Watched before" tags (every entry is in your history)', (await p.locator('.card .seen').count()) === 0);
+
+  // ---- Flaky networks: what happens while the laptop is offline is kept and delivered once, with its real time
+  const refreshes = async () => (await (await ctx.request.get(BASE + '/__events')).json()).filter((e) => e.type === 'feed_refresh');
+  const waiting = () => p.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('nt_outbox:')).length);
+  await p.goto(BASE + '/'); await p.waitForSelector('button:has-text("Refresh")'); await p.waitForTimeout(1800);
+  const r0 = (await refreshes()).length;
+  await ctx.setOffline(true);
+  const clickedAt = Date.now() / 1000;
+  await p.click('button:has-text("Refresh")');
+  await p.waitForTimeout(6500);                                      // the 5 s flush tries, fails, and keeps the batch
+  check('offline: the event is kept (in memory and on disk) instead of being dropped', (await waiting()) >= 1, String(await waiting()));
+  await ctx.setOffline(false);
+  await p.waitForFunction(() => !Object.keys(localStorage).some((k) => k.startsWith('nt_outbox:')), null, { timeout: 15000 }).catch(() => {});
+  const r1 = await refreshes();
+  check('offline: when the network returns it is delivered, once', r1.length === r0 + 1 && (await waiting()) === 0, JSON.stringify([r0, r1.length, await waiting()]));
+  const stamped = r1.at(-1).ts;
+  check('offline: ...filed under when it HAPPENED, not when it got through', Math.abs(stamped - clickedAt) < 3 && Date.now() / 1000 - stamped > 5, JSON.stringify([stamped - clickedAt]));
+  // the reply is lost on the way back (the server HAS it): the resend must not be counted again
+  let dropped = false;
+  await p.route('**/api/events', async (route) => { if (!dropped) { dropped = true; await route.fetch(); await route.abort('connectionreset'); } else await route.continue(); });
+  await p.click('button:has-text("Refresh")');
+  await p.waitForTimeout(6500);                                      // the 5 s flush sends it; the reply is cut
+  await p.waitForFunction(() => !Object.keys(localStorage).some((k) => k.startsWith('nt_outbox:')), null, { timeout: 25000 }).catch(() => {});
+  await p.unroute('**/api/events');
+  const r2 = await refreshes();
+  check('a lost reply makes the browser resend, and the server counts it once', dropped && r2.length === r0 + 2 && (await waiting()) === 0, JSON.stringify([dropped, r0, r2.length]));
+  // the tab is closed while offline: the next page delivers what the last one could not
+  await ctx.setOffline(true);
+  await p.click('button:has-text("Refresh")'); await p.waitForTimeout(300);
+  await p.goto('about:blank');
+  await ctx.setOffline(false);
+  const again = await ctx.newPage();
+  await again.goto(BASE + '/'); await again.waitForSelector('aside.side');
+  await again.waitForFunction(() => !Object.keys(localStorage).some((k) => k.startsWith('nt_outbox:')), null, { timeout: 15000 }).catch(() => {});
+  const r3 = await refreshes();
+  check('closing the tab while offline loses nothing: the next page sends it', r3.length === r0 + 3, JSON.stringify([r0, r3.length]));
+  await again.close();
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
 
   // ---- Watch time: totals and days from real playback, from a start date you control
   const statsNow = async () => (await (await ctx.request.get(BASE + '/api/stats/watch?tz=UTC')).json());

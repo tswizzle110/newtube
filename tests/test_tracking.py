@@ -94,7 +94,7 @@ def test_events_endpoint_end_to_end(env):
     }
     r = client.post("/api/events", json=body)
     assert r.status_code == 200
-    assert r.json() == {"impressions": 2, "clicks": 1, "events": 1, "watch": 1, "rejected": 3}
+    assert r.json() == {"impressions": 2, "clicks": 1, "events": 1, "watch": 1, "rejected": 3, "duplicate": 0}
     c = ctx.conn
     clicked = {r["video_id"]: r["clicked"] for r in c.execute("SELECT video_id, clicked FROM impressions")}
     assert clicked == {"aaaaaaaaaaa": 1, "bbbbbbbbbbb": 0}     # ignored impression stays unclicked

@@ -188,7 +188,7 @@ async def _db():
 
 @app.get("/__events")
 async def _events():
-    return [dict(r) for r in conn.execute("SELECT type, video_id, channel_id, payload FROM events ORDER BY id")]
+    return [dict(r) for r in conn.execute("SELECT type, video_id, channel_id, payload, ts FROM events ORDER BY id")]
 
 
 @app.get("/__seed_recommendable")

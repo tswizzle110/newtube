@@ -141,6 +141,7 @@ class Scheduler:
         if self._clock() - self._last_purge < 3600:
             return 0
         self._last_purge = self._clock()
+        self.conn.execute("DELETE FROM event_batches WHERE received_at < ?", (int(time.time()) - 14 * 24 * 3600,))
         return cache.purge_expired(self.conn)
 
     async def run(self) -> None:

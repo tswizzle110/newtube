@@ -15,17 +15,24 @@ function schedule() {
   if (!timer) timer = setTimeout(() => { timer = null; flush() }, FLUSH_MS)
 }
 
-export function trackImpression(i) { q.impressions.push(i); schedule() }
-export function trackClick(c) { q.clicks.push(c); schedule() }
-export function trackEvent(type, fields = {}) { q.events.push({ type, ...fields }); schedule() }
+// Everything is stamped with when it HAPPENED (this browser's clock; the server corrects for a wrong clock), because
+// a report may be delivered much later: laptop closed, wifi switched, tab killed.
+const now = () => Date.now() / 1000
+export function trackImpression(i) { q.impressions.push({ ...i, ts: now() }); schedule() }
+export function trackClick(c) { q.clicks.push({ ...c, ts: now() }); schedule() }
+export function trackEvent(type, fields = {}) { q.events.push({ type, ...fields, ts: now() }); schedule() }
 export function trackWatch(w) {
   // Heartbeats for one session are merged: latest position/duration win, intervals accumulate
-  // (the server unions them, so re-sent intervals are harmless).
+  // (the server unions them, so re-sent intervals are harmless). The first sighting fixes when the viewing began.
   const prev = q.watch.get(w.session_id)
-  if (prev) w = { ...w, intervals: [...prev.intervals, ...w.intervals], ended: prev.ended || w.ended }
+  w = prev
+    ? { ...w, intervals: [...prev.intervals, ...w.intervals], ended: prev.ended || w.ended, started_at: prev.started_at }
+    : { ...w, started_at: startedAt.get(w.session_id) ?? now() }
+  startedAt.set(w.session_id, w.started_at)
   q.watch.set(w.session_id, w)
   schedule()
 }
+const startedAt = new Map()
 
 function drain() {
   const batch = {
@@ -38,27 +45,94 @@ function drain() {
   return batch
 }
 
-export async function flush() {
-  const batch = drain()
-  if (!batch) return
+// ---- the outbox ------------------------------------------------------------------------------------------
+// A drained batch is first PUT AWAY (kept in memory and, one key per batch, in localStorage) and only removed once
+// the server has confirmed it. So nothing is lost if the connection is down, the laptop sleeps, or the tab is closed
+// mid-send: the batches are sent again, from this tab or the next one. Each carries an id, so a batch whose
+// confirmation was lost on the way is recognised by the server and counted once.
+const PREFIX = 'nt_outbox:'
+const MAX_BATCHES = 150              // beyond this, the oldest are dropped (a very long offline stretch)
+const MAX_AGE_MS = 30 * 24 * 3600 * 1000
+const outbox = new Map()             // batch_id -> batch, oldest first
+let sending = false, failures = 0, retryTimer = null
+
+function persist(b) { try { localStorage.setItem(PREFIX + b.batch_id, JSON.stringify(b)) } catch { /* private mode / full */ } }
+function forget(id) { outbox.delete(id); try { localStorage.removeItem(PREFIX + id) } catch { /* ignore */ } }
+
+/** Pick up batches an earlier page left behind (closed or crashed while offline). */
+function recover() {
   try {
-    const r = await fetch('/api/events', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(batch), keepalive: true,
-    })
-    if (!r.ok && r.status !== 400 && r.status !== 422) throw new Error(String(r.status))
-  } catch {
-    // Network blip: put it back and try again on the next flush.
-    q.impressions.unshift(...batch.impressions); q.clicks.unshift(...batch.clicks)
-    q.events.unshift(...batch.events)
-    for (const w of batch.watch) if (!q.watch.has(w.session_id)) q.watch.set(w.session_id, w)
-    schedule()
-  }
+    const found = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.startsWith(PREFIX)) found.push(k)
+    }
+    for (const k of found) {
+      try {
+        const b = JSON.parse(localStorage.getItem(k))
+        if (!b?.batch_id || Date.now() - (b.created ?? 0) > MAX_AGE_MS) localStorage.removeItem(k)
+        else if (!outbox.has(b.batch_id)) outbox.set(b.batch_id, b)
+      } catch { localStorage.removeItem(k) }
+    }
+    const sorted = [...outbox.values()].sort((x, y) => (x.created ?? 0) - (y.created ?? 0))
+    outbox.clear()
+    for (const b of sorted) outbox.set(b.batch_id, b)
+  } catch { /* no storage: in-memory only */ }
 }
 
+function seal() {
+  const b = drain()
+  if (!b) return null
+  b.batch_id = uid() + uid()
+  b.created = Date.now()
+  outbox.set(b.batch_id, b)
+  persist(b)
+  while (outbox.size > MAX_BATCHES) forget(outbox.keys().next().value)
+  return b
+}
+
+export async function flush() {
+  seal()
+  await sendOutbox()
+}
+
+async function sendOutbox() {
+  if (sending || !outbox.size) return
+  sending = true
+  clearTimeout(retryTimer)
+  try {
+    for (const [id, b] of [...outbox]) {
+      const { created, ...body } = b
+      const r = await fetch('/api/events', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...body, sent_at: now() }),
+      })
+      // Delivered, or refused as malformed (resending would never help): either way it is done with.
+      // Anything else (login expired, server restarting, 5xx) is kept and tried again.
+      if (r.ok || r.status === 400 || r.status === 413 || r.status === 422) { forget(id); failures = 0 }
+      else throw new Error(String(r.status))
+    }
+  } catch {
+    failures++
+    // 2 s, 4 s, 8 s ... up to a minute, with jitter; and any sign of life (online, tab visible) tries at once.
+    retryTimer = setTimeout(() => { retryTimer = null; sendOutbox() }, Math.min(60_000, 2000 * 2 ** Math.min(failures, 5)) * (0.75 + Math.random() * 0.5))
+  } finally {
+    sending = false
+  }
+}
+/** Something suggests the network may be back (online, tab shown, page restored): try now rather than later. */
+function retryNow() { failures = 0; flush() }
+/** For tests and diagnostics: how many batches are waiting to be delivered. */
+export const pending = () => outbox.size
+
 function flushBeacon() {
-  const batch = drain()
-  if (batch) navigator.sendBeacon('/api/events', new Blob([JSON.stringify(batch)], { type: 'application/json' }))
+  // The page is going away: last chance to hand things to the browser. The batch stays in the outbox (and in
+  // localStorage) until a real request is confirmed, so if this beacon never arrives, the next page sends it again.
+  const b = seal()
+  if (b) {
+    const { created, ...body } = b
+    try { navigator.sendBeacon('/api/events', new Blob([JSON.stringify({ ...body, sent_at: now() })], { type: 'application/json' })) } catch { /* the outbox has it */ }
+  }
 }
 // Things that must record their final state before the page goes away (e.g. a WatchTracker
 // saving the current position). They run first, then everything queued is sent as one beacon.
@@ -69,7 +143,11 @@ function leaving() {
   flushBeacon()
 }
 addEventListener('pagehide', leaving)
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving() })
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving(); else retryNow() })
+addEventListener('online', retryNow)           // wifi back / switched
+addEventListener('pageshow', retryNow)         // restored from the back-forward cache
+recover()                                      // anything an earlier page could not deliver
+setTimeout(() => flush(), 1500)
 
 // Svelte action: report a card as an impression once >=50% visible for >=1s.
 // If it stays visible longer, the longer time is reported when it scrolls away.
