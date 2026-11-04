@@ -507,7 +507,9 @@ same streams with no re-encoding:
 
 Segments are byte ranges of the same `/api/stream/...` proxy the web player uses, so the privacy rules are unchanged.
 A 404 means the video has no H.264/AAC pair. This is tested against hand-built playlists, **not yet against a real
-Apple device**: on a Mac or iPhone, open `http://<server>:<port>/api/hls/<id>.m3u8` in Safari to try it.
+Apple device**: on a Mac or iPhone, log in to newtube in Safari, then open `http://<server>:<port>/api/hls/<id>/play` (a bare page with one
+native video, which also has the AirPlay button). Do not open the `.m3u8` itself in Safari: it hands that to a system
+viewer that does not send your login cookie.
 
 ## Embeddings ("similar to what you watch")
 

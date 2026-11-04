@@ -121,6 +121,14 @@ def test_bad_ids_and_unknown_tracks(tmp_path):
         assert client.get("/api/hls/aaaaaaaaaaa/248.m3u8").status_code == 404          # WebM is not HLS-capable
 
 
+def test_play_page_is_a_native_video_element_on_the_playlist(tmp_path):
+    handler, _ = file_server()
+    with make_client(tmp_path, handler, HlsExtractor()) as (client, ctx):
+        r = client.get("/api/hls/aaaaaaaaaaa/play")
+        assert r.status_code == 200 and "<video src='/api/hls/aaaaaaaaaaa.m3u8'" in r.text and "<script" not in r.text
+        assert client.get("/api/hls/bad/play").status_code == 400
+
+
 def test_no_h264_means_404(env):
     client, *_ = env                    # the fixture video only has a muxed format
     assert client.get("/api/hls/aaaaaaaaaaa.m3u8").status_code == 404

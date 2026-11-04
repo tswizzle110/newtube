@@ -271,6 +271,19 @@ async def hls_master(video_id: str, lang: str | None = None, ctx: Context = Depe
     return Response(text, media_type=HLS_TYPE, headers={"Cache-Control": "private, no-store"})
 
 
+@router.get("/hls/{video_id}/play")
+async def hls_play(video_id: str) -> Response:
+    """A bare page with one native <video> for the HLS stream: the way to try it (and AirPlay it) from Safari. Opening the
+    .m3u8 address directly makes Safari hand the load to the system media viewer, which does not send the login cookie;
+    a video element on a page does."""
+    valid_video_id(video_id)
+    page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<title>newtube (HLS)</title><body style='margin:0;background:#000'>"
+            f"<video src='/api/hls/{video_id}.m3u8' controls autoplay playsinline x-webkit-airplay=allow "
+            "style='width:100vw;height:100vh'></video>")
+    return Response(page, media_type="text/html", headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/hls/{video_id}/{format_id}.m3u8")
 async def hls_track(video_id: str, format_id: str, ctx: Context = Depends(get_ctx)) -> Response:
     """One track's fragment list, read from the stream's own sidx index (cached: it never changes for a stream)."""
