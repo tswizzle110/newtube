@@ -118,8 +118,8 @@ class Scheduler:
                 self.conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?",
                                   (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
                 return "polled"
+            self._fallbacks.append(self._clock())      # counted BEFORE asking: a lookup that fails still used YouTube's patience
             n = await poll_channel_fallback(self.conn, self.extractor, cid)
-            self._fallbacks.append(self._clock())
             log.info("channel page %s: %d new", cid, n)
             # Its feed is broken, so do not come back to its page every few hours: twice a day is plenty.
             self.conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?",

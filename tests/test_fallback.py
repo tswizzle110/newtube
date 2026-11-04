@@ -299,3 +299,14 @@ def test_background_work_is_spread_over_the_day(conn):
     assert Scheduler(Settings(backfill_daily_cap=0), conn, http=None, extractor=None).pause_after("fetched") == 300.0
     assert Scheduler(Settings(backfill_daily_cap=100000), conn, http=None, extractor=None).pause_after("fetched") == 60.0   # never faster than a minute
     assert Scheduler(Settings(backfill_daily_cap=1), conn, http=None, extractor=None).pause_after("fetched") == 43200.0     # nor longer than 12 hours between looks
+
+
+async def test_failed_channel_lookups_use_up_the_hourly_allowance_too(conn):
+    """A lookup that FAILS (a bot check, a network error) is still a request: it must not be free, or a refusal would
+    turn into a retry loop over every channel."""
+    from newtube.jobs.scheduler import FALLBACK_PER_HOUR
+    ex = FakeExtractor(fail=True)
+    sch, requests, ids = make(conn, 500, ex, n_channels=FALLBACK_PER_HOUR + 6)
+    for _ in range(FALLBACK_PER_HOUR + 6):
+        await sch.tick()
+    assert len(ex.calls) == FALLBACK_PER_HOUR
