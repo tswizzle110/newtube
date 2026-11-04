@@ -11,7 +11,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET/.test(m.text())) problems.push('console: ' + m.text()); });
+  p.on('console', m => { if (m.type() === 'error' && !/status of (400|404|409)|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED/.test(m.text())) problems.push('console: ' + m.text()); });
   p.on('response', async r => { if (r.url().endsWith('/api/events')) console.log('EVENTS', r.status(), (r.status()!==200 ? (await r.text()).slice(0,300) + ' | body: ' + (r.request().postData()||'').slice(0,400) : (r.request().postData()||'').match(/"watch":\[[^\]]*\]/)?.[0]?.slice(0,160) ?? '')); });
   p.on('request', r => { if (!r.url().startsWith(BASE)) problems.push('EXTERNAL: ' + r.url()); });
 
@@ -571,6 +571,33 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const r3 = await refreshes();
   check('closing the tab while offline loses nothing: the next page sends it', r3.length === r0 + 3, JSON.stringify([r0, r3.length]));
   await again.close();
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+
+  // ---- Playback survives the connection dropping (wifi switched, server restarted, a captive-portal network...)
+  await p.goto(BASE + '/watch?v=e2eLONG0001&src=direct');
+  await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 25000 });
+  await p.evaluate(() => { document.querySelector('video').dataset.mark = 'long'; });
+  await ctx.setOffline(true);
+  await p.evaluate(() => { document.querySelector('video').currentTime = 200; });        // not buffered: with no network it can only stall
+  await p.waitForSelector('.netnote', { timeout: 25000 });
+  const offNote = await p.locator('.netnote').innerText();
+  check('offline: the player says so instead of freezing silently', /offline|reconnect/i.test(offNote), offNote);
+  await p.waitForTimeout(3000);
+  await ctx.setOffline(false);
+  const back1 = await p.waitForFunction(() => { const v = document.querySelector('video'); return !!v && v.currentTime > 202 && !v.paused && v.dataset.mark === 'long'; }, null, { timeout: 45000 }).then(() => true).catch(() => false);
+  const st1 = await p.evaluate(() => { const v = document.querySelector('video'); return v ? { t: v.currentTime, paused: v.paused, mark: v.dataset.mark, ready: v.readyState } : null; });
+  check('offline: playback carries on by itself when the network returns (same player, no reload)', back1, JSON.stringify(st1));
+  await p.waitForFunction(() => !document.querySelector('.netnote'), null, { timeout: 10000 }).catch(() => {});
+  check('...and the notice goes away', (await p.locator('.netnote').count()) === 0);
+  // "online" but nothing gets through (the server restarting, a hotel wifi login page): same recovery
+  await p.route('**/api/dash/**', (r) => r.abort('connectionrefused'));
+  await p.route('**/api/stream/**', (r) => r.abort('connectionrefused'));
+  await p.evaluate(() => { document.querySelector('video').currentTime = 300; });
+  await p.waitForSelector('.netnote', { timeout: 25000 });
+  check('stuck while "online": the player notices that too', /reconnect|problem/i.test(await p.locator('.netnote').innerText()), await p.locator('.netnote').innerText());
+  await p.unroute('**/api/dash/**'); await p.unroute('**/api/stream/**');
+  const back2 = await p.waitForFunction(() => { const v = document.querySelector('video'); return !!v && v.currentTime > 302 && !v.paused && v.dataset.mark === 'long'; }, null, { timeout: 60000 }).then(() => true).catch(() => false);
+  check('...and resumes once requests get through again', back2, JSON.stringify(await p.evaluate(() => { const v = document.querySelector('video'); return v ? { t: v.currentTime, paused: v.paused } : null; })));
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
 
   // ---- Watch time: totals and days from real playback, from a start date you control

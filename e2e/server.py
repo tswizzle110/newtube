@@ -16,7 +16,7 @@ from newtube.net.ratelimit import RateLimiter
 from newtube.services.videos import VideoService
 
 MEDIA = Path(sys.argv[1]); PORT = int(sys.argv[2])
-FILES = {"v360": "v360.mp4", "v180": "v180.mp4", "aud": "a.m4a", "mux": "muxed.mp4",
+FILES = {"long360": "long360.mp4", "longaud": "longa.m4a", "v360": "v360.mp4", "v180": "v180.mp4", "aud": "a.m4a", "mux": "muxed.mp4",
          "vp9a": "vp9a.webm", "vp9b": "vp9b.webm"}
 hits = []
 
@@ -94,6 +94,9 @@ class Ex:
                   Format("313", gv("vp9a"), "webm", "vp09.00.40.08", None, height=2160, width=3840, fps=25, tbr=15000, dynamic_range="SDR"),
                   Format("271", gv("vp9b"), "webm", "vp09.00.40.08", None, height=1440, width=2560, fps=60, tbr=6000, dynamic_range="SDR"),
                   Format("140", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64, language="en-US", language_preference=10)]
+        elif vid == "e2eLONG0001":   # six minutes: cannot be fully buffered, so a dropped connection really stalls it
+            fm = [Format("134", gv("long360"), "mp4", "avc1.4d401e", None, height=360, width=640, fps=25, tbr=150),
+                  Format("140-0", gv("longaud"), "m4a", None, "mp4a.40.2", tbr=48, language="en-US", language_preference=10)]
         elif vid == "e2eMUXED001":
             fm = [Format("18", gv("mux"), "mp4", "avc1.4d401e", "mp4a.40.2", height=360, width=640, tbr=500)]
         else:
@@ -106,7 +109,7 @@ class Ex:
                   Format("140-drc", gv("aud"), "m4a", None, "mp4a.40.2", tbr=64, language="en-US",
                          language_preference=10, note="English (US) original (default), medium, DRC"),
                   Format("18", gv("mux"), "mp4", "avc1.4d401e", "mp4a.40.2", height=360, width=640, tbr=500)]
-        return VideoInfo(vid, "E2E test video", "UC" + "a" * 22, "Test Channel", "A description\nwith lines", 24,
+        return VideoInfo(vid, "E2E test video", "UC" + "a" * 22, "Test Channel", "A description\nwith lines", 360 if vid == "e2eLONG0001" else 24,
                          1_700_000_000, 1234, None, [], None, False, 0,
                          chapters=[Chapter(0, "Intro"), Chapter(8, "Middle part"), Chapter(16, "Outro")],
                          captions=[Caption("en", "English", "https://www.youtube.com/api/timedtext?x=1", "vtt")],

@@ -41,6 +41,16 @@
   let toast = $state('')
   let help = $state(false)
 
+  // ---- connection trouble (wifi switched, laptop slept, server restarting) --------------------------------
+  let netNote = $state('')       // shown while the picture is stuck for lack of a connection
+  let gaveUp = $state(false)     // many attempts failed: offer a button instead of retrying forever
+  let destroyed = false
+  const STUCK_AFTER = 6000       // ms of "wants to play, cannot" before we step in (shorter stalls are ordinary buffering)
+  const GIVE_UP_AFTER = 12       // automatic attempts (about three minutes) before asking you
+  let codecUsed = null           // 'avc1' once the browser could not decode the first choice
+  let recovering = false, recoverTries = 0
+  let lastT = -1, stuckFor = 0, lastTick = Date.now(), watchdog = null
+
   // ---- SponsorBlock state
   let sbOn = $state(true)        // quick per-video off switch
   let sbButton = $state(null)    // segment currently offered as "Skip ..." button
@@ -137,23 +147,33 @@
         shakaPlayer.configure({
           // Start playing after ~1 s of buffer, and start at a quality that suits a home connection
           // (Shaka's default assumes 1 Mbit/s and ramps up from the lowest rung). ABR still adapts.
-          streaming: { bufferingGoal: 90, rebufferingGoal: 1, bufferBehind: 30 },
+          streaming: {
+            bufferingGoal: 90, rebufferingGoal: 1, bufferBehind: 30,
+            // A dropped connection must not end playback: retry each segment for a good while (1, 2, 4, 8... s), and when
+            // Shaka gives up on one, tell the watchdog below to step in rather than leaving the picture frozen.
+            retryParameters: { maxAttempts: 6, baseDelay: 1000, backoffFactor: 2, fuzzFactor: 0.5, timeout: 30_000, stallTimeout: 8000, connectionTimeout: 10_000 },
+            failureCallback: (err) => { console.warn('streaming failure:', err?.code); stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000) },
+          },
           abr: { enabled: true, defaultBandwidthEstimate: 25_000_000 },
+          // (The manifest keeps Shaka's default of two tries: a 404 there means "no adaptive streams, use the plain file",
+          // which must not wait. A dropped connection while loading is handled by loadManifest below.)
           manifest: { dash: { ignoreMinBufferTime: true } },
         })
         shakaPlayer.addEventListener('variantchanged', syncQualities)
         shakaPlayer.addEventListener('adaptation', syncQualities)
         const from = startAt > 5 ? startAt : null
         try {
-          await shakaPlayer.load(manifestUrl(audioLang), from)
+          await loadManifest(from)
         } catch (e) {
           // Not "no DASH for this video" (HTTP error): maybe this browser can't decode the chosen codec
           // (VP9/AV1). Ask for the most compatible one before giving up on DASH.
           if (e?.code === 1001) throw e
           console.warn('DASH load failed, retrying with H.264:', e?.code ?? e)
-          await shakaPlayer.load(manifestUrl(audioLang, 'avc1'), from)
+          codecUsed = 'avc1'
+          await loadManifest(from)
         }
         if (gone) return
+        netNote = ''
         mode = 'dash'
         syncQualities()
         el.play().catch(() => {})
@@ -161,13 +181,109 @@
         if (!gone) fallback(e)
       }
     })()
+    watchdog = setInterval(watch, 1000)
     return () => {
       gone = true
+      destroyed = true
+      clearInterval(watchdog)
       tracker?.stop()
       shakaPlayer?.destroy()
       clearTimeout(hideTimer); clearTimeout(toastTimer); clearTimeout(sbToastTimer); clearInterval(sbTimer)
     }
   })
+
+  // ---- recovery ----------------------------------------------------------------------------------------------
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const whenOnline = () => new Promise((r) => { addEventListener('online', r, { once: true }); setTimeout(r, 20_000) })
+  // "We could not reach the server" (as opposed to "the server said no"): worth trying again.
+  function transient(e) {
+    if (e?.category !== 1) return false                         // 1 = network
+    if (e.code !== 1001) return true                            // 1001 = the server answered with an error status...
+    const status = e.data?.[1]
+    return status === 0 || status === 429 || status >= 500      // ...which only matters if it can pass (a proxy hiccup, a restart)
+  }
+  async function loadManifest(from) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await shakaPlayer.load(manifestUrl(audioLang, codecUsed), from)
+        return
+      } catch (e) {
+        if (destroyed || !transient(e) || attempt >= 6) throw e
+        netNote = navigator.onLine ? 'Connection problem: trying again…' : 'Offline: will start when the connection is back'
+        if (navigator.onLine) await sleep(1000 * 2 ** attempt)
+        else await whenOnline()                                 // do not use up attempts while there is no network at all
+      }
+    }
+  }
+
+  // Did playback actually move on within `ms`?
+  async function progressed(ms) {
+    const from = el.currentTime
+    for (let waited = 0; waited < ms && !destroyed; waited += 250) {
+      await sleep(250)
+      if (el.ended || (el.readyState >= 3 && el.currentTime > from + 0.3)) return true
+    }
+    return false
+  }
+
+  // Once a second: is the picture stuck although you want it to play? (Covers every cause at once: a wifi switch,
+  // a laptop that slept, a restarted server, a stream URL that expired.) Time spent frozen while the laptop slept
+  // counts as already stuck, so recovery starts the moment it wakes up.
+  function watch() {
+    const t = Date.now(), gap = t - lastTick
+    lastTick = t
+    if (destroyed || (mode !== 'dash' && mode !== 'muxed') || !el) return
+    const advanced = Math.abs(el.currentTime - lastT) > 0.01
+    lastT = el.currentTime
+    if (el.paused || el.ended || advanced) {
+      stuckFor = Math.min(stuckFor, 0)
+      if (advanced && netNote && !recovering) netNote = ''
+      return
+    }
+    stuckFor += Math.min(gap, 8000)
+    if (gap > 8000) stuckFor = Math.max(stuckFor, STUCK_AFTER)
+    if (!navigator.onLine) netNote = 'Offline: will carry on when the connection is back'
+    if (stuckFor >= STUCK_AFTER && !recovering && !gaveUp && navigator.onLine) recover()
+  }
+
+  async function recover() {
+    if (recovering || destroyed || !el) return
+    recovering = true
+    netNote = 'Connection problem: reconnecting…'
+    const wantPlay = !el.paused
+    const at = el.currentTime
+    recoverTries++
+    try {
+      if (mode === 'dash' && shakaPlayer) {
+        // false = Shaka is not in a failed state, merely waiting on a slow network: give it a few seconds first
+        const resumed = shakaPlayer.retryStreaming(0.1)
+        if (!(await progressed(resumed ? 5000 : 3000))) {
+          await shakaPlayer.load(manifestUrl(audioLang, codecUsed), at)       // start over from here: new connections
+          if (chosenQuality !== 'auto') setQuality(chosenQuality)
+          syncQualities()
+        }
+      } else if (mode === 'muxed') {
+        const src = el.getAttribute('src')
+        el.src = src
+        el.load()
+        await new Promise((r) => { el.addEventListener('loadedmetadata', r, { once: true }); setTimeout(r, 8000) })
+        el.currentTime = at
+      }
+      if (wantPlay) el.play().catch(() => {})
+      if (await progressed(6000)) { netNote = ''; recoverTries = 0; stuckFor = 0 }
+    } catch (e) {
+      console.warn('recovery attempt failed:', e?.code ?? e)
+    } finally {
+      recovering = false
+    }
+    if (netNote && !destroyed) {
+      if (recoverTries >= GIVE_UP_AFTER) { gaveUp = true; return }
+      stuckFor = STUCK_AFTER - Math.min(15_000, 1500 * 2 ** Math.min(recoverTries, 3))   // wait longer each time, then go again
+    }
+  }
+  function tryAgain() { gaveUp = false; recoverTries = 0; stuckFor = STUCK_AFTER; netNote = 'Connection problem: reconnecting…' }
+  // The network is back: do not wait for the next tick.
+  function backOnline() { if (netNote) { stuckFor = STUCK_AFTER; recoverTries = Math.min(recoverTries, 3) } }
 
   // No DASH (404 from manifest, unsupported browser...): play the best muxed stream directly.
   async function fallback(cause) {
@@ -424,7 +540,7 @@
   const chapterAt = (s) => chapters.findLast?.((c) => c.start <= s)?.title ?? ''
 </script>
 
-<svelte:window onkeydown={onKey} onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
+<svelte:window onkeydown={onKey} ononline={backOnline} onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="player" class:compact class:idle={!showControls && !paused} bind:this={box} onmousemove={wake} onmouseleave={() => !paused && (showControls = false)}>
@@ -436,7 +552,7 @@
     onplaying={wake}                                  /* start the hide timer: a touch screen has no mouse movement to do it */
     onended={() => onended?.()}
     onpointerdown={fingerDown} onclick={videoClick} ondblclick={() => lastPointer !== 'touch' && toggleFullscreen()}
-    onerror={() => mode === 'muxed' && (error = 'Playback error')}></video>
+    onerror={() => mode === 'muxed' && (stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000))}></video>
 
   {#if mode === 'loading'}<div class="center muted">Loading…</div>{/if}
   {#if mode === 'error' || error}<div class="center error">{error}</div>{/if}
@@ -444,6 +560,13 @@
     <button class="bigplay" onclick={toggle} aria-label="Play">▶</button>
   {/if}
   {#if toast}<div class="toast">{toast}</div>{/if}
+  {#if gaveUp}
+    <div class="netnote" role="alert">Can't reach the video. <button onclick={tryAgain}>Try again</button></div>
+  {:else if netNote && mode !== 'loading'}
+    <div class="netnote" role="status">{netNote}</div>
+  {:else if netNote}
+    <div class="center muted">{netNote}</div>
+  {/if}
 
   {#if sbButton}
     <button class="sbskip" onclick={() => skipSegment(sbButton, 'button')}>
@@ -610,6 +733,9 @@
   .bigplay:hover { background: var(--accent); color: var(--accent-fg); }
   .toast { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.75);
     color: #fff; padding: 6px 14px; border-radius: 8px; pointer-events: none; }
+  .netnote { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.8); color: #fff;
+    padding: 6px 14px; border-radius: 999px; font-size: 13px; z-index: 3; white-space: nowrap; max-width: 92%; overflow: hidden; text-overflow: ellipsis; }
+  .netnote button { margin-left: 8px; background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; padding: 2px 10px; font-weight: 600; }
   .help { position: absolute; top: 14px; right: 14px; background: rgba(0, 0, 0, 0.85); color: #fff; padding: 12px 16px;
     border-radius: 10px; font-size: 13px; }
   .help dl { display: grid; grid-template-columns: auto auto; gap: 3px 16px; margin: 8px 0 0; }
