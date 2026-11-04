@@ -250,3 +250,52 @@ def test_migration_005_removes_invented_dates_and_keeps_real_ones(tmp_path):
     assert pub == {"invented0001": None, "realrss00001": 5_000, "opened000001": 9_998}
     assert c.execute("SELECT rss_checked_at FROM channels WHERE id=?", (CH,)).fetchone()[0] is None   # poll it again soon
     assert c.execute("SELECT feed_seeded FROM channels WHERE id='UCnever'").fetchone()[0] == 0        # never really read
+
+
+# ---- asking YouTube slowly: the channel-page lookup is limited and rare ---------------------------------------
+
+async def test_an_rss_outage_cannot_become_a_burst_of_channel_lookups(conn):
+    from newtube.jobs.scheduler import FALLBACK_PER_HOUR
+    ex = FakeExtractor()
+    sch, requests, ids = make(conn, 500, ex, n_channels=FALLBACK_PER_HOUR + 5)
+    for _ in range(FALLBACK_PER_HOUR + 5):
+        await sch.tick()
+    assert len(ex.calls) == FALLBACK_PER_HOUR                              # the rest were left alone (and queued for later)
+    waiting = [r[0] for r in conn.execute("SELECT id FROM channels") if r[0] not in {c[0] for c in ex.calls}]
+    assert len(waiting) == 5
+    assert subs.due_for_poll(conn, Settings().rss_poll_interval) == []     # nothing is due again straight away
+
+
+async def test_the_hourly_allowance_comes_back_an_hour_later(conn):
+    from newtube.jobs.scheduler import FALLBACK_PER_HOUR
+    t = [1000.0]
+    ex = FakeExtractor()
+    sch, requests, ids = make(conn, 500, ex, clock=lambda: t[0], n_channels=FALLBACK_PER_HOUR + 1)
+    for _ in range(FALLBACK_PER_HOUR + 1):
+        await sch.tick()
+    assert len(ex.calls) == FALLBACK_PER_HOUR
+    t[0] += 3601
+    conn.execute("UPDATE channels SET rss_checked_at=NULL")                 # (pretend the waiting channels are due again)
+    await sch.tick()
+    assert len(ex.calls) == FALLBACK_PER_HOUR + 1
+
+
+async def test_a_channel_whose_feed_is_broken_is_revisited_twice_a_day_not_every_few_hours(conn):
+    from newtube.jobs.scheduler import FALLBACK_REVISIT
+    ex = FakeExtractor()
+    sch, requests, [cid] = make(conn, 404, ex)
+    await sch.tick()
+    interval = Settings().rss_poll_interval
+    now = int(time.time())
+    assert subs.due_for_poll(conn, interval, now=now + interval + 60) == []                  # not at the usual interval
+    assert subs.due_for_poll(conn, interval, now=now + FALLBACK_REVISIT + 120) == [cid]      # but after 12 hours
+
+
+def test_background_work_is_spread_over_the_day(conn):
+    s = Scheduler(Settings(backfill_daily_cap=30, related_daily_cap=10), conn, http=None, extractor=None)
+    assert s.pause_after("fetched") == pytest.approx(86400 / 30)                  # one about every 48 minutes
+    assert s.pause_after("related") == pytest.approx(86400 / 10)                  # one about every 2.4 hours
+    assert s.pause_after("polled") == 5.0 and s.pause_after("embedded") == 3.0 and s.pause_after("idle") == 300.0
+    assert Scheduler(Settings(backfill_daily_cap=0), conn, http=None, extractor=None).pause_after("fetched") == 300.0
+    assert Scheduler(Settings(backfill_daily_cap=100000), conn, http=None, extractor=None).pause_after("fetched") == 60.0   # never faster than a minute
+    assert Scheduler(Settings(backfill_daily_cap=1), conn, http=None, extractor=None).pause_after("fetched") == 43200.0     # nor longer than 12 hours between looks

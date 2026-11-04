@@ -127,8 +127,8 @@ the title and channel the history gave); the full details are filled in later, s
 ### Filling in the details (automatic)
 
 Imported videos start with just an id. While `newtube serve` is running, it fetches the details (title, channel,
-length, date) slowly in the background: about one video a minute, never more than `backfill_daily_cap` (default
-100) in any 24 hours, and only when no subscribed channel is waiting for its update. Liked videos go first, then
+length, date) slowly in the background: spread across the day (30 a day means one about every 48 minutes), never more than `backfill_daily_cap` (default
+30) in any 24 hours, and only when no subscribed channel is waiting for its update. Liked videos go first, then
 watch later, then videos you watched more than once, then the rest, newest first. Private or deleted videos are
 remembered and not asked for again. If YouTube ever asks for a bot check, the backfill pauses for 6 hours.
 
@@ -148,7 +148,25 @@ out videos until it calms down. It has nothing to do with your login (newtube ha
   channel-page checks) stays away for 6 hours, then 12, then 24 if it is refused again; what you click gets a single
   attempt about once a minute, and in between fails instantly with a plain message and **Try again** (nothing retries a
   bot check by itself). The moment YouTube relents, playback works again and background work resumes.
-* The background defaults are gentler (`backfill_daily_cap = 100`, `related_daily_cap = 20`).
+* The background defaults are gentler (`backfill_daily_cap = 30`, `related_daily_cap = 10`).
+
+**A quiet profile** (what a single person's server can sustain without drawing attention; every number is a ceiling):
+
+```toml
+backfill_daily_cap = 30      # imported videos looked up per day, spread out: one about every 48 minutes (0 while flagged)
+related_daily_cap = 10       # related-video lookups per day: one about every 2.4 hours (0 while flagged)
+rss_poll_interval = 14400    # check each channel's feed every 4 hours (default 3): 6 checks a day per channel
+min_request_interval = 2.0   # seconds between YouTube requests (default 0.8)
+request_jitter = 2.0         # plus up to this much random extra (default 0.6)
+```
+
+Why these: YouTube judges the *rate and shape* of requests from one address. What counts as expensive is a full
+video/channel lookup (yt-dlp), not a feed check or a thumbnail. newtube spreads the capped work over the whole day
+(a cap of 30 is not 30 in half an hour), limits the "channel page" lookup that replaces a failing feed to 6 an hour
+and revisits a channel with a broken feed only twice a day (before this, a feed outage meant hundreds of full lookups in
+a few minutes). What you do yourself (opening videos, comments, searches) is not limited: a person clicking is normal.
+Allow roughly `channels x 24 / rss_poll_interval_in_hours + 150` for `background_daily_cap` if you lower that too.
+While you are flagged, set both caps to 0 and wait; once it has been quiet for a week, bring them back to the numbers above.
 
 **What to do about it, in this order:**
 
@@ -246,7 +264,7 @@ playback, kept in your database for 3 days, and a failed lookup just shows nothi
 The same lists feed **For you**. A slow background job fetches the related list of the videos you like most
 (liked, watched often and recently, on your Watch later) so that videos from channels you do **not** subscribe to
 can be recommended, with the reason "Related to videos you have watched". It makes at most `related_daily_cap`
-lookups per 24 hours (default 20; 0 turns it off), one a minute at most, only when nothing else is waiting, and
+lookups per 24 hours (default 10; 0 turns it off), spread across the day, only when nothing else is waiting, and
 never when YouTube has asked for a bot check. This is extra traffic to YouTube from your IP (one request per
 lookup, to `www.youtube.com`, the same kind of request as opening a playlist), so it is yours to turn down.
 

@@ -9,6 +9,7 @@ time, within its own daily budget (see backfill.py).
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import random
 import sqlite3
@@ -31,6 +32,9 @@ log = logging.getLogger("newtube.jobs")
 RETRY_AFTER = 600   # seconds before retrying a channel whose poll failed completely
 RSS_FAILURES_BEFORE_SKIP = 3   # consecutive RSS failures (any channel) before we stop asking for a while
 RSS_SKIP_SECONDS = 1800        # ...and go straight to the channel-page fallback
+# The channel-page fallback is a full yt-dlp lookup, the kind of request that gets an address flagged as a bot. So:
+FALLBACK_PER_HOUR = 6          # at most this many per hour, however many channels are due (a feed outage must not become a burst)
+FALLBACK_REVISIT = 12 * 3600   # a channel that needed it (its feed is broken) is looked at again only this often
 
 
 async def poll_channel(conn: sqlite3.Connection, http: OutboundClient, channel_id: str,
@@ -64,6 +68,7 @@ class Scheduler:
         self._last_purge = 0.0
         self.related = RelatedService(conn, extractor) if extractor is not None else None
         self._embedder = None
+        self._fallbacks: collections.deque[float] = collections.deque()    # when recent channel-page lookups happened
         self._embed_off = False
         self.backfiller = (Backfiller(conn, extractor, settings.backfill_daily_cap)
                            if extractor is not None else None)
@@ -82,6 +87,12 @@ class Scheduler:
             raise
         self._rss_failures = 0
         return n
+
+    def _fallback_allowed(self) -> bool:
+        now = self._clock()
+        while self._fallbacks and now - self._fallbacks[0] > 3600:
+            self._fallbacks.popleft()
+        return len(self._fallbacks) < FALLBACK_PER_HOUR
 
     async def tick(self) -> str:
         """One unit of work. Returns 'polled', 'idle' or 'capped' (for tests/logging)."""
@@ -102,8 +113,17 @@ class Scheduler:
                     log.warning("rss %s failed (%s); trying its channel page", cid, e)
             if self.extractor is None:
                 raise ExtractionError("RSS is being skipped and there is no fallback")
+            if not self._fallback_allowed():
+                # RSS is down and this hour's channel-page lookups are used up: leave it for later rather than ask more.
+                self.conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?",
+                                  (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
+                return "polled"
             n = await poll_channel_fallback(self.conn, self.extractor, cid)
+            self._fallbacks.append(self._clock())
             log.info("channel page %s: %d new", cid, n)
+            # Its feed is broken, so do not come back to its page every few hours: twice a day is plenty.
+            self.conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?",
+                              (int(time.time()) - self.settings.rss_poll_interval + FALLBACK_REVISIT, cid))
         except DailyCapReached:
             return "capped"
         except Exception as e:  # noqa: BLE001 - one bad channel must not stop the loop
@@ -155,8 +175,19 @@ class Scheduler:
             result = "embedded"            # (the backfill having nothing to do leaves time for this)
         if result in ("idle", "capped", "paused") and self.related is not None:
             if await self.related.expand_step(self.settings.related_daily_cap) == "fetched":
-                result = "fetched"         # ...and so does this: one related list a minute, within its budget
+                result = "related"         # ...and so does this, within its own budget
         return result
+
+    def pause_after(self, result: str) -> float:
+        """Seconds (before jitter) to rest after a step. Work that asks YouTube questions is SPREAD over the whole day:
+        a cap of 30 a day means one about every 48 minutes, not 30 in half an hour, because a burst is what looks like
+        a bot. Local work (embeddings) and channel polling go at their own, faster pace."""
+        def spread(cap: int) -> float:
+            return min(43200.0, max(60.0, 86400.0 / cap)) if cap > 0 else 300.0
+        s = self.settings
+        return {"polled": 5.0, "embedded": 3.0, "error": 60.0,
+                "fetched": spread(s.backfill_daily_cap), "gone": spread(s.backfill_daily_cap), "retry": spread(s.backfill_daily_cap),
+                "related": spread(s.related_daily_cap)}.get(result, 300.0)
 
     async def run(self) -> None:
         while True:
@@ -169,7 +200,4 @@ class Scheduler:
                 # a dead loop would silently stop all feed polling until the next restart.
                 log.exception("background step failed; carrying on in a minute")
                 result = "error"
-            # Busy: a few seconds (jittered) between channels. Backfill: about a minute between videos,
-            # so the daily budget is spread over hours. Idle/capped: check back in a bit.
-            base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0, "embedded": 3.0, "error": 60.0}.get(result, 300.0)
-            await self._sleep(base * (0.5 + self._rand()))
+            await self._sleep(self.pause_after(result) * (0.5 + self._rand()))
