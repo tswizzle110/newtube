@@ -14,8 +14,8 @@ from .net import audit
 def serve() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     settings = load_settings()
-    audit.install_from_settings(settings)       # before anything can open a connection
-    ctx = build_context(settings)
+    ctx = build_context(settings)               # (applies what you saved on the Settings page, no connection is opened yet)
+    audit.install_from_settings(ctx.settings)   # before anything can open a connection
     if not ctx.auth.configured:
         print("No password set. Run `newtube passwd` first.")
         return 2

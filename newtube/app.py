@@ -7,7 +7,7 @@ import contextlib
 import logging
 import sqlite3
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from .auth import Auth
 from .config import Settings, load_settings
+from .settings_registry import apply_db_overrides, snapshot
 from .db.connection import connect, migrate
 from .extract.base import BotCheck, Extractor
 from .jobs.scheduler import Scheduler
@@ -49,6 +50,7 @@ class Context:
     sb_contrib: Contributor | None = None
     sb_limiter: RateLimiter | None = None
     related: RelatedService | None = None
+    started_with: dict = field(default_factory=dict)      # the settings this server started with (to tell what still needs a restart)
 
     def __post_init__(self) -> None:
         if self.related is None:
@@ -71,6 +73,7 @@ def build_context(settings: Settings | None = None) -> Context:
     settings = settings or load_settings()
     conn = connect(settings.db_path)
     migrate(conn)
+    apply_db_overrides(settings, conn)       # what you saved on the Settings page (see settings_registry.py)
     limiter = RateLimiter(settings.min_request_interval, settings.request_jitter,
                           settings.background_daily_cap)
     extractor = YtDlpExtractor(settings, limiter)
@@ -78,12 +81,12 @@ def build_context(settings: Settings | None = None) -> Context:
     return Context(settings, conn, limiter, OutboundClient(settings, limiter), extractor,
                    VideoService(conn, extractor),
                    DiskCache(settings.cache_dir / "images", settings.cache_max_bytes),
-                   Auth(settings.data_dir / "auth.json"))
+                   Auth(settings.data_dir / "auth.json"), started_with=snapshot(settings))
 
 
 def create_app(ctx: Context | None = None) -> FastAPI:
     from .api import auth as auth_api
-    from .api import comments, events, history, lists, media, mylists, playback, recommendations, related, sponsorblock, stats, subscriptions, videos
+    from .api import appsettings, comments, events, history, lists, media, mylists, playback, recommendations, related, sponsorblock, stats, subscriptions, videos
     from .security import GuardMiddleware
 
     @contextlib.asynccontextmanager
@@ -127,6 +130,7 @@ def create_app(ctx: Context | None = None) -> FastAPI:
     app.include_router(history.router)
     app.include_router(related.router)
     app.include_router(stats.router)
+    app.include_router(appsettings.router)
     _mount_frontend(app, (ctx.settings if ctx else load_settings()).frontend_dir)
     return app
 

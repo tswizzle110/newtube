@@ -3,9 +3,10 @@ import { auth } from './auth.svelte.js'
 import { net, refreshPages, whenOnline } from './net.svelte.js'
 
 export class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, rawDetail = null) {
     super(message)
     this.status = status
+    this.rawDetail = rawDetail      // the server's `detail` as JSON text, when it was more than a sentence
   }
 }
 
@@ -45,9 +46,12 @@ async function request(method, url, body) {
       auth.loggedIn = false // session expired: App shows the login page
     }
     if (!res.ok) {
-      let msg = res.statusText
-      try { msg = (await res.json()).detail ?? msg } catch { /* not JSON */ }
-      throw new ApiError(res.status, msg)
+      let msg = res.statusText, raw = null
+      try {
+        const detail = (await res.json()).detail
+        if (detail && typeof detail === 'object') { raw = JSON.stringify(detail); msg = detail.message ?? msg } else msg = detail ?? msg
+      } catch { /* not JSON */ }
+      throw new ApiError(res.status, msg, raw)
     }
     return res.json()
   }

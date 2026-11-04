@@ -236,7 +236,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const mpd2 = await p.evaluate(async () => (await fetch('/api/dash/e2eVP9VID01.mpd')).text());
   check('a 1080p limit falls back to H.264', mpd2.includes('avc1') && !mpd2.includes('vp09'));
   await p.goto(BASE + '/settings'); await p.waitForSelector('select');
-  check('Playback section on the settings page', (await p.locator('h2:has-text("Playback")').count()) === 1 && (await p.locator('select').nth(1).inputValue()) === 'auto');         // (the first select is the start page)
+  check('Playback section on the settings page', (await p.locator('h2:has-text("Playback")').count()) === 1 && (await p.locator('label:has-text("Video codec") select').inputValue()) === 'auto');
   await p.evaluate(async () => fetch('/api/settings/playback', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ codec: 'auto', max_height: 0 }) }));
 
   // ---- comments: lazy, sortable, replies capped at the first 10, timestamps seek
@@ -619,6 +619,40 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('bot check: the page shows the message once, with a Try again button, and does not retry on its own', /not a bot/i.test(await p.locator('.watch .error').innerText()) && (await p.locator('.watch button:has-text("Try again")').count()) === 1 && videoAsks === 1, String(videoAsks));
   await p.unroute('**/api/video/**');
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+
+  // ---- Settings page: change the traffic settings without touching newtube.toml
+  await p.goto(BASE + '/settings'); await p.waitForSelector('#set-backfill_daily_cap');
+  check('settings: the traffic section shows each setting with its current value and a note on when it applies',
+    (await p.locator('#set-backfill_daily_cap').inputValue()) === '30' && (await p.locator('label[for="set-backfill_daily_cap"] .tag.now').count()) === 1 &&
+    (await p.locator('label[for="set-ip_version"] .tag.later').count()) === 1 && (await p.locator('.usage .meter').count()) === 4);
+  check('settings: it shows how much was used against each limit', /of 30/.test(await p.locator('.usage').innerText()));
+  await p.click('.presets button:has-text("Quiet profile")');
+  check('settings: a preset only fills the form (nothing saved yet)', (await p.locator('#set-rss_poll_interval').inputValue()) === '4' &&
+    (await p.locator('#set-min_request_interval').inputValue()) === '2' && (await p.locator('.bar .muted:has-text("not saved yet")').count()) === 1 &&
+    (await (await ctx.request.get(BASE + '/api/settings/app')).json()).fields.find((f) => f.name === 'rss_poll_interval').saved === null);
+  await p.click('.presets button:has-text("Pause background lookups")');
+  check('settings: "Pause background lookups" zeroes both caps', (await p.locator('#set-backfill_daily_cap').inputValue()) === '0' && (await p.locator('#set-related_daily_cap').inputValue()) === '0');
+  await p.fill('#set-min_request_interval', '0');                          // too low: the server must say so, next to the field, and save nothing
+  await p.click('.bar button:has-text("Save")');
+  await p.waitForSelector('.field.bad p.error');
+  check('settings: a wrong value is explained next to its field and nothing is saved', /Minimum pause between YouTube requests/.test(await p.locator('.field.bad p.error').innerText()) &&
+    (await (await ctx.request.get(BASE + '/api/settings/app')).json()).fields.find((f) => f.name === 'backfill_daily_cap').saved === null);
+  await p.fill('#set-min_request_interval', '2');
+  await p.selectOption('#set-ip_version', '4');
+  await p.click('.bar button:has-text("Save")');
+  await p.waitForFunction(() => /Saved\./.test(document.querySelector('.bar .ok')?.innerText ?? ''));
+  const live = (await (await ctx.request.get(BASE + '/api/settings/app')).json()).fields;
+  check('settings: a live setting is applied at once, a restart setting is saved and waits', live.find((f) => f.name === 'backfill_daily_cap').value === 0 &&
+    live.find((f) => f.name === 'ip_version').pending_restart === true && live.find((f) => f.name === 'ip_version').value !== '4');
+  check('settings: the page says a restart is needed, and how (not started by systemd here)', (await p.locator('.restart').innerText()).includes('systemctl') && (await p.locator('.restart button').count()) === 0 &&
+    (await p.locator('label[for="set-ip_version"] .tag.pending').count()) === 1);
+  await p.reload(); await p.waitForSelector('#set-backfill_daily_cap');
+  check('settings: your choices are still there after a reload', (await p.locator('#set-backfill_daily_cap').inputValue()) === '0' && (await p.locator('#set-ip_version').inputValue()) === '4' &&
+    (await p.locator('#set-rss_poll_interval').inputValue()) === '4');
+  await p.click('.presets button:has-text("Built-in defaults")'); await p.click('.bar button:has-text("Save")');
+  await p.waitForFunction(() => /Saved\./.test(document.querySelector('.bar .ok')?.innerText ?? ''));
+  check('settings: "Built-in defaults" puts everything back', (await p.locator('#set-backfill_daily_cap').inputValue()) === '30' && (await p.locator('#set-ip_version').inputValue()) === 'auto' &&
+    (await p.locator('.restart').count()) === 0);
 
   // ---- Pages load through trouble: offline, a server hiccup, a long outage, and a long sleep
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');

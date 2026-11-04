@@ -85,7 +85,7 @@ def _ml(args: argparse.Namespace) -> int:
     from .ml.embedder import ModelNotInstalled, load_embedder
     from .ml.store import count_pending, embed_pending
 
-    s = load_settings()
+    s = _effective_settings()
     conn = connect(s.db_path)
     migrate(conn)
     try:
@@ -119,7 +119,7 @@ def _privacy_check(args: argparse.Namespace) -> int:
     from .config import load_settings
     from .net import audit
 
-    s = load_settings()
+    s = _effective_settings()
     if args.log:
         from .db.connection import connect, migrate
 
@@ -163,7 +163,7 @@ def _backup(args: argparse.Namespace) -> int:
     from .config import load_settings
     from .db.connection import connect
 
-    s = load_settings()
+    s = _effective_settings()
     dest = Path(args.dir).expanduser() if args.dir else s.backups_path
     if args.list:
         found = list_backups(dest)
@@ -191,7 +191,7 @@ def _backfill_status() -> int:
     from .db.connection import connect, migrate
     from .jobs.backfill import progress
 
-    s = load_settings()
+    s = _effective_settings()
     conn = connect(s.db_path)
     migrate(conn)
     p = progress(conn, s.backfill_daily_cap)
@@ -256,6 +256,21 @@ def _takeout(args: argparse.Namespace) -> int:
     except FileNotFoundError as e:
         print(e)
         return 2
+
+
+def _effective_settings():
+    """The settings as the server sees them: file and environment, then what was saved on the Settings page."""
+    from .config import load_settings
+    from .db.connection import connect, migrate
+    from .settings_registry import apply_db_overrides
+
+    s = load_settings()
+    if s.db_path.exists():
+        conn = connect(s.db_path)
+        migrate(conn)
+        apply_db_overrides(s, conn)
+        conn.close()
+    return s
 
 
 if __name__ == "__main__":

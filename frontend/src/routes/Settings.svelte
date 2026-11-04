@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
   import { COLORS } from '../lib/sponsorblock.js'
   import { nav, setStartPage } from '../lib/nav.svelte.js'
+  import AppSettings from '../components/AppSettings.svelte'
 
   const ACTIONS = [['auto', 'Skip automatically'], ['button', 'Show skip button'], ['mark', 'Only mark on the bar'], ['ignore', 'Ignore']]
   let s = $state(null)
@@ -65,6 +66,8 @@
       </select>
     </label>
   </div>
+
+  <AppSettings />
 
   {#if pb}
     <h2>Playback <span class="status muted">{status}</span></h2>

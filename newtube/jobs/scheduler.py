@@ -169,6 +169,7 @@ class Scheduler:
         self.flush_audit()
         result = await self.tick()
         if result == "idle" and self.backfiller is not None:
+            self.backfiller.daily_cap = self.settings.backfill_daily_cap       # (changed on the Settings page? applies now)
             result = await self.backfiller.step()
         if result in ("idle", "capped", "paused") and await self.embed_step() == "embedded":
             result = "embedded"            # (the backfill having nothing to do leaves time for this)

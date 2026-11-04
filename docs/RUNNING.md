@@ -412,6 +412,27 @@ Copy `newtube.toml.example` to `newtube.toml` (git-ignored) or set `NEWTUBE_*` e
 variables. To send all outbound traffic through a proxy later, set `outbound_proxy`: one
 setting covers the app and yt-dlp.
 
+### Changing settings from the page (no file editing)
+
+**Settings** has a *YouTube traffic and system* section with the settings people most often change, each with a plain
+explanation and sensible limits:
+
+* **Presets** fill in the form for you (nothing changes until you press **Save**): **Quiet profile** (the numbers from
+  "If YouTube says not a bot"), **Pause background lookups** (both caps to 0), and **Built-in defaults**.
+* A green **applies now** tag means the change takes effect the moment you save (the lookup caps, how often channels are
+  checked, the pause between requests, the background ceiling). An amber **after restart** tag means newtube must restart
+  (proxy, protocol, the outside-connection record, the thumbnail cache size, the language model). A saved one waiting for a
+  restart is marked, and a **Restart newtube now** button appears if newtube was started as a service (otherwise the page
+  tells you the command).
+* The top of the section shows what has been used against each limit (and says so if YouTube is asking for a bot check).
+* A wrong value is explained next to its box and *nothing at all* is saved until everything is right.
+* **use default** puts one setting back to what `newtube.toml` (or the built-in value) gives.
+
+What you save is kept in the database and used by the server and by every command (`backup`, `selftest`...). The order is:
+built-in default, then `newtube.toml`, then what you saved on the page; an environment variable (`NEWTUBE_<NAME>`) beats all
+of them and is shown as locked. The address, port and folders are deliberately file-only: changing them from a page served on
+that very address could lock you out.
+
 ## IPv4 or IPv6
 
 `selftest` prints the address YouTube saw (`exit_ip`). If it is an IPv6 address, that is your server's own

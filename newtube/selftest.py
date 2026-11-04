@@ -426,8 +426,12 @@ def format_results(results: list[Result]) -> str:
 def run(dump_dir: str | None = None, only: str | None = None) -> int:
     from .db.connection import connect, migrate
     from .extract.ytdlp import YtDlpExtractor
+    from .settings_registry import apply_db_overrides
 
     settings = load_settings()
+    conn = connect(settings.db_path)
+    migrate(conn)
+    apply_db_overrides(settings, conn)            # what you saved on the Settings page
     wanted = {n.strip() for n in only.split(",") if n.strip()} if only else None
     if wanted and wanted - set(SelfTest.CHECKS):
         print(f"Unknown check(s): {', '.join(sorted(wanted - set(SelfTest.CHECKS)))}.\nChoose from: {', '.join(SelfTest.CHECKS)}")
@@ -435,8 +439,6 @@ def run(dump_dir: str | None = None, only: str | None = None) -> int:
     limiter = RateLimiter(settings.min_request_interval, settings.request_jitter,
                           settings.background_daily_cap)
     extractor = YtDlpExtractor(settings, limiter)
-    conn = connect(settings.db_path)
-    migrate(conn)
     extractor.gate.persist_to(conn)               # share what the server knows about a bot check (and tell it what we learn)
 
     async def main() -> list[Result]:
