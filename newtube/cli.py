@@ -16,6 +16,8 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("selftest", help="check that YouTube extraction works from this machine")
     st.add_argument("--dump", metavar="DIR", help="save redacted raw extractor output here "
                                                   "(handy for tests / bug reports)")
+    st.add_argument("--only", metavar="NAMES", help="run only these checks (comma-separated, e.g. video_info): a gentle "
+                                                    "way to test without making ~20 requests to YouTube")
     sub.add_parser("passwd", help="set the login password")
     tk = sub.add_parser("takeout", help="import a Google Takeout (watch history, subscriptions, likes...)")
     tsub = tk.add_subparsers(dest="takeout_command", required=True)
@@ -55,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "selftest":
         from .selftest import run
 
-        return run(dump_dir=args.dump)
+        return run(dump_dir=args.dump, only=args.only)
     if args.command == "passwd":
         return _passwd()
     if args.command == "takeout":

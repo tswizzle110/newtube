@@ -330,6 +330,7 @@ class YtDlpExtractor:
         self._sessions = {False: _Session(self._base_opts), True: _Session(self._base_opts)}
         self._scan_session = _ScanSession(self._base_opts)
         self.gate = BotGate()                # see botgate.py: what to do after YouTube's 'not a bot' answer
+        self._failures: dict[str, tuple[float, ExtractionError]] = {}    # see _recall: a failed lookup is remembered briefly
 
     def _base_opts(self) -> dict[str, Any]:
         s = self._settings
@@ -342,8 +343,25 @@ class YtDlpExtractor:
             "noplaylist": True,
         }
 
+    FAILURE_MEMORY = 45.0
+
+    def _recall(self, key: str) -> None:
+        """If this exact lookup failed a moment ago, fail the same way without asking YouTube again. Retries (the player's,
+        the page's, Shaka's, a hurried second click) are then free instead of each being a fresh full lookup."""
+        hit = self._failures.get(key)
+        if hit and hit[0] > time.monotonic():
+            raise type(hit[1])(str(hit[1]))
+
+    def _remember(self, key: str, err: ExtractionError) -> None:
+        now = time.monotonic()
+        if len(self._failures) > 200:
+            self._failures = {k: v for k, v in self._failures.items() if v[0] > now}
+        self._failures[key] = (now + self.FAILURE_MEMORY, err)
+
     async def _extract(self, url: str, extra: dict[str, Any], background: bool) -> dict[str, Any]:
         self.gate.check(background)                  # after a bot check: fail at once, do not ask YouTube again
+        key = url + repr(sorted(extra.items(), key=lambda kv: kv[0]))
+        self._recall(key)
         await self._limiter.acquire(Lane.BACKGROUND if background else Lane.INTERACTIVE)
         try:
             result = await asyncio.to_thread(self._sessions[background].run, url, extra)
@@ -351,6 +369,8 @@ class YtDlpExtractor:
             err = classify_error(str(e))
             if isinstance(err, BotCheck):
                 self.gate.trip(background)
+            else:
+                self._remember(key, err)
             raise err from e
         self.gate.ok()
         return result
@@ -426,6 +446,8 @@ class YtDlpExtractor:
         if not CHANNEL_ID_RE.match(channel_id):
             raise ExtractionError("bad channel request")
         self.gate.check(background)
+        key = f"scan:{channel_id}"
+        self._recall(key)
         await self._limiter.acquire(Lane.BACKGROUND if background else Lane.INTERACTIVE)
         url = f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}"
         extra = {"extract_flat": "in_playlist", "sleep_interval_requests": self._settings.min_request_interval}
@@ -435,6 +457,8 @@ class YtDlpExtractor:
             err = classify_error(str(e))
             if isinstance(err, BotCheck):
                 self.gate.trip(background)
+            else:
+                self._remember(key, err)
             raise err from e
         self.gate.ok()
         return result

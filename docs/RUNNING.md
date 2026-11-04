@@ -168,12 +168,31 @@ a few minutes). What you do yourself (opening videos, comments, searches) is not
 Allow roughly `channels x 24 / rss_poll_interval_in_hours + 150` for `background_daily_cap` if you lower that too.
 While you are flagged, set both caps to 0 and wait; once it has been quiet for a week, bring them back to the numbers above.
 
+**Everything newtube asks YouTube for, and what limits it** (the full list; a test checks that every route into YouTube
+obeys the bot gate, so a future change cannot quietly bypass it):
+
+| What | Kind | What limits it |
+| --- | --- | --- |
+| Feed check per channel | cheap request | once per `rss_poll_interval`; pauses 30 min after 3 failures in a row |
+| Channel-page lookup, only when a feed is broken | **heavy** | 6 an hour (counted in the database, failures included); a broken-feed channel is revisited every 12 h |
+| Backfill of imported videos | **heavy** | `backfill_daily_cap` a day, spread over the day; counted in the database |
+| Related lists for recommendations | **heavy** | `related_daily_cap` a day, spread over the day; counted in the database |
+| Opening a video (info, Up next, comments, search, channel page) | **heavy** | only what you click; results are cached (video 4 h, related 3 days, search 1 h, channel 15 min); a failed lookup is remembered for 45 s so retries cost nothing |
+| Thumbnails and channel pictures | image server | fetched once, then kept in the disk cache |
+| Video data | video servers | only while you watch |
+| `selftest` | ~20 **heavy** | only when you run it; `--only video_info` runs just one |
+
+**Safety nets** that apply to every heavy lookup: after a bot check the gate (above) closes and *stays closed across restarts*
+(it is kept in the database, so a restart or a crash loop cannot ask again); a failing lookup is not repeated for 45 seconds;
+and `selftest` shares the gate, so it will not hammer YouTube while you are flagged.
+
 **What to do about it, in this order:**
 
 1. **Give it time and quiet.** Turn the background lookups off while it clears (often hours, sometimes a day or two):
    set `backfill_daily_cap = 0` and `related_daily_cap = 0` in `newtube.toml`, restart newtube, and avoid hammering Try again.
 2. **Update yt-dlp**, which tracks YouTube's changes (it is often the actual fix):
-   `uv lock --upgrade-package yt-dlp && uv sync && uv run newtube selftest`, then restart newtube.
+   `uv lock --upgrade-package yt-dlp && uv sync`, restart newtube, then check gently with `uv run newtube selftest --only video_info`
+   (the full `selftest` makes about 20 lookups in a minute: save that for when things are working again).
 3. **Change the address YouTube sees:** send the server's traffic through a VPN/proxy (the gluetun route in "Hiding your
    home IP"). A fresh address is not flagged. This is the most reliable fix for a persistent flag.
 4. **Slow down** a little more (`min_request_interval = 2.0`, `request_jitter = 1.5`) if it keeps coming back.

@@ -182,3 +182,35 @@ async def test_channel_sort_check_fails_when_progress_never_follows_the_pages():
     http = OutboundClient(Settings(), RateLimiter(0, 0, 10), transport=httpx.MockTransport(handler))
     res = {r.name: r for r in await SelfTest(Settings(js_runtime="python3"), Silent(), http).run()}
     assert not res["channel_sort"].ok and "progress" in res["channel_sort"].detail
+
+
+# ---- --only: a gentle way to test without ~20 requests to YouTube ---------------------------------------------
+
+def test_only_runs_just_the_named_checks(tmp_path, monkeypatch, capsys):
+    from newtube.cli import main
+    monkeypatch.setenv("NEWTUBE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("NEWTUBE_CONFIG", str(tmp_path / "none.toml"))
+    code = main(["selftest", "--only", "allowlist"])             # a local check: no network
+    out = capsys.readouterr().out
+    assert code == 0 and "allowlist" in out and "video_info" not in out.split("all checks passed")[0].split("allowlist")[1]
+
+
+def test_an_unknown_check_name_is_refused_before_anything_runs(tmp_path, monkeypatch, capsys):
+    from newtube.cli import main
+    monkeypatch.setenv("NEWTUBE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("NEWTUBE_CONFIG", str(tmp_path / "none.toml"))
+    assert main(["selftest", "--only", "video_info,bogus"]) == 2
+    assert "Unknown check" in capsys.readouterr().out
+
+
+def test_the_selftest_says_when_a_bot_check_is_on_record(tmp_path, monkeypatch, capsys):
+    import time as _t
+    from newtube.cli import main
+    from newtube.db.connection import connect, migrate
+    monkeypatch.setenv("NEWTUBE_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("NEWTUBE_CONFIG", str(tmp_path / "none.toml"))
+    c = connect(tmp_path / "data" / "newtube.db"); migrate(c)
+    c.execute("INSERT INTO settings(key, value) VALUES ('bot_gate', ?)",
+              ('{"trips": 1, "background_until": %f, "probe_after": %f}' % (_t.time() + 3600, _t.time() + 60),))
+    main(["selftest", "--only", "environment"])
+    assert "asked this server for a bot check" in capsys.readouterr().out

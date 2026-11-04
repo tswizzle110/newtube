@@ -274,7 +274,7 @@ async def test_the_hourly_allowance_comes_back_an_hour_later(conn):
     for _ in range(FALLBACK_PER_HOUR + 1):
         await sch.tick()
     assert len(ex.calls) == FALLBACK_PER_HOUR
-    t[0] += 3601
+    conn.execute("UPDATE events SET ts = ts - 3601 WHERE type='channel_fallback'")      # an hour passes (the allowance is kept in the database)
     conn.execute("UPDATE channels SET rss_checked_at=NULL")                 # (pretend the waiting channels are due again)
     await sch.tick()
     assert len(ex.calls) == FALLBACK_PER_HOUR + 1
@@ -310,3 +310,19 @@ async def test_failed_channel_lookups_use_up_the_hourly_allowance_too(conn):
     for _ in range(FALLBACK_PER_HOUR + 6):
         await sch.tick()
     assert len(ex.calls) == FALLBACK_PER_HOUR
+
+
+async def test_a_restart_does_not_hand_back_the_allowance(conn):
+    """A new scheduler (= the server restarted) still sees this hour's lookups: the count is in the database."""
+    from newtube.jobs.scheduler import FALLBACK_PER_HOUR
+    ex = FakeExtractor()
+    sch, requests, ids = make(conn, 500, ex, n_channels=FALLBACK_PER_HOUR + 3)
+    for _ in range(FALLBACK_PER_HOUR):
+        await sch.tick()
+    assert len(ex.calls) == FALLBACK_PER_HOUR
+    ex2 = FakeExtractor()
+    restarted = Scheduler(Settings(), conn, sch.http, extractor=ex2)               # same database, brand-new process state
+    conn.execute("UPDATE channels SET rss_checked_at=NULL")
+    for _ in range(3):
+        await restarted.tick()
+    assert ex2.calls == []

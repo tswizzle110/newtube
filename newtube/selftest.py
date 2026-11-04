@@ -391,18 +391,25 @@ class SelfTest:
         cats = sorted({g.category for g in sample.segments} | set(sample.full_labels))
         return f"{head}; parsed a real entry: {len(sample.segments)} segment(s) + {len(sample.full_labels)} full label(s), {', '.join(cats)}"
 
-    async def run(self) -> list[Result]:
-        for name, fn in [
-            ("environment", self.environment), ("allowlist", self.allowlist),
-            ("rss", self.rss), ("video_info", self.video_info), ("video_warm", self.video_info_warm),
-            ("stream_range", self.stream_range), ("exit_ip", self.exit_ip), ("video_hd", self.video_hd), ("thumbnail", self.thumbnail),
-            ("channel", self.channel), ("search_video", self.search_video),
-            ("search_channel", self.search_channel), ("search_playlist", self.search_playlist),
-            ("channel_videos", self.channel_videos), ("channel_sort", self.channel_sort), ("playlist", self.playlist_videos), ("related", self.related), ("search_filters", self.search_filters),
-            ("comments_top", self.comments_top), ("comment_replies", self.comment_replies),
-            ("sponsorblock", self.sponsorblock),
-        ]:
-            await self._check(name, fn)
+    CHECKS = ("environment", "allowlist", "rss", "video_info", "video_warm", "stream_range", "exit_ip", "video_hd", "thumbnail",
+              "channel", "search_video", "search_channel", "search_playlist", "channel_videos", "channel_sort", "playlist",
+              "related", "search_filters", "comments_top", "comment_replies", "sponsorblock")
+
+    async def run(self, only: set[str] | None = None) -> list[Result]:
+        table = {
+            "environment": self.environment, "allowlist": self.allowlist,
+            "rss": self.rss, "video_info": self.video_info, "video_warm": self.video_info_warm,
+            "stream_range": self.stream_range, "exit_ip": self.exit_ip, "video_hd": self.video_hd, "thumbnail": self.thumbnail,
+            "channel": self.channel, "search_video": self.search_video,
+            "search_channel": self.search_channel, "search_playlist": self.search_playlist,
+            "channel_videos": self.channel_videos, "channel_sort": self.channel_sort, "playlist": self.playlist_videos,
+            "related": self.related, "search_filters": self.search_filters,
+            "comments_top": self.comments_top, "comment_replies": self.comment_replies,
+            "sponsorblock": self.sponsorblock,
+        }
+        for name in self.CHECKS:
+            if only is None or name in only:
+                await self._check(name, table[name])
         return self.results
 
 
@@ -416,24 +423,38 @@ def format_results(results: list[Result]) -> str:
     return "\n".join(lines)
 
 
-def run(dump_dir: str | None = None) -> int:
+def run(dump_dir: str | None = None, only: str | None = None) -> int:
+    from .db.connection import connect, migrate
     from .extract.ytdlp import YtDlpExtractor
 
     settings = load_settings()
+    wanted = {n.strip() for n in only.split(",") if n.strip()} if only else None
+    if wanted and wanted - set(SelfTest.CHECKS):
+        print(f"Unknown check(s): {', '.join(sorted(wanted - set(SelfTest.CHECKS)))}.\nChoose from: {', '.join(SelfTest.CHECKS)}")
+        return 2
     limiter = RateLimiter(settings.min_request_interval, settings.request_jitter,
                           settings.background_daily_cap)
+    extractor = YtDlpExtractor(settings, limiter)
+    conn = connect(settings.db_path)
+    migrate(conn)
+    extractor.gate.persist_to(conn)               # share what the server knows about a bot check (and tell it what we learn)
 
     async def main() -> list[Result]:
         http = OutboundClient(settings, limiter)
         try:
-            st = SelfTest(settings, YtDlpExtractor(settings, limiter), http,
-                          Path(dump_dir) if dump_dir else None)
-            return await st.run()
+            st = SelfTest(settings, extractor, http, Path(dump_dir) if dump_dir else None)
+            return await st.run(wanted)
         finally:
             await http.aclose()
 
     print(f"newtube selftest (python {sys.version.split()[0]}, proxy: "
           f"{settings.outbound_proxy or 'none'}, ip_version: {settings.ip_version})\n")
+    if extractor.gate.closed:
+        print(f"Note: YouTube recently asked this server for a bot check. Lookups are held back to avoid making it worse\n"
+              f"(one probe is allowed about every minute), so most checks below will fail fast until it clears.\n")
+    elif wanted is None:
+        print("Note: this makes about 20 requests to YouTube in a minute. To check just one thing gently, use\n"
+              "`--only video_info` (names: " + ", ".join(SelfTest.CHECKS) + ").\n")
     results = asyncio.run(main())
     print(format_results(results))
     return 0 if all(r.ok for r in results) else 1

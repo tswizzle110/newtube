@@ -9,10 +9,15 @@ first bot check closes a gate:
   again; between probes it fails at once, without touching YouTube, with a clear message.
 
 Any request that succeeds opens the gate again. No cookies, no account: this only slows us down.
+
+The state is kept in the database, so a restart (or a crash loop, or the self-test command) does not forget it: otherwise
+every restart would be a fresh chance to ask again while YouTube is still refusing.
 """
 
 from __future__ import annotations
 
+import json
+import sqlite3
 import time
 from collections.abc import Callable
 
@@ -23,11 +28,33 @@ PROBE_EVERY = 60
 
 
 class BotGate:
-    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
-        self._clock = clock
+    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+        self._clock = clock          # wall-clock time: it must mean the same thing after a restart
         self.trips = 0
         self.background_until = 0.0
         self.probe_after = 0.0
+        self._conn: sqlite3.Connection | None = None
+
+    # ---- remembering across restarts ---------------------------------------------------------------
+    def persist_to(self, conn: sqlite3.Connection) -> None:
+        """Load what an earlier run recorded, and keep the database up to date from now on."""
+        self._conn = conn
+        try:
+            row = conn.execute("SELECT value FROM settings WHERE key='bot_gate'").fetchone()
+            if row:
+                s = json.loads(row[0])
+                self.trips, self.background_until, self.probe_after = int(s["trips"]), float(s["background_until"]), float(s["probe_after"])
+        except (sqlite3.Error, ValueError, KeyError, TypeError):
+            pass                         # a missing or damaged record means "no known trouble"
+
+    def _save(self) -> None:
+        if self._conn is None:
+            return
+        try:
+            self._conn.execute("INSERT INTO settings(key, value) VALUES ('bot_gate', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                               (json.dumps({"trips": self.trips, "background_until": self.background_until, "probe_after": self.probe_after}),))
+        except sqlite3.Error:
+            pass                         # never let bookkeeping break a request
 
     @property
     def closed(self) -> bool:
@@ -54,6 +81,10 @@ class BotGate:
             self.trips += 1
             self.background_until = now + BACKGROUND_PAUSE[min(self.trips, len(BACKGROUND_PAUSE)) - 1]
         self.probe_after = now + PROBE_EVERY
+        self._save()
 
     def ok(self) -> None:
+        if (self.trips, self.background_until, self.probe_after) == (0, 0.0, 0.0):
+            return                       # nothing to clear (the usual case): no database write per request
         self.trips, self.background_until, self.probe_after = 0, 0.0, 0.0
+        self._save()

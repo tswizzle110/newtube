@@ -74,6 +74,7 @@ def build_context(settings: Settings | None = None) -> Context:
     limiter = RateLimiter(settings.min_request_interval, settings.request_jitter,
                           settings.background_daily_cap)
     extractor = YtDlpExtractor(settings, limiter)
+    extractor.gate.persist_to(conn)          # a restart must not forget a bot check (see extract/botgate.py)
     return Context(settings, conn, limiter, OutboundClient(settings, limiter), extractor,
                    VideoService(conn, extractor),
                    DiskCache(settings.cache_dir / "images", settings.cache_max_bytes),

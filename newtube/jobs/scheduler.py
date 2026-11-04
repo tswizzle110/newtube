@@ -9,7 +9,6 @@ time, within its own daily budget (see backfill.py).
 from __future__ import annotations
 
 import asyncio
-import collections
 import logging
 import random
 import sqlite3
@@ -18,6 +17,7 @@ from collections.abc import Awaitable, Callable
 
 from ..config import Settings
 from ..db.queries import cache, subscriptions as subs
+from ..db.queries.events import log_event
 from ..extract.base import ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
@@ -68,7 +68,6 @@ class Scheduler:
         self._last_purge = 0.0
         self.related = RelatedService(conn, extractor) if extractor is not None else None
         self._embedder = None
-        self._fallbacks: collections.deque[float] = collections.deque()    # when recent channel-page lookups happened
         self._embed_off = False
         self.backfiller = (Backfiller(conn, extractor, settings.backfill_daily_cap)
                            if extractor is not None else None)
@@ -89,10 +88,10 @@ class Scheduler:
         return n
 
     def _fallback_allowed(self) -> bool:
-        now = self._clock()
-        while self._fallbacks and now - self._fallbacks[0] > 3600:
-            self._fallbacks.popleft()
-        return len(self._fallbacks) < FALLBACK_PER_HOUR
+        """Counted in the database (the event log), so a restart does not hand back a fresh allowance."""
+        used = self.conn.execute("SELECT count(*) FROM events WHERE type='channel_fallback' AND ts > ?",
+                                 (int(time.time()) - 3600,)).fetchone()[0]
+        return used < FALLBACK_PER_HOUR
 
     async def tick(self) -> str:
         """One unit of work. Returns 'polled', 'idle' or 'capped' (for tests/logging)."""
@@ -118,7 +117,7 @@ class Scheduler:
                 self.conn.execute("UPDATE channels SET rss_checked_at=? WHERE id=?",
                                   (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
                 return "polled"
-            self._fallbacks.append(self._clock())      # counted BEFORE asking: a lookup that fails still used YouTube's patience
+            log_event(self.conn, "channel_fallback", channel_id=cid)   # counted BEFORE asking: a lookup that fails still used YouTube's patience
             n = await poll_channel_fallback(self.conn, self.extractor, cid)
             log.info("channel page %s: %d new", cid, n)
             # Its feed is broken, so do not come back to its page every few hours: twice a day is plenty.

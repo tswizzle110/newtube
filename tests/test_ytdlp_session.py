@@ -143,6 +143,7 @@ async def test_a_scan_does_not_block_interactive_extractions(ex):
 
 
 async def test_a_failure_halfway_is_classified_and_the_session_stays_usable(ex):
+    ex.FAILURE_MEMORY = 0                      # (this test is about the session, not about remembering failures)
     FakeYDL.entries_factory = entries(10, fail_at=4)
     with pytest.raises(ExtractionError):
         await ex.channel_uploads(UC, 10)

@@ -20,7 +20,7 @@ import logging
 from ..db.queries import cache, uploads as stored
 from ..db.queries.seen import SEEN_SQL
 from ..extract.base import (
-    ChannelInfo, ChannelSummary, ExtractionError, Extractor, PlaylistSummary, SearchItem, VideoSummary,
+    BotCheck, ChannelInfo, ChannelSummary, ExtractionError, Extractor, PlaylistSummary, SearchItem, VideoSummary,
 )
 
 CACHE_VERSION = 1
@@ -74,6 +74,7 @@ class _Scan:
     done: int = 0
     total: int | None = None
     error: str | None = None
+    exc: Exception | None = None  # the original exception, so a bot check stays a bot check (not a vague 'extraction failed')
     finished: bool = False
     explicit: bool = False        # you asked for it (Rescan / first visit): show progress rather than the old list
     task: asyncio.Task[None] | None = None
@@ -127,6 +128,7 @@ class ListService:
                 self._scans.pop(channel_id, None)
             except Exception as e:  # noqa: BLE001 - reported to the next request, then forgotten
                 scan.error = str(e) or type(e).__name__
+                scan.exc = e
                 log.warning("uploads scan of %s failed: %s", channel_id, scan.error)
             finally:
                 scan.finished = True
@@ -180,7 +182,7 @@ class ListService:
         if scan is not None and scan.finished and scan.error:
             del self._scans[channel_id]                  # a failure is reported once; the next try starts afresh
             if info is None or scan.explicit:
-                raise ExtractionError(scan.error)
+                raise scan.exc if isinstance(scan.exc, BotCheck) else ExtractionError(scan.error)
             scan = None                                  # a background refresh failed: keep serving the stored list
         if refresh and scan is None:
             scan = self._start_scan(channel_id, explicit=True)
