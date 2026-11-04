@@ -280,7 +280,7 @@ async def hls_track(video_id: str, format_id: str, ctx: Context = Depends(get_ct
     for attempt in (0, 1):
         info = await ctx.videos.get(video_id, refresh=attempt == 1)
         fmt = next((f for f in info.formats if f.format_id == format_id), None)
-        if not fmt or fmt.ext != "mp4":
+        if not fmt or fmt.ext not in ("mp4", "m4a"):       # (audio-only AAC streams are .m4a)
             raise HTTPException(404, "no such HLS track")
         ranges = await _ranges_for(ctx, video_id, fmt)
         segments = await _segments_for(ctx, video_id, fmt, ranges) if ranges else None

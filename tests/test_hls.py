@@ -105,6 +105,8 @@ def test_endpoints_serve_a_master_and_track_playlists_and_cache_the_index(tmp_pa
         assert "googlevideo" not in m.text
         t = client.get("/api/hls/aaaaaaaaaaa/137.m3u8")
         assert t.status_code == 200 and t.text.count("#EXTINF") == 3
+        a = client.get("/api/hls/aaaaaaaaaaa/140.m3u8")                                  # the audio track too
+        assert a.status_code == 200 and a.text.count("#EXTINF") == 3
         n = len(seen)
         client.get("/api/hls/aaaaaaaaaaa/137.m3u8")
         assert len(seen) == n                                                          # layout and index were cached
