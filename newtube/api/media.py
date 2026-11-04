@@ -13,7 +13,8 @@ from fastapi.responses import StreamingResponse
 from ..app import Context
 from ..db.queries import cache
 from ..extract.base import Format
-from ..media.dash import CODECS, Rep, build_mpd, select_formats
+from ..media import hls
+from ..media.dash import CODECS, Rep, build_mpd, codec_family, select_formats
 from ..media import isobmff, webm
 from ..media.isobmff import NotDashMp4, Ranges
 from ..media.webm import NotDashWebm
@@ -212,27 +213,97 @@ async def _ranges_for(ctx: Context, video_id: str, fmt: Format) -> Ranges | None
     return ranges
 
 
-@router.get("/dash/{video_id}.mpd")
-async def dash_manifest(video_id: str, lang: str | None = None, codec: str | None = None,
-                        ctx: Context = Depends(get_ctx)) -> Response:
-    """DASH manifest for adaptive playback (up to 1080p H.264). 404 means: use the muxed fallback."""
-    valid_video_id(video_id)
-    if lang is not None and not re.fullmatch(r"[A-Za-z0-9-]{1,16}", lang):
-        raise HTTPException(400, "bad language")
-    if codec is not None and codec not in CODECS:
-        raise HTTPException(400, "bad codec")
+async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None, *, avc_only: bool = False):
+    """The video and audio streams to offer (with their byte layout), re-extracting once if the signed URLs went stale.
+    Returns (info, video reps, audio reps), or None when no combination a player can use exists."""
     prefs = playback.load(ctx.conn)            # ?codec= overrides the preference (the player's fallback)
     for attempt in (0, 1):
         info = await ctx.videos.get(video_id, refresh=attempt == 1)
-        video_fmts, audio_fmts = select_formats(info.formats, lang, codec or prefs["codec"], prefs["max_height"])
+        video_fmts, audio_fmts = select_formats(info.formats, lang, "avc1" if avc_only else codec or prefs["codec"],
+                                                prefs["max_height"])
+        if avc_only:
+            video_fmts = [f for f in video_fmts if codec_family(f) == "avc1"]
         results = await asyncio.gather(*(_ranges_for(ctx, video_id, f)
                                          for f in video_fmts + audio_fmts))
         reps = {f.format_id: Rep(f, r) for f, r in zip(video_fmts + audio_fmts, results) if r}
         video = [reps[f.format_id] for f in video_fmts if f.format_id in reps]
         audio = [reps[f.format_id] for f in audio_fmts if f.format_id in reps]
         if video and audio:
-            break   # a stale signed URL makes every probe fail; attempt 1 re-extracts once
-    else:
+            return info, video, audio   # (a stale signed URL makes every probe fail; attempt 1 re-extracts once)
+    return None
+
+
+def _check_options(lang: str | None, codec: str | None = None) -> None:
+    if lang is not None and not re.fullmatch(r"[A-Za-z0-9-]{1,16}", lang):
+        raise HTTPException(400, "bad language")
+    if codec is not None and codec not in CODECS:
+        raise HTTPException(400, "bad codec")
+
+
+@router.get("/dash/{video_id}.mpd")
+async def dash_manifest(video_id: str, lang: str | None = None, codec: str | None = None,
+                        ctx: Context = Depends(get_ctx)) -> Response:
+    """DASH manifest for adaptive playback (up to 1080p H.264). 404 means: use the muxed fallback."""
+    valid_video_id(video_id)
+    _check_options(lang, codec)
+    found = await _reps(ctx, video_id, lang, codec)
+    if not found:
         raise HTTPException(404, "no DASH-compatible formats")
+    info, video, audio = found
     mpd = build_mpd(video_id, info.duration or 0, video, audio)
     return Response(mpd, media_type="application/dash+xml", headers={"Cache-Control": "private, no-store"})
+
+
+HLS_TYPE = "application/vnd.apple.mpegurl"
+
+
+@router.get("/hls/{video_id}.m3u8")
+async def hls_master(video_id: str, lang: str | None = None, ctx: Context = Depends(get_ctx)) -> Response:
+    """HLS entry point for Apple TV / Safari / AirPlay (H.264 + AAC only). 404 means there is no such combination."""
+    valid_video_id(video_id)
+    _check_options(lang)
+    found = await _reps(ctx, video_id, lang, None, avc_only=True)
+    if not found:
+        raise HTTPException(404, "no HLS-compatible formats")
+    _info, video, audio = found
+    a = audio[0].fmt
+    text = hls.master_playlist(video_id, [r.fmt for r in video], a, a.language or "und")
+    return Response(text, media_type=HLS_TYPE, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/hls/{video_id}/{format_id}.m3u8")
+async def hls_track(video_id: str, format_id: str, ctx: Context = Depends(get_ctx)) -> Response:
+    """One track's fragment list, read from the stream's own sidx index (cached: it never changes for a stream)."""
+    valid_video_id(video_id)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", format_id):
+        raise HTTPException(400, "bad format")
+    for attempt in (0, 1):
+        info = await ctx.videos.get(video_id, refresh=attempt == 1)
+        fmt = next((f for f in info.formats if f.format_id == format_id), None)
+        if not fmt or fmt.ext != "mp4":
+            raise HTTPException(404, "no such HLS track")
+        ranges = await _ranges_for(ctx, video_id, fmt)
+        segments = await _segments_for(ctx, video_id, fmt, ranges) if ranges else None
+        if segments:
+            break
+    else:
+        raise HTTPException(404, "track cannot be indexed")
+    return Response(hls.media_playlist(video_id, fmt, ranges, segments), media_type=HLS_TYPE,
+                    headers={"Cache-Control": "private, no-store"})
+
+
+async def _segments_for(ctx: Context, video_id: str, fmt: Format, ranges: Ranges) -> list[hls.Segment] | None:
+    key = f"sidx:{video_id}:{fmt.format_id}"
+    hit = cache.get(ctx.conn, key)
+    if hit:
+        return [hls.Segment(*s) for s in hit]
+    async with ctx.http.stream(fmt.url, headers={"Range": f"bytes={ranges.index_start}-{ranges.index_end}"}) as r:
+        if r.status_code not in (200, 206):
+            return None
+        data = await r.aread()
+    try:
+        segments = hls.parse_sidx(data, ranges.index_start)
+    except hls.BadSidx:
+        return None
+    cache.put(ctx.conn, key, [[s.start, s.size, s.seconds] for s in segments], RANGES_TTL)
+    return segments

@@ -496,6 +496,19 @@ speed limits playback quality. To undo: remove the `outbound_proxy` line and res
   Its random anonymous ID is stored in the local database and is never sent to your browser. The
   optional "viewed" pings the official extension sends on every skip are not implemented.
 
+## Apple TV, Safari and AirPlay (HLS)
+
+The web player uses DASH, which Apple's players cannot play. For them the server also offers HLS, built from the
+same streams with no re-encoding:
+
+- `/api/hls/<video id>.m3u8`: the entry point (one variant per resolution, H.264 + AAC only; VP9 and AV1 are never
+  offered because AVPlayer cannot play them, so the ceiling is whatever H.264 YouTube serves, normally 1080p).
+- `/api/hls/<video id>/<format>.m3u8`: one track's fragment list, read from the stream's own index.
+
+Segments are byte ranges of the same `/api/stream/...` proxy the web player uses, so the privacy rules are unchanged.
+A 404 means the video has no H.264/AAC pair. This is tested against hand-built playlists, **not yet against a real
+Apple device**: on a Mac or iPhone, open `http://<server>:<port>/api/hls/<id>.m3u8` in Safari to try it.
+
 ## Embeddings ("similar to what you watch")
 
 Each video gets a vector describing what it is about (from its title, channel, category, tags and the start of
