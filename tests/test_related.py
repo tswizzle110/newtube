@@ -101,6 +101,27 @@ def test_failure_means_no_suggestions_not_an_error_and_is_not_retried_at_once(co
     assert len(ex.calls) == 2
 
 
+def test_a_bot_check_is_reported_and_not_remembered_so_the_list_arrives_the_moment_it_clears(conn):
+    ex = Fake({V1: [vs(V2)]}, fail=BotCheck("sign in"))
+    svc = RelatedService(conn, ex)
+    assert run(svc.lookup(V1)) == ([], "paused")
+    assert conn.execute("SELECT COUNT(*) FROM related_fetched").fetchone()[0] == 0     # nothing remembered
+    ex.fail = None
+    cards, status = run(svc.lookup(V1))
+    assert status == "ok" and [c["id"] for c in cards] == [V2]
+
+
+def test_failed_and_empty_are_told_apart_and_try_again_bypasses_the_failure_memory(conn):
+    ex = Fake(fail=ExtractionError("HTTP 500"))
+    svc = RelatedService(conn, ex)
+    assert run(svc.lookup(V1)) == ([], "failed")
+    assert run(svc.lookup(V1)) == ([], "failed") and len(ex.calls) == 1        # remembered
+    ex.fail = None; ex.found = {V1: [vs(V2)]}
+    assert run(svc.lookup(V1, force=True))[1] == "ok"                          # Try again
+    ex2 = Fake({V3: []})
+    assert run(RelatedService(conn, ex2).lookup(V3)) == ([], "empty")           # a real, empty answer
+
+
 def test_an_imported_video_known_only_by_id_learns_its_title_from_a_related_list(conn):
     conn.execute("INSERT INTO videos(id,title,first_seen_at,from_import) VALUES (?,'',1,1)", (V2,))
     run(RelatedService(conn, Fake({V1: [vs(V2, "Now known", dur=77)]})).fetch(V1))
@@ -183,10 +204,14 @@ def test_related_endpoint(env):
     client, ctx, ex, seen = env
     ctx.related.extractor = Fake({"aaaaaaaaaaa": [vs(V2, "Two")]})
     r = client.get("/api/related/aaaaaaaaaaa?limit=5")
-    assert r.status_code == 200 and [c["id"] for c in r.json()] == [V2] and r.json()[0]["seen"] is False
+    body = r.json()
+    assert r.status_code == 200 and body["status"] == "ok" and [c["id"] for c in body["videos"]] == [V2]
+    assert body["videos"][0]["seen"] is False
     assert client.get("/api/related/bad").status_code == 400
     ctx.related.extractor = Fake(fail=ExtractionError("down"))
-    assert client.get("/api/related/bbbbbbbbbbb").json() == []
+    assert client.get("/api/related/bbbbbbbbbbb").json() == {"videos": [], "status": "failed"}
+    ctx.related.extractor = Fake(fail=BotCheck("sign in"))
+    assert client.get("/api/related/ccccccccccc").json() == {"videos": [], "status": "paused"}
 
 
 from tests.test_api import env  # noqa: E402,F401

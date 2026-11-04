@@ -23,6 +23,7 @@ from ..recommend.baseline import DAY, interest_rows
 log = logging.getLogger("newtube.related")
 TTL = 3 * DAY
 FAILURE_RETRY = 3600
+EMPTY_TTL = DAY            # YouTube really returned nothing: ask again after a day, not three
 LIMIT = 25
 
 
@@ -32,12 +33,15 @@ class RelatedService:
         self._inflight: dict[str, asyncio.Task[int]] = {}
 
     # ---- reading --------------------------------------------------------------------------------
+    def _row(self, video_id: str):
+        return self.conn.execute("SELECT fetched_at, count, failed FROM related_fetched WHERE video_id=?", (video_id,)).fetchone()
+
     def fresh(self, video_id: str, now: int | None = None) -> bool:
         now = now if now is not None else int(time.time())
-        row = self.conn.execute("SELECT fetched_at, count FROM related_fetched WHERE video_id=?", (video_id,)).fetchone()
+        row = self._row(video_id)
         if not row:
             return False
-        return now - row["fetched_at"] < (TTL if row["count"] else FAILURE_RETRY)
+        return now - row["fetched_at"] < (FAILURE_RETRY if row["failed"] else EMPTY_TTL if not row["count"] else TTL)
 
     def cards(self, video_id: str, limit: int = 20) -> list[dict[str, Any]]:
         rows = self.conn.execute(
@@ -48,15 +52,35 @@ class RelatedService:
             f" WHERE r.video_id = ? ORDER BY r.rank LIMIT ?", (video_id, limit)).fetchall()
         return [{**dict(r), "completed": bool(r["completed"]), "seen": bool(r["seen"])} for r in rows]
 
-    async def for_video(self, video_id: str, limit: int = 20, *, background: bool = False) -> list[dict[str, Any]]:
-        """The related list for a video, fetching it first if it is missing or stale. Never raises for a failed
-        fetch: the page just shows no suggestions."""
-        if not self.fresh(video_id):
+    async def lookup(self, video_id: str, limit: int = 20, *, background: bool = False,
+                     force: bool = False) -> tuple[list[dict[str, Any]], str]:
+        """The related list for a video, fetching it first if it is missing or stale, and WHY if there is none.
+        Never raises for a failed fetch (the page works without suggestions). ``force`` ignores the one-hour memory of a
+        failed attempt (the Try again button); it never overrides the bot gate. Status:
+          ok      there are videos            empty   YouTube returned none for this video
+          paused  YouTube asked for a bot check; nothing was asked           failed  the lookup did not work"""
+        status = None
+        row = self._row(video_id)
+        stale = not self.fresh(video_id) or (force and row is not None and row["failed"])
+        if stale:
             try:
                 await self.fetch(video_id, background=background)
-            except (DailyCapReached, BotCheck, ExtractionError) as e:
+            except BotCheck as e:
                 log.info("related %s: %s", video_id, e)
-        return self.cards(video_id, limit)
+                status = "paused"
+            except (DailyCapReached, ExtractionError) as e:
+                log.info("related %s: %s", video_id, e)
+                status = "failed"
+        cards = self.cards(video_id, limit)
+        if cards:
+            return cards, "ok"
+        if status:
+            return cards, status
+        row = self._row(video_id)
+        return cards, "failed" if row is not None and row["failed"] else "empty"
+
+    async def for_video(self, video_id: str, limit: int = 20, *, background: bool = False) -> list[dict[str, Any]]:
+        return (await self.lookup(video_id, limit, background=background))[0]
 
     # ---- fetching -------------------------------------------------------------------------------
     async def fetch(self, video_id: str, *, background: bool = False) -> int:
@@ -72,11 +96,12 @@ class RelatedService:
         now = int(time.time())
         try:
             found = await self.extractor.related(video_id, LIMIT, background=background)
-        except DailyCapReached:
-            raise
+        except (DailyCapReached, BotCheck):
+            raise            # (a bot check is NOT remembered as a failure of this video: the gate paces us, and the list must
+                             #  be fetched the moment YouTube relents, not an hour later)
         except Exception:
-            self.conn.execute("INSERT INTO related_fetched(video_id, fetched_at, count) VALUES (?,?,0)"
-                              " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=0", (video_id, now))
+            self.conn.execute("INSERT INTO related_fetched(video_id, fetched_at, count, failed) VALUES (?,?,0,1)"
+                              " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=0, failed=1", (video_id, now))
             raise
         return self.store(video_id, found, now)
 
@@ -99,8 +124,8 @@ class RelatedService:
                           " view_count = COALESCE(view_count, ?) WHERE id = ?",
                           (v.title, channel, v.duration, v.view_count, v.id))
                 c.execute("INSERT INTO related_videos(video_id, related_id, rank) VALUES (?,?,?)", (video_id, v.id, rank))
-            c.execute("INSERT INTO related_fetched(video_id, fetched_at, count) VALUES (?,?,?)"
-                      " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=excluded.count",
+            c.execute("INSERT INTO related_fetched(video_id, fetched_at, count, failed) VALUES (?,?,?,0)"
+                      " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=excluded.count, failed=0",
                       (video_id, now, len(found)))
             c.execute("COMMIT")
         except Exception:

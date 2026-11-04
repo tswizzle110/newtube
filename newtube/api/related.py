@@ -13,6 +13,9 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/related/{video_id}")
-async def related(video_id: str, limit: int = 20, ctx: Context = Depends(get_ctx)) -> list[dict[str, Any]]:
-    """Videos related to this one. A failed lookup is an empty list, not an error: the watch page works without it."""
-    return await ctx.related.for_video(valid_video_id(video_id), min(max(limit, 1), 40))
+async def related(video_id: str, limit: int = 20, force: bool = False, ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
+    """Videos related to this one, and WHY there are none when there are none (``status``: ok, empty, paused for a bot
+    check, or failed). A failed lookup is never an error: the watch page works without it. ``force`` is the Try again
+    button: it retries a failed lookup now (it still cannot get past a bot check)."""
+    videos, status = await ctx.related.lookup(valid_video_id(video_id), min(max(limit, 1), 40), force=force)
+    return {"videos": videos, "status": status}
