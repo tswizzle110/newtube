@@ -139,6 +139,28 @@ uv run newtube backfill status
 shows what is left and how long it should take. Set `backfill_daily_cap = 0` in `newtube.toml` to turn it off.
 These videos do not appear in your Subscriptions feed (that is for recent uploads); the recommender uses them.
 
+## Closing the laptop, switching wifi, and other interruptions
+
+newtube is built to carry on when your connection comes and goes:
+
+* **Video:** if the picture freezes because the connection dropped (wifi switched, laptop woke from sleep, the server
+  restarted), the player says so ("Offline…" / "reconnecting…"), keeps trying, and carries on from the same spot by
+  itself, without reloading the page. After about three minutes of failures it stops and shows **Try again**.
+* **What you watched and did:** the browser keeps anything it could not send (history, watch time, likes... all of it) on
+  disk, sends it again as soon as the connection is back (and when you reopen newtube if you closed the tab meanwhile),
+  and each report is dated when it *happened*, not when it got through, so History and Watch time stay right. The
+  server counts each report once even if the reply was lost on the way.
+* **Pages:** loading a page while offline, or while the server is restarting, waits and retries instead of showing an
+  error; a banner says what is going on; pages that failed reload themselves when the connection returns; and a page
+  you left open for 30+ minutes reloads when you come back to it.
+* **The server:** one failing background job can no longer stop the others (feed polling, backfill...), a dead
+  connection to YouTube is retried once on a fresh one, and restarts finish within seconds even mid-video.
+  The service file (`deploy/newtube.service`) now restarts it always, after 3 seconds, without limit. After updating
+  it: `cp deploy/newtube.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user restart newtube`.
+
+What it cannot do: if the *server* is off or unreachable (for example Tailscale is not connected on the laptop), nothing
+can load; newtube waits and picks up as soon as it is reachable again. Your login lasts 30 days.
+
 ## On a phone, and "install" it
 
 newtube works in a phone browser: on a narrow screen the sidebar becomes a slide-over menu (☰, top left) that closes

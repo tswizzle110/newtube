@@ -144,19 +144,32 @@ class Scheduler:
         self.conn.execute("DELETE FROM event_batches WHERE received_at < ?", (int(time.time()) - 14 * 24 * 3600,))
         return cache.purge_expired(self.conn)
 
+    async def step(self) -> str:
+        """One round of background work. Returns what happened, to pick the pause before the next."""
+        self.housekeeping()
+        self.flush_audit()
+        result = await self.tick()
+        if result == "idle" and self.backfiller is not None:
+            result = await self.backfiller.step()
+        if result in ("idle", "capped", "paused") and await self.embed_step() == "embedded":
+            result = "embedded"            # (the backfill having nothing to do leaves time for this)
+        if result in ("idle", "capped", "paused") and self.related is not None:
+            if await self.related.expand_step(self.settings.related_daily_cap) == "fetched":
+                result = "fetched"         # ...and so does this: one related list a minute, within its budget
+        return result
+
     async def run(self) -> None:
         while True:
-            self.housekeeping()
-            self.flush_audit()
-            result = await self.tick()
-            if result == "idle" and self.backfiller is not None:
-                result = await self.backfiller.step()
-            if result in ("idle", "capped", "paused") and await self.embed_step() == "embedded":
-                result = "embedded"            # (the backfill having nothing to do leaves time for this)
-            if result in ("idle", "capped", "paused") and self.related is not None:
-                if await self.related.expand_step(self.settings.related_daily_cap) == "fetched":
-                    result = "fetched"         # ...and so does this: one related list a minute, within its budget
+            try:
+                result = await self.step()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                # Whatever went wrong (a locked database, a network oddity, a bug in one job), the loop must go on:
+                # a dead loop would silently stop all feed polling until the next restart.
+                log.exception("background step failed; carrying on in a minute")
+                result = "error"
             # Busy: a few seconds (jittered) between channels. Backfill: about a minute between videos,
             # so the daily budget is spread over hours. Idle/capped: check back in a bit.
-            base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0, "embedded": 3.0}.get(result, 300.0)
+            base = {"polled": 5.0, "fetched": 60.0, "gone": 30.0, "retry": 60.0, "embedded": 3.0, "error": 60.0}.get(result, 300.0)
             await self._sleep(base * (0.5 + self._rand()))

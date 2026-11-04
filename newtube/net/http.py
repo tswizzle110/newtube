@@ -15,6 +15,7 @@ Guarantees enforced here:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -41,6 +42,10 @@ BASE_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+
+# Failures of the connection itself (not HTTP answers) that are worth one more try on a fresh connection.
+TRANSIENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError, httpx.RemoteProtocolError, httpx.WriteError)
 
 
 class HostNotAllowed(Exception):
@@ -122,6 +127,8 @@ class OutboundClient:
             proxy=settings.outbound_proxy or None,
             transport=transport,
             timeout=httpx.Timeout(20.0, connect=10.0),
+            # Do not keep idle connections for long: after a network change they are the ones that turn out dead.
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=15.0),
             follow_redirects=True,
             event_hooks={"request": [_enforce_allowlist]},
         )
@@ -134,7 +141,7 @@ class OutboundClient:
         check_url(url)
         if limited:
             await self.limiter.acquire(lane)
-        return await self._http.get(url, **kwargs)
+        return await self._send("GET", url, **kwargs)
 
     async def post(
         self, url: str, *, lane: Lane = Lane.INTERACTIVE, limited: bool = True, **kwargs: Any
@@ -142,13 +149,23 @@ class OutboundClient:
         check_url(url)
         if limited:
             await self.limiter.acquire(lane)
-        return await self._http.post(url, **kwargs)
+        return await self._http.post(url, **kwargs)        # (not repeated automatically: a POST may not be safe to send twice)
+
+    async def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """One request, with a single quick second try if the CONNECTION failed (a keep-alive socket that died while the
+        network blipped, a reset). It is the same request on a new connection, never counted twice by the limiter.
+        HTTP error statuses are answers, not failures, and are returned as they are."""
+        try:
+            return await self._http.request(method, url, **kwargs)
+        except TRANSIENT:
+            await asyncio.sleep(0.4)
+            return await self._http.request(method, url, **kwargs)
 
     async def get_media(self, url: str, **kwargs: Any) -> httpx.Response:
         """GET for static media (thumbnails, avatars). Allowlisted, NOT rate limited:
         a feed page legitimately loads dozens of images at once."""
         check_url(url)
-        return await self._http.get(url, **kwargs)
+        return await self._send("GET", url, **kwargs)
 
     @asynccontextmanager
     async def stream(

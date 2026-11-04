@@ -20,5 +20,6 @@ def serve() -> int:
         print("No password set. Run `newtube passwd` first.")
         return 2
     s = ctx.settings
-    uvicorn.run(create_app(ctx), host=s.host, port=s.port, log_level="info")
+    # timeout_graceful_shutdown: a restart (update, crash recovery) must not wait on a video stream that is still open
+    uvicorn.run(create_app(ctx), host=s.host, port=s.port, log_level="info", timeout_graceful_shutdown=8)
     return 0
