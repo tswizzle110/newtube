@@ -7,6 +7,7 @@ import pytest
 
 from newtube.db.connection import connect, migrate
 from newtube.db.queries import history, stats
+from newtube.db.queries.events import log_event
 
 UTC, NY = ZoneInfo("UTC"), ZoneInfo("America/New_York")
 CH = "UC" + "a" * 22
@@ -134,6 +135,66 @@ def test_the_per_day_list_is_capped_but_the_total_covers_everything(conn):
 
 
 # ---- the API ----------------------------------------------------------------------------------------
+
+def skip(conn, when, kind="sb_skip", uuid="u1", start=100, end=160, category="sponsor", video=V1):
+    log_event(conn, kind, video_id=video, ts=when,
+              payload={"uuid": uuid, "category": category, "start": start, "end": end})
+
+
+def test_skipped_time_adds_automatic_and_button_skips_by_day_and_category(conn):
+    session(conn, "s", V1, ts(2026, 11, 2), [[0, 60]])
+    skip(conn, ts(2026, 11, 2), uuid="a", start=100, end=160)                                # 60 s sponsor
+    skip(conn, ts(2026, 11, 2, 13), "sb_manual_skip", uuid="b", start=0, end=30, category="intro")
+    skip(conn, ts(2026, 11, 3, 9), uuid="c", start=500, end=620, video=V2)                   # 120 s, next day
+    r = stats.watch_stats(conn, UTC, NOW)
+    assert r["skipped"]["seconds"] == 210 and r["skipped"]["count"] == 3
+    assert r["skipped"]["categories"] == [{"category": "sponsor", "seconds": 180}, {"category": "intro", "seconds": 30}]
+    by_day = {d["date"]: d["skipped"] for d in r["days"]}
+    assert by_day["2026-11-02"] == 90 and by_day["2026-11-03"] == 120
+    assert r["total_seconds"] == 60                                                          # (skipped time is not watch time)
+
+
+def test_an_undone_skip_does_not_count_and_only_cancels_its_own_segment(conn):
+    session(conn, "s", V1, ts(2026, 11, 2), [[0, 60]])
+    skip(conn, ts(2026, 11, 2, 12, 0), uuid="a", start=100, end=160)
+    skip(conn, ts(2026, 11, 2, 12, 1), uuid="b", start=300, end=340)
+    skip(conn, ts(2026, 11, 2, 12, 2), "sb_undo", uuid="a", start=100, end=160)
+    r = stats.watch_stats(conn, UTC, NOW)
+    assert r["skipped"]["seconds"] == 40 and r["skipped"]["count"] == 1
+    skip(conn, ts(2026, 11, 2, 12, 3), "sb_undo", uuid="never-skipped")                      # an undo with nothing to cancel
+    assert stats.watch_stats(conn, UTC, NOW)["skipped"]["seconds"] == 40
+
+
+def test_skipping_the_same_sponsor_again_after_rewinding_counts_again(conn):
+    session(conn, "s", V1, ts(2026, 11, 2), [[0, 60]])
+    skip(conn, ts(2026, 11, 2, 12, 0), uuid="a", start=100, end=160)
+    skip(conn, ts(2026, 11, 2, 12, 5), uuid="a", start=100, end=160)
+    assert stats.watch_stats(conn, UTC, NOW)["skipped"]["seconds"] == 120
+
+
+def test_highlight_jumps_damaged_payloads_and_absurd_segments_are_ignored(conn):
+    session(conn, "s", V1, ts(2026, 11, 2), [[0, 60]])
+    skip(conn, ts(2026, 11, 2), "sb_manual_skip", category="poi_highlight", start=50, end=300)
+    log_event(conn, "sb_skip", video_id=V1, ts=ts(2026, 11, 2), payload={"category": "sponsor"})      # no start/end
+    conn.execute("INSERT INTO events(ts,type,video_id,payload) VALUES (?,?,?,?)", (ts(2026, 11, 2), "sb_skip", V1, "not json"))
+    skip(conn, ts(2026, 11, 2), uuid="z", start=0, end=99999)                                        # capped at an hour
+    skip(conn, ts(2026, 11, 2), uuid="y", start=50, end=50)                                          # zero length
+    r = stats.watch_stats(conn, UTC, NOW)
+    assert r["skipped"]["seconds"] == 3600 and r["skipped"]["count"] == 1
+
+
+def test_skips_before_the_chosen_start_date_do_not_count(conn):
+    session(conn, "s", V1, ts(2026, 11, 2), [[0, 60]])
+    skip(conn, ts(2026, 10, 30), uuid="old", start=0, end=500)
+    skip(conn, ts(2026, 11, 2), uuid="new", start=0, end=50)
+    stats.save_since(conn, dt.date(2026, 11, 1))
+    assert stats.watch_stats(conn, UTC, NOW)["skipped"]["seconds"] == 50
+
+
+def test_no_skips_gives_zeros(conn):
+    r = stats.watch_stats(conn, UTC, NOW)
+    assert r["skipped"] == {"seconds": 0, "count": 0, "categories": []}
+
 
 def test_stats_api(env):
     client, ctx, ex, seen = env

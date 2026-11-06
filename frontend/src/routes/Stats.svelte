@@ -54,6 +54,14 @@
       <div><b>{s.longest_day ? spent(s.longest_day.seconds) : '–'}</b><span class="muted">{s.longest_day ? `longest day (${label(s.longest_day.date)})` : 'longest day'}</span></div>
     </div>
 
+    {#if s.skipped.count}
+      <div class="skipped">
+        <b>{spent(s.skipped.seconds)}</b> skipped by SponsorBlock
+        <span class="muted">· {s.skipped.count.toLocaleString()} skip{s.skipped.count === 1 ? '' : 's'}{#if s.skipped.categories.length}
+          · {s.skipped.categories.map((c) => `${c.category.replace('_', ' ')} ${spent(c.seconds)}`).join(', ')}{/if}</span>
+      </div>
+    {/if}
+
     <form class="since" onsubmit={(e) => { e.preventDefault(); saveSince(since) }}>
       <label>Counting from <input type="date" bind:value={since} aria-label="Counting from" max={s.today} /></label>
       <button class="btn">Use this date</button>
@@ -68,7 +76,7 @@
           <tr class:empty={!d.seconds}>
             <th scope="row">{d.date === s.today ? 'Today' : label(d.date)}</th>
             <td class="barcell"><span class="bar" style:width={(d.seconds / longest) * 100 + '%'}></span></td>
-            <td class="num">{d.seconds ? spent(d.seconds) : '–'}</td>
+            <td class="num">{d.seconds ? spent(d.seconds) : '–'}{#if d.skipped}<span class="muted sk" title="skipped by SponsorBlock"> · {spent(d.skipped)} skipped</span>{/if}</td>
           </tr>
         {/each}
       </tbody>
@@ -90,7 +98,7 @@
 
     <p class="muted small note">
       This counts time actually spent playing videos in newtube, as video time (at 2× speed an hour of video takes half
-      an hour of your day but counts as an hour). Skipped parts and replays inside one viewing are not double-counted.
+      an hour of your day but counts as an hour). Parts SponsorBlock skipped are not watch time (they are totalled separately, minus any skips you undid), and replays inside one viewing are not double-counted.
       Your imported Google history is not included: it only says a video was opened, not for how long. Days are in your
       time zone ({s.tz}). Stays on this server.
     </p>
@@ -106,6 +114,9 @@
   .facts div { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
   .facts b { font-size: 22px; }
   .facts span, .small { font-size: 13px; }
+  .skipped { margin: 0 0 18px; }
+  .skipped b { font-size: 18px; }
+  .sk { font-size: 12px; }
   .since { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .since label { display: flex; gap: 8px; align-items: center; }
   .since input { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }

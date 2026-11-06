@@ -52,6 +52,52 @@ def _session_seconds(raw_intervals: str, duration: float | None) -> float:
     return min(seconds, duration) if duration else seconds
 
 
+MAX_SKIP = 3600          # one skip never counts for more than an hour (guards a bad segment)
+NOT_SKIPS = {"poi_highlight"}   # "jump to the highlight" moves you forward but is not a sponsor/intro/etc. being skipped
+
+
+def _skipped(conn: sqlite3.Connection, tz: ZoneInfo, start_ts: int) -> dict[str, Any]:
+    """Video time SponsorBlock saved you: every automatic or button skip, minus the ones you undid. Read from the
+    events the player already logs (the segment's start and end), so skips made before this was added count too.
+    Each skip counts, including skipping the same sponsor again after rewinding; an undo cancels the latest skip of
+    that same segment. Attributed to the day of the skip, like watch time."""
+    pending: dict[tuple[str | None, str], list[tuple[dt.date, str, float]]] = defaultdict(list)
+    per_day: dict[dt.date, float] = defaultdict(float)
+    per_category: dict[str, float] = defaultdict(float)
+    count = 0
+    for r in conn.execute(
+            "SELECT ts, type, video_id, payload FROM events WHERE type IN ('sb_skip','sb_manual_skip','sb_undo')"
+            " AND ts >= ? ORDER BY ts, id", (start_ts,)):
+        try:
+            p = json.loads(r["payload"] or "{}")
+            seg_start, seg_end = float(p["start"]), float(p["end"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        category, uuid = str(p.get("category") or "other"), str(p.get("uuid") or "")
+        if category in NOT_SKIPS:
+            continue
+        key = (r["video_id"], uuid)
+        day = dt.datetime.fromtimestamp(r["ts"], tz).date()
+        if r["type"] == "sb_undo":
+            if pending[key]:
+                d, c, s = pending[key].pop()
+                per_day[d] -= s
+                per_category[c] -= s
+                count -= 1
+            continue
+        seconds = min(max(seg_end - seg_start, 0.0), MAX_SKIP)
+        if seconds <= 0:
+            continue
+        pending[key].append((day, category, seconds))
+        per_day[day] += seconds
+        per_category[category] += seconds
+        count += 1
+    return {"seconds": round(max(0.0, sum(per_day.values()))), "count": max(0, count),
+            "days": {d: max(0.0, s) for d, s in per_day.items()},
+            "categories": sorted(({"category": c, "seconds": round(s)} for c, s in per_category.items() if s > 0.5),
+                                 key=lambda x: -x["seconds"])}
+
+
 def watch_stats(conn: sqlite3.Connection, tz: ZoneInfo, now: int | None = None) -> dict[str, Any]:
     now = now if now is not None else int(time.time())
     today = dt.datetime.fromtimestamp(now, tz).date()
@@ -83,10 +129,12 @@ def watch_stats(conn: sqlite3.Connection, tz: ZoneInfo, now: int | None = None) 
         if r["channel_id"] and r["ctitle"]:
             channel_titles[r["channel_id"]] = r["ctitle"]
 
+    skipped = _skipped(conn, tz, start_ts)
     total = sum(per_day.values())
     span = max(1, (today - since).days + 1)
     first_listed = max(since, today - dt.timedelta(days=MAX_DAYS - 1))
-    days = [{"date": d.isoformat(), "seconds": round(per_day.get(d, 0.0))}
+    days = [{"date": d.isoformat(), "seconds": round(per_day.get(d, 0.0)),
+             "skipped": round(skipped["days"].get(d, 0.0))}
             for d in (first_listed + dt.timedelta(days=i) for i in range((today - first_listed).days + 1))]
     best = max(per_day.items(), key=lambda kv: kv[1], default=None)
     return {
@@ -96,6 +144,7 @@ def watch_stats(conn: sqlite3.Connection, tz: ZoneInfo, now: int | None = None) 
         "average_per_day": round(total / span),
         "longest_day": {"date": best[0].isoformat(), "seconds": round(best[1])} if best else None,
         "days": days,
+        "skipped": {"seconds": skipped["seconds"], "count": skipped["count"], "categories": skipped["categories"]},
         "top_videos": [{"id": v, "title": titles[v], "seconds": round(s)}
                        for v, s in sorted(per_video.items(), key=lambda kv: -kv[1])[:TOP]],
         "top_channels": [{"id": c, "title": channel_titles.get(c, ""), "seconds": round(s)}

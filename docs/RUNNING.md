@@ -299,6 +299,11 @@ counts as an hour); skipped parts are not counted, and replaying the same minute
 twice. Two separate viewings of the same video both count. Your imported Google history is **not** included (it only
 says a video was opened, not for how long), and watches you remove from History are removed from the totals too.
 
+**Skipped by SponsorBlock** is totalled underneath (and shown next to each day): the length of every sponsor, intro,
+etc. that was skipped, automatically or with the Skip button, minus skips you undid. It is read from the skips newtube
+already logged, so skips from before this was added count too. It is time *saved*, so it is not part of watch time;
+skipping the same sponsor again after rewinding counts again, and "jump to highlight" is not a skip.
+
 It counts from your **first recorded watch** unless you set **Counting from** to a date (for example the day you
 started), which is remembered; **Back to automatic** undoes that. "A day" is a calendar day in your browser's time
 zone, and a viewing counts on the day it started.

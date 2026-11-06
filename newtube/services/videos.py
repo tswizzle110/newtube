@@ -11,16 +11,32 @@ import asyncio
 import dataclasses
 import json
 import sqlite3
+import re
 import time
 from typing import Any
 
 from ..db.queries import cache
 from ..extract.base import Caption, Chapter, ChannelInfo, Extractor, Format, VideoInfo
 
-INFO_TTL = 4 * 3600
+INFO_TTL = 4 * 3600          # used when the stream links carry no expiry time
+MAX_TTL = 5 * 3600           # even when they are good for longer
+EXPIRY_MARGIN = 30 * 60      # stop using the links this long before they die, so a video never starts on a dying link
+MIN_TTL = 5 * 60
 # Bump when the fields we cache change (e.g. a new Format attribute), so entries cached by older
 # code are ignored instead of being served with missing data for up to INFO_TTL.
 CACHE_VERSION = 2
+
+
+def cache_seconds(info: VideoInfo, now: int | None = None) -> int:
+    """How long the cached copy (which includes signed stream links) stays usable: until shortly before the EARLIEST
+    link expires (googlevideo URLs say when, in ``expire=``). A fixed time was wrong both ways: coming back to a video
+    at hour 5 needed a lookup the link's real lifetime made unnecessary, and a link that died sooner than that failed
+    the player, which then had to look the video up again before playing. Without an expiry, the old fixed time."""
+    now = now if now is not None else int(time.time())
+    expiries = [int(m.group(1)) for f in info.formats if (m := re.search(r"[?&/]expire[=/](\d{9,11})", f.url or ""))]
+    if not expiries:
+        return INFO_TTL
+    return max(MIN_TTL, min(MAX_TTL, min(expiries) - now - EXPIRY_MARGIN))
 
 
 def info_from_dict(d: dict[str, Any]) -> VideoInfo:
@@ -55,7 +71,7 @@ class VideoService:
     async def _fetch(self, video_id: str, background: bool) -> VideoInfo:
         info = await self.extractor.video_info(video_id, background=background)
         self.persist(info)
-        cache.put(self.conn, f"video:v{CACHE_VERSION}:{video_id}", dataclasses.asdict(info), INFO_TTL)
+        cache.put(self.conn, f"video:v{CACHE_VERSION}:{video_id}", dataclasses.asdict(info), cache_seconds(info))
         return info
 
     def persist(self, v: VideoInfo) -> None:
