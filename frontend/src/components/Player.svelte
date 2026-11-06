@@ -50,6 +50,13 @@
   let codecUsed = null           // 'avc1' once the browser could not decode the first choice
   let recovering = false, recoverTries = 0
   let lastT = -1, stuckFor = 0, lastTick = Date.now(), watchdog = null
+  // A video left paused for a long while (a background tab, a laptop that slept): the browser may have dropped its
+  // decoder or buffers, and the stream links may have gone stale. The sound can then play with a frozen picture, or
+  // playback can fail with "connection" trouble until the page is reopened.
+  const STALE_PAUSE_MS = 10 * 60 * 1000
+  const FROZEN_AFTER = 3000      // ms of sound/time moving with no new picture before we step in
+  let pausedAt = 0, refreshing = false
+  let lastFrameAt = 0, frozenTries = 0, vfc = 0
 
   // ---- SponsorBlock state
   let sbOn = $state(true)        // quick per-video off switch
@@ -159,6 +166,14 @@
           // which must not wait. A dropped connection while loading is handled by loadManifest below.)
           manifest: { dash: { ignoreMinBufferTime: true } },
         })
+        // Errors that used to vanish into the console: say so, and (for broken media pipelines) rebuild right away.
+        shakaPlayer.addEventListener('error', (ev) => {
+          const e = ev.detail
+          console.warn('player error:', e?.category, e?.code)
+          trackEvent('player_error', { video_id: video.id, payload: { category: e?.category, code: e?.code } })
+          if (e?.category === 3 && !recovering) stuckFor = STUCK_AFTER      // 3 = media: the pipeline itself broke
+          else stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000)
+        })
         shakaPlayer.addEventListener('variantchanged', syncQualities)
         shakaPlayer.addEventListener('adaptation', syncQualities)
         const from = startAt > 5 ? startAt : null
@@ -184,7 +199,14 @@
       }
     })()
     watchdog = setInterval(watch, 1000)
+    // Every picture actually shown calls this; if it stops while time moves, the picture is frozen (see watch()).
+    const frame = () => { lastFrameAt = Date.now(); vfc = el.requestVideoFrameCallback(frame) }
+    if (el.requestVideoFrameCallback) vfc = el.requestVideoFrameCallback(frame)
+    const visible = () => { lastFrameAt = Date.now(); frozenTries = 0 }
+    document.addEventListener('visibilitychange', visible)
     return () => {
+      document.removeEventListener('visibilitychange', visible)
+      try { el.cancelVideoFrameCallback?.(vfc) } catch { /* ignore */ }
       gone = true
       destroyed = true
       clearInterval(watchdog)
@@ -238,6 +260,9 @@
     if (destroyed || (mode !== 'dash' && mode !== 'muxed') || !el) return
     const advanced = Math.abs(el.currentTime - lastT) > 0.01
     lastT = el.currentTime
+    if (advanced && !el.paused && !el.seeking && !recovering && !refreshing && document.visibilityState === 'visible'
+        && el.requestVideoFrameCallback && el.videoWidth > 0 && lastFrameAt && Date.now() - lastFrameAt > FROZEN_AFTER) unfreeze()
+    else if (el.paused || !advanced) frozenTries = Math.min(frozenTries, 0)
     if (el.paused || el.ended || advanced) {
       stuckFor = Math.min(stuckFor, 0)
       if (advanced && netNote && !recovering) netNote = ''
@@ -247,6 +272,52 @@
     if (gap > 8000) stuckFor = Math.max(stuckFor, STUCK_AFTER)
     if (!navigator.onLine) netNote = 'Offline: will carry on when the connection is back'
     if (stuckFor >= STUCK_AFTER && !recovering && !gaveUp && navigator.onLine) recover()
+  }
+
+  // Time (and sound) move but no new picture has been shown: the video decoder or the picture surface died, typically
+  // after a long pause or a fullscreen switch. First nudge the decoder with a tiny seek; if that does not help, rebuild
+  // the stream from here (what closing the tab used to do).
+  async function unfreeze() {
+    lastFrameAt = Date.now()                       // give each step a few seconds to work
+    frozenTries++
+    console.warn('picture frozen while playing; attempt', frozenTries)
+    trackEvent('player_frozen', { video_id: video.id, payload: { attempt: frozenTries, fullscreen: !!document.fullscreenElement } })
+    if (frozenTries === 1) { el.currentTime = el.currentTime; return }
+    await rebuild('Restarting the picture…')
+  }
+
+  // Throw away the playing pipeline and start again from the same spot (new connections, new stream links, new decoder).
+  async function rebuild(message) {
+    if (refreshing || recovering || destroyed || mode !== 'dash' || !shakaPlayer) return
+    refreshing = true
+    const at = el.currentTime, wasPlaying = !el.paused
+    say(message)
+    try {
+      await loadManifest(at)
+      if (chosenQuality !== 'auto') setQuality(chosenQuality)
+      syncQualities()
+      netNote = ''
+      if (wasPlaying) el.play().catch(() => {})
+    } catch (e) {
+      console.warn('rebuild failed:', e?.code ?? e)
+      stuckFor = STUCK_AFTER - 1000                  // hand over to the ordinary recovery, which keeps trying
+    } finally {
+      refreshing = false
+      lastFrameAt = Date.now()
+    }
+  }
+
+  // Pressing play on a video that sat paused for a long time: rebuild first, so it does not start on a dead pipeline.
+  function onPause() { if (!el.ended) pausedAt = Date.now() }
+  async function onPlay() {
+    const idle = pausedAt ? Date.now() - pausedAt : 0
+    pausedAt = 0
+    if (idle < STALE_PAUSE_MS || refreshing) return
+    trackEvent('player_refresh', { video_id: video.id, payload: { paused_s: Math.round(idle / 1000) } })
+    el.pause()
+    pausedAt = 0
+    await rebuild('Refreshing after a long pause…')
+    el.play().catch(() => {})
   }
 
   async function recover() {
@@ -559,6 +630,7 @@
     bind:paused bind:volume bind:muted
     ontimeupdate={onTime} onprogress={onTime}
     ondurationchange={() => Number.isFinite(el.duration) && (dur = el.duration)}
+    onpause={onPause} onplay={onPlay}
     onplaying={wake}                                  /* start the hide timer: a touch screen has no mouse movement to do it */
     onended={() => onended?.()}
     onpointerdown={fingerDown} onclick={videoClick} ondblclick={() => lastPointer !== 'touch' && toggleFullscreen()}

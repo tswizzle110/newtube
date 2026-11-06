@@ -23,6 +23,7 @@ EVENT_TYPES = {
     "like", "unlike", "not_interested", "more_like_this", "dont_recommend_channel",
     "search", "search_click", "feed_refresh",
     "sb_skip", "sb_undo", "sb_manual_skip", "sb_vote", "sb_submit",
+    "player_error", "player_frozen", "player_refresh",       # (what the player had to recover from: for finding patterns)
 }
 SURFACES = {"for_you", "subs", "search", "related", "channel", "playlist", "history"}
 MAX_PAYLOAD = 2048

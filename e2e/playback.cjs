@@ -832,6 +832,50 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('install: the page links its manifest', (await m.locator('link[rel="manifest"]').count()) === 1 && (await m.locator('meta[name="theme-color"]').count()) === 1);
   await unauth.dispose(); await mctx.close();
 
+  // ---- a video left paused for a long time, and a frozen picture (the browser lost its decoder)
+  {
+    const lctx = await b.newContext({ viewport: { width: 1200, height: 800 } });
+    await lctx.addInitScript(() => {                // a switch to make the picture "stop" while time keeps moving
+      const orig = HTMLVideoElement.prototype.requestVideoFrameCallback;
+      HTMLVideoElement.prototype.requestVideoFrameCallback = function (cb) {
+        return orig.call(this, (...a) => { if (window.__freeze) this.requestVideoFrameCallback(cb); else cb(...a); });
+      };
+    });
+    const lp = await lctx.newPage();
+    await lp.goto(BASE + '/'); await lp.fill('input[type=password]', 'e2e-password'); await lp.click('button.primary'); await lp.waitForSelector('aside.side');
+    let manifests = 0; lp.on('request', r => { if (/\/api\/dash\/e2eLONG0001\.mpd/.test(r.url())) manifests++; });
+    await lp.goto(BASE + '/watch?v=e2eLONG0001');
+    await lp.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
+    await lp.keyboard.press('2'); await lp.waitForTimeout(2500);
+    await lp.keyboard.press('k'); await lp.waitForTimeout(300);
+    const pausedAt = (await state(lp)).t, before = manifests;
+    await lp.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 11 * 60 * 1000; });   // "11 minutes later"
+    await lp.keyboard.press('k');
+    await lp.waitForFunction(() => document.querySelector('.player .toast')?.textContent.includes('long pause'), null, { timeout: 4000 }).catch(() => {});
+    await lp.waitForFunction(() => { const v = document.querySelector('video'); return v && !v.paused && v.readyState >= 3; }, null, { timeout: 20000 }).catch(() => {});
+    await lp.waitForTimeout(1500);
+    const resumedAfterPause = await state(lp);
+    check('long pause: pressing play rebuilds the stream first (a new manifest request)', manifests > before, `${before} -> ${manifests}`);
+    check('long pause: ...and carries on from the same place', !resumedAfterPause.paused && resumedAfterPause.t >= pausedAt - 1 && resumedAfterPause.t < pausedAt + 8, `${pausedAt.toFixed(1)} -> ${resumedAfterPause.t.toFixed(1)}`);
+    await lp.evaluate(() => { Date.now = Date.now; });
+
+    await lp.keyboard.press('k'); await lp.waitForTimeout(300); await lp.keyboard.press('k');      // a short pause: no rebuild
+    const shortBefore = manifests; await lp.waitForTimeout(1000);
+    check('a short pause does not rebuild', manifests === shortBefore);
+
+    // frozen picture: pictures stop being shown while time moves
+    await lp.evaluate(() => (window.__freeze = true));
+    const mBefore = manifests;
+    await lp.waitForFunction(() => document.querySelector('.player .toast')?.textContent.includes('picture'), null, { timeout: 15000 }).catch(() => {});
+    await lp.evaluate(() => (window.__freeze = false));
+    const frozenEvents = await lp.evaluate(async () => (await (await fetch('/api/stats/watch')).json()).total_seconds >= 0);
+    check('frozen picture: the player notices and rebuilds the stream', manifests > mBefore, `${mBefore} -> ${manifests}`);
+    await lp.waitForTimeout(2500);
+    const afterFreeze = await state(lp), t1 = afterFreeze.t; await lp.waitForTimeout(1500);
+    check('frozen picture: playback carries on afterwards', (await state(lp)).t > t1 + 0.8 && !afterFreeze.paused, JSON.stringify(afterFreeze));
+    await lctx.close();
+  }
+
   const hits = await (await ctx.request.get(BASE + '/__hits')).json();
   const gv = hits.filter(h => /^\/(v360|v180|aud|mux)$/.test(h[0]));
   check('video bytes only via Range requests', gv.length > 0 && gv.every(h => h[1] && h[1].startsWith('bytes=')), gv.length + ' requests');
