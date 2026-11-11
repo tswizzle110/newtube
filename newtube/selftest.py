@@ -341,7 +341,15 @@ class SelfTest:
         self._dump("related", raw)
         vids = [v for v in parse_entries(raw) if isinstance(v, VideoSummary) and v.id != TEST_VIDEO]
         if len(vids) < 3:
-            raise RuntimeError(f"only {len(vids)} related videos parsed from {len(raw.get('entries') or [])} raw entries")
+            # The Mix is empty or unreadable. Up next then searches for the video's title instead, so that is what has to
+            # work: check it, and say plainly that the Mix itself is not.
+            found = [v for v in await self.extractor.search("me at the zoo", "video", 10)  # type: ignore[attr-defined]
+                     if isinstance(v, VideoSummary) and v.id != TEST_VIDEO]
+            if len(found) < 3:
+                raise RuntimeError(f"the Mix gave {len(vids)} videos from {len(raw.get('entries') or [])} raw entries, "
+                                   f"and the title search fallback gave only {len(found)}")
+            return (f"the Mix is empty ({len(raw.get('entries') or [])} raw entries) but the title-search fallback "
+                    f"Up next uses instead works: {len(found)} videos")
         named = sum(bool(v.channel_id) for v in vids)
         return (f"{len(vids)} related videos ({named} with a channel id); first '{vids[0].title[:40]}' "
                 f"by {vids[0].channel_title}")

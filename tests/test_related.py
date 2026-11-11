@@ -29,6 +29,11 @@ def vs(vid, title="T", channel=B, ctitle="Beta", dur=100, views=5):
 class Fake:
     def __init__(self, found=None, fail=None):
         self.found, self.fail, self.calls = found or {}, fail, []
+        self.searches, self.search_results = [], []
+
+    async def search(self, query, kind="video", limit=20, *, background=False, filters=None):
+        self.searches.append((query, kind, background))
+        return self.search_results
 
     async def related(self, vid, limit=25, *, background=False):
         self.calls.append((vid, background))
@@ -266,3 +271,43 @@ def test_an_empty_mix_is_logged_with_what_youtube_sent(caplog):
     with caplog.at_level("WARNING", logger="newtube.ytdlp"):
         assert asyncio.run(ex.related(V1)) == []            # only the seed video itself came back
     assert "no usable videos" in caplog.text and "1 entries" in caplog.text and "Mix - Seed" in caplog.text
+
+
+def title_row(conn, vid, title):
+    conn.execute("INSERT OR IGNORE INTO videos(id,title,first_seen_at) VALUES (?,?,1)", (vid, title))
+
+
+def test_an_empty_mix_falls_back_to_searching_for_the_title(conn):
+    title_row(conn, V1, "How sourdough works")
+    ex = Fake({V1: []})
+    ex.search_results = [vs(V1, "How sourdough works"), vs(V2, "Sourdough starter guide"), vs(V3, "Bread science")]
+    svc = RelatedService(conn, ex)
+    cards, status = run(svc.lookup(V1))
+    assert status == "ok" and [c["id"] for c in cards] == [V2, V3]                  # (never the video itself)
+    assert ex.searches == [("How sourdough works", "video", False)]
+
+
+def test_a_video_with_no_known_title_is_not_searched(conn):
+    ex = Fake({V1: []})
+    assert run(RelatedService(conn, ex).lookup(V1)) == ([], "empty") and ex.searches == []
+
+
+def test_after_three_empty_mixes_the_mix_is_skipped_and_titles_are_searched_directly(conn):
+    ex = Fake()
+    svc = RelatedService(conn, ex)
+    for v in (V1, V2, V3, V4):
+        title_row(conn, v, "title " + v)
+        run(svc.lookup(v))
+    assert len(ex.calls) == 3 and len(ex.searches) == 4          # the 4th video never asked for a Mix
+    svc._mix_skip_until = 0                                       # six hours later: one Mix is tried again
+    title_row(conn, "eeeeeeeeeee", "another")
+    run(svc.lookup("eeeeeeeeeee"))
+    assert len(ex.calls) == 4
+
+
+def test_a_working_mix_resets_the_miss_count(conn):
+    ex = Fake({V1: [vs(V2)]})
+    svc = RelatedService(conn, ex)
+    svc._mix_misses = 2
+    run(svc.lookup(V1))
+    assert svc._mix_misses == 0 and ex.searches == []

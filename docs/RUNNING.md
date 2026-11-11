@@ -279,6 +279,10 @@ results really are long, so a change on YouTube's side would show up there.
 Beside the video you are watching (below it on a narrow window) is **Up next**: videos related to it, taken from
 YouTube's own "Mix" for that video. The list is requested a moment after the video starts so it never delays
 playback, kept in your database for 3 days, and a failed lookup is retried after an hour (or at once with **Try again**).
+If YouTube's Mix comes back empty, Up next **searches YouTube for the video's title** instead (one ordinary search request,
+like using the search box) and shows those results. After three empty Mixes in a row it stops asking for Mixes for six
+hours and searches directly, so a Mix that has stopped working costs one request per video, not two.
+
 When YouTube's list is not available (a bot check, a failed lookup, or nothing returned) Up next is filled from your
 own library instead, and says so: the channel's other videos this server already knows, then the closest titles by
 the same embeddings as "similar to what you watch". That needs no request to YouTube at all.
