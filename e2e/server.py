@@ -263,4 +263,9 @@ async def _sbposts():
 for _ in range(6):     # these must come before the app's catch-all route
     app.router.routes.insert(0, app.router.routes.pop())
 
+# The app's catch-all page route must come after every harness route above, whatever order they were added in.
+for r in [r for r in app.router.routes if getattr(r, "path", "") == "/{path:path}"]:
+    app.router.routes.remove(r)
+    app.router.routes.append(r)
+
 uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

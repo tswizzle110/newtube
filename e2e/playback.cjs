@@ -286,7 +286,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.goto(BASE + '/search?q=zoo&kind=video'); await p.waitForSelector('.card img');
   await p.waitForFunction(() => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});
   check('result thumbnails load through our proxy', await V(p, () => { const i = document.querySelector('.card img'); return !!i && i.complete && i.naturalWidth > 0; }));
-  await p.click('.tabs a:has-text("Channels")'); await p.waitForSelector('main .row');
+  await p.click('.chips a:has-text("Channels")'); await p.waitForSelector('main .row');
   await p.waitForFunction(() => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});
   check('channel result avatar loads via /api/img (protocol-relative url handled)', await V(p, () => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0 && i.src.includes('/api/img'); }));
   await p.click('main .row'); await p.waitForSelector('.head');
@@ -391,7 +391,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const fEvents = await (await ctx.request.get(BASE + '/__events')).json();
   const fSearch = fEvents.filter(e => e.type === 'search' && JSON.parse(e.payload).q === 'filtertest').map(e => JSON.parse(e.payload).filters).filter(Boolean).pop();
   check('...and reach the server (and the local search log)', JSON.stringify(fSearch) === JSON.stringify({ date: 'week', duration: 'long', sort: 'views' }), JSON.stringify(fSearch));
-  await p.goto(BASE + '/search?q=filtertest&kind=channel'); await p.waitForSelector('.tabs');
+  await p.goto(BASE + '/search?q=filtertest&kind=channel'); await p.waitForSelector('.chips');
   check('channel searches have no video filters', (await p.locator('.filters').count()) === 0);
   await p.goto(BASE + '/search?q=filtertest&kind=video&date=decade&sort=bogus'); await p.waitForSelector('.filters');
   check('nonsense filter values in the address are ignored, not an error', (await p.locator('.error').count()) === 0 && (await p.locator('select[aria-label="Sort by"]').inputValue()) === '');
@@ -472,11 +472,11 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     (await p.locator('aside.side a:has-text("Watch later") .count').innerText()) === '1');
   await p.click('aside.side a:has-text("Liked videos")'); await p.waitForSelector('.grid .card');
   check('Liked videos lists it, with a Remove action', (await p.locator('.grid .card').count()) === 1 &&
-    (await p.locator('.page h1').innerText()) === 'Liked videos' && (await p.locator('.card .act:has-text("Remove")').count()) === 1);
+    (await p.locator('.page h1').innerText()) === 'Liked videos' && (await p.locator('.card .dots').count()) === 1);
   await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
   check('Play all plays from the list (and shows it under the video)', p.url().includes('mylist=liked') && (await p.locator('.plist h2').innerText()).startsWith('Liked videos'));
   await p.goto(BASE + '/list/liked'); await p.waitForSelector('.grid .card');
-  await p.click('.card .act:has-text("Remove")');
+  await p.click('.card .dots'); await p.click('button[role=menuitem]:has-text("Remove from this list")');
   await p.waitForFunction(() => !document.querySelector('.grid .card'));
   check('removing takes it off the list, the count and the video page',
     (await p.locator('p:has-text("Nothing here yet")').count()) === 1 && (await p.locator('aside.side a:has-text("Liked videos") .count').count()) === 0);
@@ -505,7 +505,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const ids = () => p.locator('.grid .card a.title').evaluateAll((as) => as.map((a) => new URL(a.href).searchParams.get('v')));
   const order1 = await ids();
   check('the playlist lists both videos in the order added', order1.join() === 'e2eMUXED001,e2eVIDEO001', order1.join());
-  await p.click('.grid .card:first-child .act[aria-label="Move later"]');
+  await p.click('.grid .card:first-child .dots'); await p.click('button[role=menuitem]:has-text("Move later")');
   await p.waitForFunction((first) => new URL(document.querySelector('.grid .card a.title').href).searchParams.get('v') !== first, order1[0]);
   await p.reload(); await p.waitForSelector('.grid .card');
   const order2 = await ids();
@@ -712,12 +712,11 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     (await p.locator('.days tfoot .num').innerText()) === shown && (await p.locator('aside.side a.active:has-text("Watch time")').count()) === 1);
   const todayIso = await p.locator('input[aria-label="Counting from"]').getAttribute('max');
   await p.fill('input[aria-label="Counting from"]', todayIso);
-  await p.click('.since .btn:has-text("Use this date")');
-  await p.waitForSelector('.since .btn:has-text("Back to automatic")');
+  await p.waitForSelector('.since .link-btn:has-text("Back to automatic")');           // (picking the date applies it: no button to press)
   check('stats: choosing a start date is remembered and shown as set by you', (await p.locator('.since .small').innerText()).startsWith('Set by you') && (await p.locator('.hero .muted').innerText()).includes('since'));
   await p.reload(); await p.waitForSelector('.since');
-  check('stats: ...and survives a reload', (await p.locator('input[aria-label="Counting from"]').inputValue()) === todayIso && (await p.locator('.since .btn:has-text("Back to automatic")').count()) === 1);
-  await p.click('.since .btn:has-text("Back to automatic")');
+  check('stats: ...and survives a reload', (await p.locator('input[aria-label="Counting from"]').inputValue()) === todayIso && (await p.locator('.since .link-btn:has-text("Back to automatic")').count()) === 1);
+  await p.click('.since .link-btn:has-text("Back to automatic")');
   await p.waitForFunction(() => /^Automatic/.test(document.querySelector('.since .small')?.innerText ?? ''));
   check('stats: "Back to automatic" counts from your first watch again', (await p.locator('.hero .big').innerText()) === shown);
 
@@ -726,13 +725,13 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   const hBefore = await p.locator('.grid .card').count();
   check('History lists what you watched, newest under a Today heading', hBefore >= 1 && (await p.locator('h2').first().innerText()) === 'Today' &&
     (await p.locator('aside.side a.active:has-text("History")').count()) === 1);
-  await p.fill('input[aria-label="Search your history"]', 'zzz-nothing-matches'); await p.click('form.find button');
+  await p.fill('input[aria-label="Search your history"]', 'zzz-nothing-matches');          // (the list narrows as you type)
   await p.waitForFunction(() => /matches/.test(document.body.innerText));
   check('searching narrows it (and says so when nothing matches)', (await p.locator('.grid .card').count()) === 0);
-  await p.fill('input[aria-label="Search your history"]', ''); await p.click('form.find button');
+  await p.fill('input[aria-label="Search your history"]', '');
   await p.waitForSelector('.grid .card');
   const removedTitle = await p.locator('.grid .card .title').first().innerText();
-  await p.click('.card .act:has-text("Remove from history")');
+  await p.locator('.grid .card .dots').first().click(); await p.click('button[role=menuitem]:has-text("Remove from history")');
   await p.waitForFunction((n) => document.querySelectorAll('.grid .card').length === n, hBefore - 1);
   await p.reload(); await p.waitForSelector('.page h1');
   await p.waitForTimeout(500);
@@ -742,37 +741,39 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   // ---- For you: recommendations, with a visible reason for each and a way to say no
   await ctx.request.get(BASE + '/__seed_recommendable');
   await p.goto(BASE + '/'); await p.waitForSelector('.grid .card');
-  // The two seeded uploads are NEW uploads from a subscription, so they sit on the shelf at the top; the ranked list
-  // below holds the rest (here the related videos), each with its reasons.
+  // Home is one grid: the new uploads from subscriptions are ranked in with everything else (no separate shelf, no tabs).
   const card = (title) => p.locator('.grid .card', { has: p.locator(`a.title[title="${title}"]`) });
   const gridTitles = async () => p.locator('.grid .card a.title').evaluateAll((as) => as.map((a) => a.title));
-  const shelfTitles = async () => p.locator('.shelf .card a.title').evaluateAll((as) => as.map((a) => a.title));
-  const shelf = await shelfTitles(), ranked = await gridTitles();
-  check('Home is the first tab; new uploads from subscriptions are on a shelf, recommendations below',
-    (await p.locator('nav.tabs a.active').innerText()) === 'Home' && shelf.includes('Recommended 1') && shelf.includes('Recommended 2') &&
-    ranked.includes('Related two') && !ranked.includes('Recommended 1'), JSON.stringify({ shelf, ranked }));
-  await card('Related two').locator('.act:has-text("Why this?")').click();
+  const menuItem = async (title, label) => { await card(title).locator('.dots').click(); await p.click(`button[role=menuitem]:has-text("${label}")`); };
+  const ranked = await gridTitles();
+  check('Home is one grid of recommendations, new subscription uploads ranked in, with no shelf and no tab bar',
+    ranked.includes('Recommended 1') && ranked.includes('Recommended 2') && ranked.includes('Related two') &&
+    (await p.locator('.shelf, nav.tabs').count()) === 0 && (await p.locator('h1:has-text("Home")').count()) === 1, JSON.stringify(ranked));
+  await menuItem('Related two', 'Why this?');
   const why = await p.locator('.why li').allInnerTexts();
-  check('"Why this?" lists each reason with its points, then the total', why.length >= 3 && why.some(t => /Related to videos you have watched/.test(t)) &&
+  check('"Why this?" (in the card menu) lists each reason with its points, then the total', why.length >= 3 && why.some(t => /Related to videos you have watched/.test(t)) &&
     why.slice(0, -1).every(t => /[+-]\d+\.\d\d/.test(t)) && why.at(-1).startsWith('Score'), JSON.stringify(why));
-  await card('Related two').locator('.act:has-text("Not interested")').click();
+  await menuItem('Related two', 'Not interested');
   await p.waitForFunction(() => ![...document.querySelectorAll('.grid .card a.title')].some((a) => a.title === 'Related two'));
   await p.waitForTimeout(6000);                                  // tracker batches for 5 s
   const recEvts = await (await ctx.request.get(BASE + '/__events')).json();
   check('Not interested removes the card and is logged for the recommender', recEvts.some(e => e.type === 'not_interested' && e.video_id === 'e2eREL00002'));
-  await p.reload(); await p.waitForSelector('.shelf .card');
+  await p.reload(); await p.waitForSelector('.grid .card');
   check('...and the video stays gone after a reload', !(await gridTitles()).includes('Related two'), JSON.stringify(await gridTitles()));
   await p.screenshot({ path: require('os').tmpdir() + '/newtube-foryou.png' });
-  check('the Home page also has a shelf of new uploads from your subscriptions', (await p.locator('section[aria-label="New from your subscriptions"]').count()) === 1);
-  await p.goto(BASE + '/subscriptions'); await p.waitForSelector('nav.tabs');
-  check('Subscriptions is its own tab and page', (await p.locator('nav.tabs a.active').innerText()) === 'Subscriptions' && (await p.locator('aside.side .row.active').count()) === 1);
-  await p.goto(BASE + '/for-you'); await p.waitForSelector('nav.tabs');
-  check('the old /for-you address lands on Home', new URL(p.url()).pathname === '/' && (await p.locator('nav.tabs a.active').innerText()) === 'Home');
+  await p.keyboard.press('Escape');
+  await p.locator('.grid .card .dots').first().click();
+  await p.keyboard.press('Escape');
+  check('the card menu closes with Escape', (await p.locator('[role=menu]').count()) === 0);
+  await p.goto(BASE + '/subscriptions'); await p.waitForSelector('h1:has-text("Subscriptions")');
+  check('Subscriptions is its own page, with Manage channels one click away', (await p.locator('aside.side .row.active').count()) === 1 && (await p.locator('a.btn:has-text("Manage channels")').count()) === 1);
+  await p.goto(BASE + '/for-you'); await p.waitForSelector('h1:has-text("Home")');
+  check('the old /for-you address lands on Home', new URL(p.url()).pathname === '/');
   await p.goto(BASE + '/settings'); await p.waitForSelector('select[aria-label="Open newtube on"]');
   await p.selectOption('select[aria-label="Open newtube on"]', 'subscriptions');
   await p.goto(BASE + '/'); await p.waitForURL(/\/subscriptions$/);
   check('"Open newtube on: Subscriptions" starts there', new URL(p.url()).pathname === '/subscriptions');
-  await p.click('nav.tabs a:has-text("Home")'); await p.waitForSelector('h2:has-text("Recommended for you")');
+  await p.click('aside.side a[href="/"]'); await p.waitForSelector('h1:has-text("Home")');
   check('...but Home is still one click away and is not redirected away from', new URL(p.url()).pathname === '/');
   await p.goto(BASE + '/settings'); await p.selectOption('select[aria-label="Open newtube on"]', 'home');
 
