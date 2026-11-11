@@ -16,7 +16,8 @@ from typing import Any
 
 from ..db.queries.events import log_event
 from ..db.queries.seen import SEEN_SQL
-from ..extract.base import BotCheck, ExtractionError, Extractor, VideoSummary
+from ..db.queries import settings as saved
+from ..extract.base import BotCheck, ExtractionError, Extractor, RelatedUnsupported, VideoSummary
 from ..ml import store as ml_store
 from ..net.ratelimit import DailyCapReached
 from ..recommend.baseline import DAY, interest_rows
@@ -28,6 +29,8 @@ EMPTY_TTL = DAY            # YouTube really returned nothing: ask again after a 
 LIMIT = 25
 MIX_GIVE_UP_AFTER = 3      # this many empty Mixes in a row (and none that worked): stop asking for Mixes for a while
 MIX_PAUSE = 6 * 3600       # ... then try one again, in case YouTube changed back
+MIX_UNSUPPORTED_PAUSE = 7 * DAY   # yt-dlp does not read Mixes at all: look again only after a week (or a yt-dlp update)
+MIX_SKIP_KEY = "related_mix_skip_until"
 LOCAL_CHANNEL = 8          # from the same channel (newest first) ...
 LOCAL_SIMILAR = 12         # ... then the closest by title/topic among videos this server already knows
 
@@ -37,7 +40,7 @@ class RelatedService:
         self.conn, self.extractor = conn, extractor
         self._inflight: dict[str, asyncio.Task[int]] = {}
         self._mix_misses = 0
-        self._mix_skip_until = 0.0
+        self._mix_skip_until = float(saved.get(conn, MIX_SKIP_KEY, 0) or 0)       # (remembered across restarts)
 
     # ---- reading --------------------------------------------------------------------------------
     def _row(self, video_id: str):
@@ -133,7 +136,12 @@ class RelatedService:
         try:
             found = []
             if time.time() >= self._mix_skip_until:
-                found = await self.extractor.related(video_id, LIMIT, background=background)
+                try:
+                    found = await self.extractor.related(video_id, LIMIT, background=background)
+                except RelatedUnsupported as e:
+                    log.warning("related: %s; searching by title instead for a week", e)
+                    self._skip_mix(MIX_UNSUPPORTED_PAUSE)
+                    found = []
                 if found:
                     self._mix_misses = 0
                 else:
@@ -141,7 +149,7 @@ class RelatedService:
                     if self._mix_misses >= MIX_GIVE_UP_AFTER:
                         log.warning("related: YouTube's Mix came back empty %d times; searching by title instead for %dh",
                                     self._mix_misses, MIX_PAUSE // 3600)
-                        self._mix_skip_until, self._mix_misses = time.time() + MIX_PAUSE, 0
+                        self._skip_mix(MIX_PAUSE)
             if not found:
                 found = await self._by_title(video_id, background)
         except (DailyCapReached, BotCheck):
@@ -152,6 +160,10 @@ class RelatedService:
                               " ON CONFLICT(video_id) DO UPDATE SET fetched_at=excluded.fetched_at, count=0, failed=1", (video_id, now))
             raise
         return self.store(video_id, found, now)
+
+    def _skip_mix(self, seconds: float) -> None:
+        self._mix_skip_until, self._mix_misses = time.time() + seconds, 0
+        saved.put(self.conn, MIX_SKIP_KEY, self._mix_skip_until)
 
     async def _by_title(self, video_id: str, background: bool) -> list[VideoSummary]:
         """When YouTube's own Mix is not available: the results of searching for the video's title, which are

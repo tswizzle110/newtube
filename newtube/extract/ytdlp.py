@@ -33,7 +33,7 @@ from ..net.http import absolute_url, ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
 from .base import (
     AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, Comment, CommentPage,
-    ExtractionError, Format, PlaylistSummary, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
+    ExtractionError, Format, PlaylistSummary, RelatedUnsupported, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
 )
 
 log = logging.getLogger("newtube.ytdlp")
@@ -498,6 +498,8 @@ class YtDlpExtractor:
 
     async def related(self, video_id: str, limit: int = 25, *, background: bool = False) -> list[VideoSummary]:
         info = await self.raw_related(video_id, limit, background=background)
+        if info.get("_type") == "video" or ("entries" not in info and info.get("formats")):
+            raise RelatedUnsupported("yt-dlp read the Mix address as one video, not a playlist")
         found = [v for v in parse_entries(info) if isinstance(v, VideoSummary) and v.id != video_id][:limit]
         if not found:
             # An empty Mix is the one thing we cannot explain from here: record what YouTube actually sent, so the log

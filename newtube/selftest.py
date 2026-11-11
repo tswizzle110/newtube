@@ -348,7 +348,9 @@ class SelfTest:
             if len(found) < 3:
                 raise RuntimeError(f"the Mix gave {len(vids)} videos from {len(raw.get('entries') or [])} raw entries, "
                                    f"and the title search fallback gave only {len(found)}")
-            return (f"the Mix is empty ({len(raw.get('entries') or [])} raw entries) but the title-search fallback "
+            what = ("yt-dlp read the Mix address as one video" if raw.get("_type") == "video"
+                    else f"the Mix is empty ({len(raw.get('entries') or [])} raw entries)")
+            return (f"{what}, but the title-search fallback "
                     f"Up next uses instead works: {len(found)} videos")
         named = sum(bool(v.channel_id) for v in vids)
         return (f"{len(vids)} related videos ({named} with a channel id); first '{vids[0].title[:40]}' "

@@ -26,6 +26,11 @@ class AgeRestricted(VideoUnavailable):
     """Needs a signed-in account (not supported in phase 1)."""
 
 
+class RelatedUnsupported(ExtractionError):
+    """YouTube's Mix address came back as an ordinary single video (this yt-dlp version does not read Mixes), so
+    asking again would only repeat a full video lookup that yields nothing."""
+
+
 class BotCheck(ExtractionError):
     """YouTube asked us to prove we're not a bot. Back off; upgrade yt-dlp."""
 

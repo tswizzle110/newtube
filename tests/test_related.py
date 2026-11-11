@@ -1,5 +1,6 @@
 """Related videos: storage, the Up next list, the background job and its budget, and the recommender's use of them."""
 import asyncio
+import time
 
 import pytest
 
@@ -311,3 +312,32 @@ def test_a_working_mix_resets_the_miss_count(conn):
     svc._mix_misses = 2
     run(svc.lookup(V1))
     assert svc._mix_misses == 0 and ex.searches == []
+
+
+def test_a_mix_read_as_a_single_video_is_detected_and_not_asked_again_for_a_week(conn):
+    from newtube.extract.base import RelatedUnsupported
+    title_row(conn, V1, "one"); title_row(conn, V2, "two")
+    ex = Fake(fail=RelatedUnsupported("one video"))
+    ex.search_results = [vs(V3, "found by title")]
+    svc = RelatedService(conn, ex)
+    assert [c["id"] for c in run(svc.lookup(V1))[0]] == [V3]            # this very video is still served, by title
+    run(svc.lookup(V2))
+    assert len(ex.calls) == 1 and len(ex.searches) == 2                 # the second video never asked for a Mix
+    assert RelatedService(conn, ex)._mix_skip_until > time.time() + 6 * DAY   # ...and a restart remembers it
+    conn.execute("UPDATE settings SET value='0' WHERE key=?", (rel.MIX_SKIP_KEY,))
+    again = RelatedService(conn, ex)
+    title_row(conn, V4, "four"); run(again.lookup(V4))
+    assert len(ex.calls) == 2                                           # a week later: one more try
+
+
+def test_ytdlp_reading_the_mix_address_as_a_video_is_reported_as_unsupported():
+    from newtube.extract.base import RelatedUnsupported
+    from newtube.extract.ytdlp import YtDlpExtractor
+
+    async def raw(self, video_id, limit=25, *, background=False):
+        return {"_type": "video", "id": video_id, "title": "Me at the zoo", "formats": [{"format_id": "18"}]}
+
+    ex = object.__new__(YtDlpExtractor)
+    ex.raw_related = raw.__get__(ex)
+    with pytest.raises(RelatedUnsupported):
+        asyncio.run(ex.related(V1))
