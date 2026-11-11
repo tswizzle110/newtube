@@ -253,3 +253,16 @@ def test_related_endpoint(env):
 
 
 from tests.test_api import env  # noqa: E402,F401
+
+
+def test_an_empty_mix_is_logged_with_what_youtube_sent(caplog):
+    from newtube.extract.ytdlp import YtDlpExtractor
+
+    async def raw(self, video_id, limit=25, *, background=False):
+        return {"_type": "playlist", "title": "Mix - Seed", "entries": [{"id": video_id, "title": "Seed", "ie_key": "Youtube"}]}
+
+    ex = object.__new__(YtDlpExtractor)
+    ex.raw_related = raw.__get__(ex)
+    with caplog.at_level("WARNING", logger="newtube.ytdlp"):
+        assert asyncio.run(ex.related(V1)) == []            # only the seed video itself came back
+    assert "no usable videos" in caplog.text and "1 entries" in caplog.text and "Mix - Seed" in caplog.text

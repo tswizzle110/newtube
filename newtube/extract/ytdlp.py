@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import threading
 import re
 import time
@@ -34,6 +35,8 @@ from .base import (
     AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, Comment, CommentPage,
     ExtractionError, Format, PlaylistSummary, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
 )
+
+log = logging.getLogger("newtube.ytdlp")
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
@@ -495,7 +498,15 @@ class YtDlpExtractor:
 
     async def related(self, video_id: str, limit: int = 25, *, background: bool = False) -> list[VideoSummary]:
         info = await self.raw_related(video_id, limit, background=background)
-        return [v for v in parse_entries(info) if isinstance(v, VideoSummary) and v.id != video_id][:limit]
+        found = [v for v in parse_entries(info) if isinstance(v, VideoSummary) and v.id != video_id][:limit]
+        if not found:
+            # An empty Mix is the one thing we cannot explain from here: record what YouTube actually sent, so the log
+            # (journalctl --user -u newtube | grep related) says whether it was one entry, none, or something unparsed.
+            entries = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
+            log.warning("related %s: the Mix gave no usable videos (type=%s, title=%r, %d entries; first: %s)", video_id,
+                        info.get("_type"), (info.get("title") or "")[:60], len(entries),
+                        [{k: (str(v)[:40]) for k, v in list(e.items())[:8]} for e in entries[:2]])
+        return found
 
     async def channel_page(self, channel_id: str, limit: int = 30, *,
                            background: bool = False) -> tuple[ChannelInfo, list[VideoSummary]]:
