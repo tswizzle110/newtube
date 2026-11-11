@@ -278,7 +278,10 @@ results really are long, so a change on YouTube's side would show up there.
 
 Beside the video you are watching (below it on a narrow window) is **Up next**: videos related to it, taken from
 YouTube's own "Mix" for that video. The list is requested a moment after the video starts so it never delays
-playback, kept in your database for 3 days, and a failed lookup just shows nothing (it is retried after an hour).
+playback, kept in your database for 3 days, and a failed lookup is retried after an hour (or at once with **Try again**).
+When YouTube's list is not available (a bot check, a failed lookup, or nothing returned) Up next is filled from your
+own library instead, and says so: the channel's other videos this server already knows, then the closest titles by
+the same embeddings as "similar to what you watch". That needs no request to YouTube at all.
 
 The same lists feed **For you**. A slow background job fetches the related list of the videos you like most
 (liked, watched often and recently, on your Watch later) so that videos from channels you do **not** subscribe to

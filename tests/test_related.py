@@ -122,6 +122,44 @@ def test_failed_and_empty_are_told_apart_and_try_again_bypasses_the_failure_memo
     assert run(RelatedService(conn, ex2).lookup(V3)) == ([], "empty")           # a real, empty answer
 
 
+def add_video(conn, vid, title, channel, published):
+    conn.execute("INSERT OR IGNORE INTO channels(id,title,created_at) VALUES (?,?,1)", (channel, "Chan " + channel[2:4]))
+    conn.execute("INSERT INTO videos(id,channel_id,title,published_at,first_seen_at) VALUES (?,?,?,?,1)", (vid, channel, title, published))
+
+
+def test_local_suggestions_are_the_channels_other_videos_newest_first_and_never_the_video_itself(conn):
+    add_video(conn, V1, "Now playing", A, 100)
+    add_video(conn, V2, "Older upload", A, 50)
+    add_video(conn, V3, "Newer upload", A, 200)
+    add_video(conn, V4, "Other channel", B, 300)
+    got = RelatedService(conn, Fake()).local_cards(V1)
+    assert [c["id"] for c in got] == [V3, V2] and got[0]["channel_title"].startswith("Chan")
+    assert RelatedService(conn, Fake()).local_cards("zzzzzzzzzzz") == []            # an unknown video: nothing, not an error
+
+
+def test_local_suggestions_add_the_closest_titles_by_embedding(conn):
+    from newtube.ml import store
+    from newtube.ml.embedder import HashingEmbedder
+    add_video(conn, V1, "python asyncio tutorial for beginners", A, 100)
+    add_video(conn, V2, "python asyncio tutorial advanced", B, 100)
+    add_video(conn, V3, "sourdough bread baking guide", B, 100)
+    store.embed_pending(conn, HashingEmbedder(), limit=10)
+    got = [c["id"] for c in RelatedService(conn, Fake()).local_cards(V1)]
+    assert got[0] == V2 and V1 not in got                                          # the similar title ranks first
+
+
+def test_endpoint_falls_back_to_local_suggestions_and_says_so(env):
+    client, ctx, ex, seen = env
+    add_video(ctx.conn, V1, "Now playing", A, 100)
+    add_video(ctx.conn, V2, "Sibling", A, 90)
+    ctx.related.extractor = Fake(fail=BotCheck("sign in"))
+    body = client.get(f"/api/related/{V1}").json()
+    assert body["status"] == "paused" and body["source"] == "local" and [v["id"] for v in body["videos"]] == [V2]
+    ctx.related.extractor = Fake({V1: [vs(V3, "From YouTube")]})
+    body = client.get(f"/api/related/{V1}?force=1").json()
+    assert body["status"] == "ok" and body["source"] == "youtube" and [v["id"] for v in body["videos"]] == [V3]
+
+
 def test_an_imported_video_known_only_by_id_learns_its_title_from_a_related_list(conn):
     conn.execute("INSERT INTO videos(id,title,first_seen_at,from_import) VALUES (?,'',1,1)", (V2,))
     run(RelatedService(conn, Fake({V1: [vs(V2, "Now known", dur=77)]})).fetch(V1))
@@ -209,9 +247,9 @@ def test_related_endpoint(env):
     assert body["videos"][0]["seen"] is False
     assert client.get("/api/related/bad").status_code == 400
     ctx.related.extractor = Fake(fail=ExtractionError("down"))
-    assert client.get("/api/related/bbbbbbbbbbb").json() == {"videos": [], "status": "failed"}
+    assert client.get("/api/related/bbbbbbbbbbb").json() == {"videos": [], "status": "failed", "source": "youtube"}
     ctx.related.extractor = Fake(fail=BotCheck("sign in"))
-    assert client.get("/api/related/ccccccccccc").json() == {"videos": [], "status": "paused"}
+    assert client.get("/api/related/ccccccccccc").json() == {"videos": [], "status": "paused", "source": "youtube"}
 
 
 from tests.test_api import env  # noqa: E402,F401

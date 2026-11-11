@@ -11,6 +11,7 @@
   let videos = $state([])
   let loading = $state(true)
   let status = $state('ok')    // ok | empty | paused (bot check) | failed
+  let source = $state('youtube') // 'local': YouTube's list is not available, these come from this server's own library
 
   async function load(force = false) {
     loading = true
@@ -18,6 +19,7 @@
       const r = await api.get(`/api/related/${videoId}?limit=20${force ? '&force=1' : ''}`)
       videos = r.videos
       status = r.status
+      source = r.source ?? 'youtube'
     } catch {
       status = 'failed'        // the page works without suggestions
     } finally {
@@ -45,6 +47,14 @@
       <p class="muted small">Couldn't load related videos right now.</p>
     {/if}
     {#if status !== 'empty'}<button class="retry" onclick={() => load(true)}>Try again</button>{/if}
+  {/if}
+  {#if source === 'local' && videos.length}
+    <p class="muted small">
+      {status === 'paused' ? "YouTube is asking this server for a bot check, so these come from your own library:"
+        : "YouTube's suggestions aren't available for this one, so these come from your own library:"}
+      the channel's other videos and similar titles.
+      <button class="retry" onclick={() => load(true)}>Try YouTube again</button>
+    </p>
   {/if}
   <div class="list">
     {#each videos as v, i (v.id)}

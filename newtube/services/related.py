@@ -17,6 +17,7 @@ from typing import Any
 from ..db.queries.events import log_event
 from ..db.queries.seen import SEEN_SQL
 from ..extract.base import BotCheck, ExtractionError, Extractor, VideoSummary
+from ..ml import store as ml_store
 from ..net.ratelimit import DailyCapReached
 from ..recommend.baseline import DAY, interest_rows
 
@@ -25,6 +26,8 @@ TTL = 3 * DAY
 FAILURE_RETRY = 3600
 EMPTY_TTL = DAY            # YouTube really returned nothing: ask again after a day, not three
 LIMIT = 25
+LOCAL_CHANNEL = 8          # from the same channel (newest first) ...
+LOCAL_SIMILAR = 12         # ... then the closest by title/topic among videos this server already knows
 
 
 class RelatedService:
@@ -51,6 +54,35 @@ class RelatedService:
             f" LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN video_progress p ON p.video_id = r.related_id"
             f" WHERE r.video_id = ? ORDER BY r.rank LIMIT ?", (video_id, limit)).fetchall()
         return [{**dict(r), "completed": bool(r["completed"]), "seen": bool(r["seen"])} for r in rows]
+
+    def local_cards(self, video_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Suggestions that need no request to YouTube at all, for when its own list is not available: the channel's
+        other videos this server already knows (newest first), then the videos closest in meaning (the embeddings used
+        for "similar to what you watch"). Never contains the video itself."""
+        select = (f"SELECT v.id AS id, v.title, v.channel_id, COALESCE(c.title, '') AS channel_title, v.published_at,"
+                  f" v.duration, v.view_count, p.position AS resume_position, p.completed AS completed, {SEEN_SQL} AS seen"
+                  f" FROM videos v LEFT JOIN channels c ON c.id = v.channel_id LEFT JOIN video_progress p ON p.video_id = v.id")
+        me = self.conn.execute("SELECT channel_id FROM videos WHERE id=?", (video_id,)).fetchone()
+        ids: list[str] = []
+        if me and me["channel_id"]:
+            ids += [r[0] for r in self.conn.execute(
+                "SELECT id FROM videos WHERE channel_id=? AND id<>? AND title<>'' ORDER BY COALESCE(published_at, 0) DESC LIMIT ?",
+                (me["channel_id"], video_id, LOCAL_CHANNEL))]
+        emb = self.conn.execute("SELECT model FROM video_embeddings WHERE video_id=? LIMIT 1", (video_id,)).fetchone()
+        if emb:
+            vectors = ml_store.load_vectors(self.conn, emb["model"])
+            mine = vectors.pop(video_id, None)
+            if mine:
+                titled = {r[0] for r in self.conn.execute("SELECT id FROM videos WHERE title<>''")}
+                ranked = sorted(((ml_store.dot(mine, v), i) for i, v in vectors.items() if i in titled and i not in ids),
+                                reverse=True)
+                ids += [i for _s, i in ranked[:LOCAL_SIMILAR]]
+        ids = ids[:limit]
+        if not ids:
+            return []
+        rows = {r["id"]: r for r in self.conn.execute(f"{select} WHERE v.id IN ({','.join('?' * len(ids))})", ids)}
+        return [{**dict(rows[i]), "completed": bool(rows[i]["completed"]), "seen": bool(rows[i]["seen"])}
+                for i in ids if i in rows]
 
     async def lookup(self, video_id: str, limit: int = 20, *, background: bool = False,
                      force: bool = False) -> tuple[list[dict[str, Any]], str]:
