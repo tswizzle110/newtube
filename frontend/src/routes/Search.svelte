@@ -43,21 +43,26 @@
 </script>
 
 <div class="page">
-  <nav class="tabs">
-    {#each TABS as [k, label]}
-      <a href={`/search?q=${enc}&kind=${k}`} class:active={k === kind}>{label}</a>
-    {/each}
-  </nav>
-  {#if kind === 'video'}
-    <div class="filters" role="group" aria-label="Search filters">
-      <label>Uploaded <select bind:value={date} onchange={refilter} aria-label="Upload date">{#each DATES as [v, label]}<option value={v}>{label}</option>{/each}</select></label>
-      <label>Length <select bind:value={duration} onchange={refilter} aria-label="Duration">{#each DURATIONS as [v, label]}<option value={v}>{label}</option>{/each}</select></label>
-      <label>Sort by <select bind:value={sort} onchange={refilter} aria-label="Sort by">{#each SORTS as [v, label]}<option value={v}>{label}</option>{/each}</select></label>
-    </div>
-  {/if}
+  <div class="page-head">
+    <h1>Results for “{q}”</h1>
+  </div>
+  <div class="bar">
+    <nav class="chips" aria-label="Kind of result">
+      {#each TABS as [k, label]}
+        <a href={`/search?q=${enc}&kind=${k}`} class="chip" class:active={k === kind}>{label}</a>
+      {/each}
+    </nav>
+    {#if kind === 'video'}
+      <div class="filters" role="group" aria-label="Search filters">
+        <label>Uploaded <select bind:value={date} onchange={refilter} aria-label="Upload date">{#each DATES as [v, label]}<option value={v}>{label}</option>{/each}</select></label>
+        <label>Length <select bind:value={duration} onchange={refilter} aria-label="Duration">{#each DURATIONS as [v, label]}<option value={v}>{label}</option>{/each}</select></label>
+        <label>Sort by <select bind:value={sort} onchange={refilter} aria-label="Sort by">{#each SORTS as [v, label]}<option value={v}>{label}</option>{/each}</select></label>
+      </div>
+    {/if}
+  </div>
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Searching…</p>{/if}
-  {#if !loading && !error && !results.length}<p class="muted">No {kind}s found for “{q}”.</p>{/if}
+  {#if !loading && !error && !results.length}<p class="empty">No {kind}s found for “{q}”.</p>{/if}
 
   {#if kind === 'video'}
     <div class="grid">
@@ -77,12 +82,8 @@
 </div>
 
 <style>
-  .filters { display: flex; gap: 16px; flex-wrap: wrap; margin: 0 0 18px; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin: 0 0 22px; }
+  .filters { display: flex; gap: 16px; flex-wrap: wrap; }
   .filters label { display: flex; gap: 8px; align-items: center; color: var(--text-dim); font-size: 14px; }
-  .tabs { display: flex; gap: 6px; margin-bottom: 20px; }
-  .tabs a { padding: 6px 14px; border-radius: 999px; background: var(--bg-elev); color: var(--text-dim); }
-  .tabs a:hover { background: var(--bg-hover); color: var(--text); }
-  .tabs a.active { background: var(--text); color: var(--bg); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 18px; }
   .list { max-width: 860px; }
 </style>

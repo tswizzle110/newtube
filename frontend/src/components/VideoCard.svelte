@@ -2,6 +2,7 @@
   import { duration, ago, views } from '../lib/format.js'
   import { impression, trackClick, trackEvent } from '../lib/tracker.js'
   import { navigate } from '../lib/router.svelte.js'
+  import Menu from './Menu.svelte'
 
   // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
   // why: {score, reasons[{label, points}]} for recommended cards; ondismiss(type): 'not_interested' | 'dont_recommend_channel'
@@ -17,6 +18,16 @@
   let thumbSize = $state(compact ? 'mqdefault' : 'best')
   let imgFailed = $state(false)
   const thumbFailed = () => (thumbSize === 'best' ? (thumbSize = 'mqdefault') : (imgFailed = true))
+
+  // The rare actions live behind the ⋯ button, so the grid itself stays clean.
+  const items = $derived([
+    ...(why ? [{ label: showWhy ? 'Hide why this' : 'Why this?', onclick: () => (showWhy = !showWhy) }] : []),
+    ...(why && ondismiss ? [{ label: 'Not interested', onclick: () => ondismiss('not_interested') }] : []),
+    ...(why && ondismiss && video.channel_id ? [{ label: 'Never this channel', danger: true, onclick: () => ondismiss('dont_recommend_channel') }] : []),
+    ...(onremove ? [{ label: removeLabel, onclick: onremove }] : []),
+    ...(onremove && onup ? [{ label: 'Move earlier', onclick: onup }] : []),
+    ...(onremove && ondown ? [{ label: 'Move later', onclick: ondown }] : []),
+  ])
 
   function open(e) {
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
@@ -40,7 +51,10 @@
     {#if pct > 0 && !video.completed}<span class="bar"><span style:width={pct + '%'}></span></span>{/if}
   </a>
   <div class="meta">
-    <a class="title" {href} onclick={open} title={video.title}>{video.title}</a>
+    <div class="titlerow">
+      <a class="title" {href} onclick={open} title={video.title}>{video.title}</a>
+      <Menu {items} />
+    </div>
     {#if video.channel_id}
       <a class="chan muted" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
     {:else}
@@ -50,29 +64,13 @@
       {[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}
     </div>
     {#if note}<div class="muted small">{note}</div>{/if}
-    {#if onremove}
-      <div class="actions small">
-        <button class="act" onclick={onremove}>{removeLabel}</button>
-        {#if onup}<button class="act" onclick={onup} title="Move earlier in the playlist" aria-label="Move earlier">↑</button>{/if}
-        {#if ondown}<button class="act" onclick={ondown} title="Move later in the playlist" aria-label="Move later">↓</button>{/if}
-      </div>
-    {/if}
-    {#if why}
-      <div class="actions small">
-        <button class="act" aria-expanded={showWhy} onclick={() => (showWhy = !showWhy)}>Why this?</button>
-        {#if ondismiss}
-          <button class="act" onclick={() => ondismiss('not_interested')}>Not interested</button>
-          {#if video.channel_id}<button class="act" onclick={() => ondismiss('dont_recommend_channel')}>Never this channel</button>{/if}
-        {/if}
-      </div>
-      {#if showWhy}
-        <ul class="why small" aria-label="Why this was recommended">
-          {#each why.reasons as r}
-            <li><span>{r.label}</span><b class:neg={r.points < 0}>{r.points > 0 ? '+' : ''}{r.points.toFixed(2)}</b></li>
-          {/each}
-          <li class="total"><span>Score</span><b>{why.score.toFixed(2)}</b></li>
-        </ul>
-      {/if}
+    {#if why && showWhy}
+      <ul class="why small" aria-label="Why this was recommended">
+        {#each why.reasons as r}
+          <li><span>{r.label}</span><b class:neg={r.points < 0}>{r.points > 0 ? '+' : ''}{r.points.toFixed(2)}</b></li>
+        {/each}
+        <li class="total"><span>Score</span><b>{why.score.toFixed(2)}</b></li>
+      </ul>
     {/if}
   </div>
 </article>
@@ -96,13 +94,12 @@
   .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.25); }
   .bar span { display: block; height: 100%; background: var(--accent); }
   .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .title { font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  .titlerow { display: flex; align-items: flex-start; gap: 4px; }
+  .titlerow :global(.menu) { margin: -4px -6px -4px 0; }
+  @media (pointer: coarse) { .titlerow :global(.menu) { margin: -11px -11px -11px 0; } }       /* (a bigger button must not make the row taller) */
+  .title { flex: 1; min-width: 0; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; }
   .chan:hover { color: var(--text); }
-  .small { font-size: 13px; }
-  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
-  .act { background: none; border: 0; padding: 0; color: var(--text-dim); font: inherit; cursor: pointer; }
-  .act:hover { color: var(--text); text-decoration: underline; }
   .why { list-style: none; margin: 4px 0 0; padding: 8px 10px; background: var(--bg-elev); border-radius: 8px; }
   .why li { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
   .why b { font-variant-numeric: tabular-nums; color: #7ee787; }

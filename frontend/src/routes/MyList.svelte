@@ -5,7 +5,9 @@
   import { uid } from '../lib/tracker.js'
   import { loadLists } from '../lib/nav.svelte.js'
   import { navigate } from '../lib/router.svelte.js'
+  import { nearEnd } from '../lib/scroll.js'
   import VideoCard from '../components/VideoCard.svelte'
+  import Menu from '../components/Menu.svelte'
 
   const ref = router.pathname.split('/')[2]
   const PAGE = 60
@@ -17,6 +19,7 @@
   let error = $state('')
 
   async function load() {
+    if (loading && videos.length) return
     loading = true; error = ''
     try {
       const page = await api.get(`/api/mylists/${ref}?limit=${PAGE}&offset=${videos.length}`)
@@ -87,7 +90,7 @@
 <div class="page">
   {#if error}<p class="error">{error}</p>{/if}
   {#if info}
-    <header>
+    <div class="page-head">
       {#if editing}
         <form class="rename" onsubmit={saveName}>
           <input class="input" bind:value={nameDraft} aria-label="Playlist name" maxlength="100" />
@@ -96,19 +99,18 @@
         </form>
       {:else}
         <h1>{info.name}</h1>
+        <span class="meta">{info.count.toLocaleString()} video{info.count === 1 ? '' : 's'}</span>
       {/if}
-      <div class="muted">{info.count.toLocaleString()} video{info.count === 1 ? '' : 's'}</div>
-      <p class="row">
-        {#if videos.length}<a class="btn primary" href={`/watch?v=${videos[0].id}&src=playlist&mylist=${ref}`}>▶ Play all</a>{/if}
-        {#if own && !editing}
-          <button class="btn" onclick={() => { nameDraft = info.name; editing = true }}>Rename</button>
-          <button class="btn" onclick={deleteList}>Delete playlist</button>
-        {/if}
-      </p>
-    </header>
+      <span class="spacer"></span>
+      {#if videos.length && !editing}<a class="btn primary" href={`/watch?v=${videos[0].id}&src=playlist&mylist=${ref}`}>▶ Play all</a>{/if}
+      {#if own && !editing}
+        <Menu label="Playlist actions" items={[{ label: 'Rename', onclick: () => { nameDraft = info.name; editing = true } },
+                                                { label: 'Delete playlist', danger: true, onclick: deleteList }]} />
+      {/if}
+    </div>
   {/if}
   {#if !loading && !videos.length && !error}
-    <p class="muted">Nothing here yet.</p>
+    <p class="empty">Nothing here yet.</p>
   {/if}
   <div class="grid">
     {#each videos as v, i (v.id)}
@@ -118,16 +120,10 @@
     {/each}
   </div>
   {#if loading}<p class="muted">Loading…</p>{/if}
-  {#if !loading && !done && videos.length}
-    <p><button class="btn" onclick={load}>Load more</button></p>
-  {/if}
+  {#if !loading && !done && videos.length}<div use:nearEnd={load}></div>{/if}
 </div>
 
 <style>
-  header { margin-bottom: 24px; }
-  h1 { margin: 0 0 6px; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .rename { display: flex; gap: 8px; max-width: 480px; margin-bottom: 6px; }
+  .rename { display: flex; gap: 8px; width: min(100%, 480px); }
   .rename .input { flex: 1; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 18px; }
 </style>

@@ -207,6 +207,45 @@ async def _seed_recommendable():
     return {"ok": True}
 
 
+@app.get("/__seed_demo")
+async def _seed_demo():
+    """A believable library (subscriptions, uploads, history, likes, a playlist) so every page can be looked at with
+    content on it. Sandbox only."""
+    import json as _json, time
+    now = int(time.time())
+    names = ["Kitchen Science", "Trail Notes", "Retro Computing", "Quiet Piano", "City Walks", "Garage Builds", "Chess Lab", "Deep Space"]
+    titles = ["Why sourdough starters fail (and how to fix it)", "Ten minutes of rain on a tin roof", "Restoring a 1987 home computer, part {n}",
+              "Nocturne in E flat, slow practice", "Walking Tokyo at night, no talking", "Building a workbench from pallets",
+              "The opening trap nobody teaches", "What the new telescope images really show", "A very long title that goes on and on to check how wrapping behaves in a narrow card layout"]
+    for ci, name in enumerate(names):
+        cid = "UC" + chr(97 + ci) * 22
+        conn.execute("INSERT OR IGNORE INTO channels(id,title,created_at) VALUES (?,?,1)", (cid, name))
+        if ci < 6:
+            conn.execute("INSERT OR IGNORE INTO subscriptions VALUES (?,1)", (cid,))
+        for vi in range(8):
+            vid = f"demo{ci}{vi:06d}"
+            conn.execute("INSERT OR REPLACE INTO videos(id,channel_id,title,published_at,duration,view_count,first_seen_at) VALUES (?,?,?,?,?,?,1)",
+                         (vid, cid, titles[(ci + vi) % len(titles)].replace("{n}", str(vi + 1)), now - int((vi * 2.5 + ci * 0.7 + 0.3) * 86400),
+                          240 + 97 * ci + 61 * vi, 1200 * (vi + 1) * (ci + 1)))
+    vids = [r[0] for r in conn.execute("SELECT id FROM videos WHERE id LIKE 'demo%' ORDER BY id")]
+    for i, vid in enumerate(vids[:14]):                     # watched: some finished, some stopped partway
+        dur = conn.execute("SELECT duration FROM videos WHERE id=?", (vid,)).fetchone()[0]
+        frac = 1.0 if i % 3 == 0 else 0.35
+        conn.execute("INSERT OR REPLACE INTO watch_sessions(id,video_id,started_at,intervals,max_position,duration,source) VALUES (?,?,?,?,?,?,'for_you')",
+                     (f"demo-s{i}", vid, now - (i // 2) * 86400 - 3600 * (i % 5), _json.dumps([[0, dur * frac]]), dur * frac, dur))
+        conn.execute("INSERT OR REPLACE INTO video_progress(video_id,position,duration,completed,updated_at) VALUES (?,?,?,?,?)",
+                     (vid, dur * frac, dur, int(frac >= 1), now - i * 3600))
+    for kind, picks in (("liked", vids[2:9]), ("watch_later", vids[20:26])):
+        for pos, vid in enumerate(picks):
+            conn.execute("INSERT OR IGNORE INTO playlist_items(playlist_id,video_id,added_at,position) SELECT id,?,?,? FROM playlists WHERE kind=?",
+                         (vid, now - pos * 7200, pos + 1, kind))
+    conn.execute("INSERT OR IGNORE INTO playlists(kind,name,created_at,updated_at) VALUES ('user','Piano practice',?,?)", (now, now))
+    pid = conn.execute("SELECT id FROM playlists WHERE name='Piano practice'").fetchone()[0]
+    for pos, vid in enumerate(vids[24:29]):
+        conn.execute("INSERT OR IGNORE INTO playlist_items(playlist_id,video_id,added_at,position) VALUES (?,?,?,?)", (pid, vid, now, pos + 1))
+    return {"videos": len(vids)}
+
+
 @app.get("/__seed_import_watch")
 async def _seed_import_watch():
     """One history entry that came from a Takeout: we know only that it was opened."""

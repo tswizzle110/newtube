@@ -51,13 +51,10 @@
 </script>
 
 <div class="page narrow">
-  <h1>Settings</h1>
+  <div class="page-head"><h1>Settings</h1></div>
   {#if error}<p class="error">{error}</p>{/if}
   <h2>Start page</h2>
-  <p class="muted">
-    What newtube shows when you open it. Home is recommendations plus the newest uploads from your subscriptions;
-    Subscriptions is just the chronological feed. (Remembered by this browser only.)
-  </p>
+  <p class="muted">What newtube shows when you open it. Remembered by this browser only.</p>
   <div class="row">
     <label>Open newtube on
       <select value={nav.startPage} onchange={(e) => setStartPage(e.target.value)} aria-label="Open newtube on">
@@ -66,8 +63,6 @@
       </select>
     </label>
   </div>
-
-  <AppSettings />
 
   {#if pb}
     <h2>Playback <span class="status muted">{status}</span></h2>
@@ -145,15 +140,16 @@
   {:else if !error}
     <p class="muted">Loading…</p>
   {/if}
+
+  <AppSettings />
 </div>
 
 <style>
-  .narrow { max-width: 760px; }
-  h2 { margin-top: 28px; } h3 { margin: 28px 0 8px; font-size: 15px; }
+  h2 { margin-top: 32px; }
+  h3 { margin: 28px 0 8px; font-size: 15px; }
   .status { font-size: 13px; font-weight: 400; margin-left: 10px; }
   .cats { border-spacing: 0 6px; } .cats td { padding-right: 24px; }
   i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
-  select { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; color: var(--text); }
   .row { margin: 12px 0; } .num { width: 70px; padding: 4px 8px; }
   .warn { background: var(--bg-elev); border-left: 4px solid var(--danger); padding: 10px 14px; border-radius: 6px; }
   .over { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }

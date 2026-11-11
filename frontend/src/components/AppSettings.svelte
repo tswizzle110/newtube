@@ -96,10 +96,10 @@
 
 {#if problem && !data}<p class="error">{problem}</p>{/if}
 {#if data}
-  <section class="app" aria-label="Newtube settings">
+  <section class="app section" aria-label="Newtube settings">
     <h2>YouTube traffic and system</h2>
     <p class="muted">
-      These used to live in a file. Changes marked <span class="tag now">applies now</span> take effect the moment you save;
+      How much newtube asks YouTube for in the background, and system options. Changes marked <span class="tag now">applies now</span> take effect the moment you save;
       <span class="tag later">after restart</span> ones need newtube restarted.
     </p>
 
@@ -184,7 +184,6 @@
 <style>
   .app { margin-bottom: 8px; }
   h3 { font-size: 15px; margin: 26px 0 2px; }
-  .small { font-size: 13px; }
   .tag { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; white-space: nowrap; vertical-align: middle; }
   .tag.now { background: color-mix(in srgb, #3fb950 22%, transparent); color: #3fb950; }
   .tag.later { background: color-mix(in srgb, #d29922 22%, transparent); color: #d29922; }
@@ -196,7 +195,6 @@
   .control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .input.num { width: 9em; }
   .input.wide { width: min(100%, 30em); }
-  select, .input { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--text); }
   .field.bad .input, .field.bad select { border-color: var(--danger); }
   .link { background: none; border: 0; padding: 0; color: var(--accent); font-size: 13px; cursor: pointer; }
   .presets { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 4px; }

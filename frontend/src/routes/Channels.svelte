@@ -24,21 +24,33 @@
     } catch (err) { error = err.message } finally { busy = false }
   }
 
+  // Unsubscribing happens at once (no "are you sure?" click); the note below it offers Undo instead.
+  let undo = $state(null)
   async function remove(c) {
-    if (!confirm(`Unsubscribe from ${c.title}?`)) return
     await api.del(`/api/subscriptions/${c.id}`)
+    undo = c
     await load()
+  }
+  async function restore() {
+    const c = undo
+    undo = null
+    try { await api.post('/api/subscriptions', { ref: c.id }); await load() } catch (err) { error = err.message }
   }
 </script>
 
 <div class="page narrow">
-  <h1>Manage channels</h1>
+  <div class="page-head">
+    <h1>Manage channels</h1>
+    <span class="spacer"></span>
+    <a class="btn" href="/subscriptions">← Subscriptions</a>
+  </div>
   <form class="add" onsubmit={add}>
     <input class="input" bind:value={ref} placeholder="@handle, channel URL or UC… id" />
     <button class="btn primary" disabled={busy || !ref.trim()}>{busy ? 'Adding…' : 'Subscribe'}</button>
   </form>
   {#if error}<p class="error">{error}</p>{/if}
   {#if note}<p class="muted">{note}</p>{/if}
+  {#if undo}<p class="muted">Unsubscribed from {undo.title}. <button class="link-btn" onclick={restore}>Undo</button></p>{/if}
 
   <ul>
     {#each channels as c (c.id)}
@@ -55,11 +67,10 @@
       </li>
     {/each}
   </ul>
-  {#if !channels.length}<p class="muted">You aren't subscribed to anything yet.</p>{/if}
+  {#if !channels.length}<p class="empty">You aren't subscribed to anything yet.</p>{/if}
 </div>
 
 <style>
-  .narrow { max-width: 720px; }
   .add { display: flex; gap: 8px; margin-bottom: 12px; }
   .add .input { flex: 1; }
   ul { list-style: none; padding: 0; margin: 16px 0; display: flex; flex-direction: column; gap: 4px; }

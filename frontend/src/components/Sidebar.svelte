@@ -105,14 +105,15 @@
         <span class="lname">{l.name}</span>{#if l.count}<span class="count muted">{l.count.toLocaleString()}</span>{/if}
       </a>
     {/each}
-
-    <a class="item" class:active={is('/channels')} href="/channels">Manage channels</a>
-    <a class="item" class:active={is('/settings')} href="/settings">Settings</a>
   </nav>
 
+  <!-- The things about newtube itself, not your videos, together at the bottom. -->
   <div class="bottom">
-    <button class="btn" onclick={ontheme} title="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
-    <button class="btn" onclick={onlogout}>Log out</button>
+    <a class="item" class:active={is('/settings')} href="/settings">Settings</a>
+    <div class="account">
+      <button class="btn" onclick={ontheme} title="Switch between dark and light" aria-label="Switch between dark and light">{theme === 'dark' ? '☀' : '☾'}</button>
+      <button class="btn" onclick={onlogout}>Log out</button>
+    </div>
   </div>
 </aside>
 
@@ -147,8 +148,9 @@
   .ph { background: var(--bg-elev); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { padding: 6px 14px; font-size: 13px; }
-  .bottom { display: flex; gap: 8px; }
-  .bottom .btn:last-child { flex: 1; }
+  .bottom { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .account { display: flex; gap: 8px; }
+  .account .btn:last-child { flex: 1; }
 
   /* (after the base rules above, so these win) */
   @media (max-width: 899px) {      /* a phone: the sidebar slides over the page instead of sitting beside it */

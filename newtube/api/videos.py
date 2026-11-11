@@ -31,6 +31,7 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
     prog = ctx.conn.execute("SELECT position, completed FROM video_progress WHERE video_id=?",
                             (video_id,)).fetchone()
     lists_state = mylists.membership(ctx.conn, video_id)
+    subscribed = bool(v.channel_id and ctx.conn.execute("SELECT 1 FROM subscriptions WHERE channel_id=?", (v.channel_id,)).fetchone())
     return {
         "id": v.id, "title": v.title, "description": v.description,
         "channel_id": v.channel_id, "channel_title": v.channel_title,
@@ -44,5 +45,6 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
                      "vcodec": f.vcodec, "acodec": f.acodec, "muxed": f.is_muxed,
                      "tbr": f.tbr} for f in v.formats],
         "resume_position": prog["position"] if prog and not prog["completed"] else 0,
+        "subscribed": subscribed,
         **lists_state,
     }

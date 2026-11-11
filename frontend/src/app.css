@@ -2,7 +2,7 @@
 :root {
   --bg: #0f0f12; --bg-elev: #17171c; --bg-hover: #22222a; --border: #2a2a33;
   --text: #ececf1; --text-dim: #9a9aa8; --accent: #6ea8fe; --accent-fg: #0b1220;
-  --danger: #ff6b6b; --radius: 10px;
+  --danger: #ff6b6b; --good: #7ee787; --radius: 10px; --gap: 18px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme: dark;
 }
@@ -26,7 +26,42 @@ button { cursor: pointer; }
 .input { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
 .muted { color: var(--text-dim); }
 .error { color: var(--danger); }
-.page { max-width: 1680px; margin: 0 auto; padding: 20px 24px 60px; }
-@media (max-width: 699px) { .page { padding: 56px 12px 60px; } }
 button, .btn, select, input { touch-action: manipulation; }
-h1 { font-size: 20px; margin: 0 0 16px; }
+
+/* ---- the shared pieces every page is built from --------------------------------------------------------------- */
+
+/* Type: one scale. h1 names the page, h2 a section of it, .small is secondary text. */
+h1 { font-size: 22px; line-height: 1.25; font-weight: 700; margin: 0 0 18px; }
+h2 { font-size: 16px; line-height: 1.3; font-weight: 700; margin: 0 0 10px; }
+.small { font-size: 13px; }
+
+/* Page: every page starts at the same left edge with the same padding. `.narrow` pages (text, forms, settings) keep a
+   comfortable line length but stay left-aligned so their titles line up with the other pages'. */
+.page { max-width: 1680px; margin: 0 auto; padding: 20px 24px 60px; }
+.page.narrow { max-width: 760px; margin: 0; }
+@media (max-width: 699px) { .page { padding: 56px 12px 60px; } }
+
+/* Page header: the title, what it holds ("7 videos"), and the page's actions on the right. */
+.page-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 18px; min-height: 38px; }
+.page-head h1 { margin: 0; }
+.page-head .meta { color: var(--text-dim); font-size: 14px; }
+.page-head .spacer { flex: 1; }
+.section { margin: 32px 0 0; }
+
+/* The video grid, the same everywhere. */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px var(--gap); }
+
+/* Quiet text-style action, a pill for tabs and filters, a framed block, and the "nothing here" message. */
+.link-btn { background: none; border: 0; padding: 0; color: var(--text-dim); font: inherit; cursor: pointer; }
+.link-btn:hover { color: var(--text); text-decoration: underline; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { background: var(--bg-elev); border: 1px solid transparent; border-radius: 999px; padding: 6px 14px; color: var(--text-dim); }
+.chip:hover { background: var(--bg-hover); color: var(--text); }
+.chip.active { background: var(--text); color: var(--bg); }
+.panel { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.empty { color: var(--text-dim); padding: 24px 0; }
+.empty a, a.link { color: var(--accent); }
+
+/* Form controls look the same wherever they are (the browser's own grey select did not). */
+select, input[type='date'] { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+.btn.small { padding: 4px 10px; font-size: 13px; }

@@ -7,6 +7,7 @@
   import Comments from '../components/Comments.svelte'
   import SponsorBlockPanel from '../components/SponsorBlockPanel.svelte'
   import ListButtons from '../components/ListButtons.svelte'
+  import SubscribeButton from '../components/SubscribeButton.svelte'
   import RelatedList from '../components/RelatedList.svelte'
 
   // The video to play comes from the host (App), not from the address bar, so the same page can keep playing in a
@@ -81,6 +82,7 @@
     <h1>{video.title}</h1>
     <div class="byline">
       <a class="chan" href={`/channel/${video.channel_id}`}>{video.channel_title}</a>
+      {#if video.channel_id}<SubscribeButton channelId={video.channel_id} subscribed={video.subscribed} />{/if}
       <span class="muted">{[views(video.view_count), ago(video.published_at)].filter(Boolean).join(' · ')}</span>
       <span class="spacer"></span>
       <ListButtons videoId={video.id} liked={video.liked} watchLater={video.watch_later} playlists={video.playlists} />

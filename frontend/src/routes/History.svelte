@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { uid } from '../lib/tracker.js'
+  import { nearEnd } from '../lib/scroll.js'
   import VideoCard from '../components/VideoCard.svelte'
   import { historyNote } from '../lib/historyNote.js'
 
@@ -15,6 +16,7 @@
   let applied = $state('') // the search the list on screen belongs to
 
   async function load(reset = false) {
+    if (!reset && (loading || done)) return
     if (reset) { items = []; done = false; applied = q.trim() }
     loading = true; error = ''
     try {
@@ -28,6 +30,10 @@
     }
   }
   onMount(() => { document.title = 'History · newtube'; load(true) })
+
+  // The list narrows as you type (no Search button to press).
+  let typing
+  function onType() { clearTimeout(typing); typing = setTimeout(() => load(true), 350) }
 
   async function remove(v) {
     try {
@@ -62,18 +68,17 @@
 </script>
 
 <div class="page">
-  <h1>Watch history</h1>
-  <form class="find" onsubmit={(e) => { e.preventDefault(); load(true) }} role="search">
-    <input class="input" bind:value={q} placeholder="Search your history" aria-label="Search your history" maxlength="100" />
-    <button class="btn">Search</button>
-  </form>
-  <p class="muted small">Only on this server. Removing a video here also forgets where you stopped and stops it counting towards recommendations.</p>
+  <div class="page-head">
+    <h1>History</h1>
+    <span class="spacer"></span>
+    <input class="input find" type="search" bind:value={q} oninput={onType} placeholder="Search your history" aria-label="Search your history" maxlength="100" />
+  </div>
   {#if error}<p class="error">{error}</p>{/if}
   {#if !loading && !items.length && !error}
-    <p class="muted">{applied ? 'Nothing in your history matches that.' : 'Nothing in your history yet.'}</p>
+    <p class="empty">{applied ? 'Nothing in your history matches that.' : 'Nothing in your history yet.'}</p>
   {/if}
   {#each groups as g (g.label + g.videos[0].id)}
-    <h2>{g.label}</h2>
+    <h2 class="section">{g.label}</h2>
     <div class="grid">
       {#each g.videos as v (v.id)}
         <VideoCard video={{ ...v, title: v.title || v.id }} surface="history" position={items.indexOf(v)} {requestId}
@@ -82,16 +87,9 @@
     </div>
   {/each}
   {#if loading}<p class="muted">Loading…</p>{/if}
-  {#if !loading && !done && items.length}
-    <p><button class="btn" onclick={() => load()}>Load more</button></p>
-  {/if}
+  {#if !loading && !done && items.length}<div use:nearEnd={() => load()}></div>{/if}
 </div>
 
 <style>
-  h1 { margin: 0 0 12px; }
-  h2 { font-size: 16px; margin: 28px 0 12px; }
-  .find { display: flex; gap: 8px; max-width: 520px; margin-bottom: 8px; }
-  .find .input { flex: 1; }
-  .small { font-size: 13px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 18px; }
+  .find { width: min(100%, 320px); }
 </style>

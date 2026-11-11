@@ -37,7 +37,7 @@
 </script>
 
 <div class="page narrow">
-  <h1>Watch time</h1>
+  <div class="page-head"><h1>Watch time</h1></div>
   {#if error}<p class="error">{error}</p>{/if}
   {#if s}
     <div class="hero">
@@ -62,14 +62,14 @@
       </div>
     {/if}
 
-    <form class="since" onsubmit={(e) => { e.preventDefault(); saveSince(since) }}>
-      <label>Counting from <input type="date" bind:value={since} aria-label="Counting from" max={s.today} /></label>
-      <button class="btn">Use this date</button>
-      {#if !s.since_is_automatic}<button type="button" class="btn" onclick={() => saveSince(null)}>Back to automatic</button>{/if}
+    <div class="since">
+      <label>Counting from <input type="date" bind:value={since} max={s.today} aria-label="Counting from"
+                                  onchange={() => since && saveSince(since)} /></label>
+      {#if !s.since_is_automatic}<button type="button" class="link-btn" onclick={() => saveSince(null)}>Back to automatic</button>{/if}
       <span class="muted small">{s.since_is_automatic ? 'Automatic: from your first recorded watch.' : 'Set by you.'}</span>
-    </form>
+    </div>
 
-    <h2>By day</h2>
+    <h2 class="section">By day</h2>
     <table class="days">
       <tbody>
         {#each rows as d (d.date)}
@@ -84,13 +84,13 @@
     </table>
 
     {#if s.top_channels.length}
-      <h2>Most watched channels</h2>
+      <h2 class="section">Most watched channels</h2>
       <ol class="top">
         {#each s.top_channels as c}<li><a href={`/channel/${c.id}`}>{c.title || c.id}</a><span class="muted">{spent(c.seconds)}</span></li>{/each}
       </ol>
     {/if}
     {#if s.top_videos.length}
-      <h2>Most watched videos</h2>
+      <h2 class="section">Most watched videos</h2>
       <ol class="top">
         {#each s.top_videos as v}<li><a href={`/watch?v=${v.id}&src=direct`}>{v.title}</a><span class="muted">{spent(v.seconds)}</span></li>{/each}
       </ol>
@@ -106,20 +106,17 @@
 </div>
 
 <style>
-  .narrow { max-width: 760px; }
-  h2 { font-size: 16px; margin: 28px 0 10px; }
   .hero { margin: 4px 0 20px; }
   .big { font-size: 52px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; }
   .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .facts div { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
   .facts b { font-size: 22px; }
-  .facts span, .small { font-size: 13px; }
+  .facts span { font-size: 13px; }
   .skipped { margin: 0 0 18px; }
   .skipped b { font-size: 18px; }
   .sk { font-size: 12px; }
-  .since { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .since { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   .since label { display: flex; gap: 8px; align-items: center; }
-  .since input { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
   .days { width: 100%; border-collapse: collapse; }
   .days th { text-align: left; font-weight: 500; padding: 6px 10px 6px 0; white-space: nowrap; }
   .days td { padding: 6px 0; }

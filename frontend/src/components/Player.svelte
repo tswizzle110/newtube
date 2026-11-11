@@ -792,7 +792,7 @@
           </ul>
         {/if}
       </div>
-      <button title="Keyboard shortcuts (?)" onclick={() => (help = !help)}>?</button>
+      <button class="helpbtn" title="Keyboard shortcuts (?)" onclick={() => (help = !help)}>?</button>
       {#if ontheater}
         <button class="theater" class:on={theater} aria-pressed={theater} title={theater ? 'Default view (t)' : 'Theater mode (t)'}
                 onclick={ontheater}>▭</button>
@@ -868,7 +868,7 @@
   .player.compact .vol, .player.compact .chap, .player.compact .theater, .player.compact .time { display: none; }
   .player.compact .bigplay { width: 52px; height: 52px; font-size: 20px; }
   .row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
-  .row button { background: none; border: 0; color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 14px; }
+  .row button { background: none; border: 0; color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 14px; white-space: nowrap; }
   .row button:hover { background: rgba(255, 255, 255, 0.18); }
   .row button.on { color: var(--accent); }
   .time { font-size: 13px; font-variant-numeric: tabular-nums; margin: 0 8px; }
@@ -885,7 +885,13 @@
   /* touch screens: bigger targets, no volume slider (the phone has buttons) */
   @media (pointer: coarse), (max-width: 699px) {      /* (a small window counts too: emulators and some browsers do not report 'coarse') */
     .row button { padding: 11px 12px; }
-    .vol { display: none; }
+    .vol, .helpbtn { display: none; }                 /* (no keyboard to get help for) */
     .bar { height: 26px; }
+  }
+  @media (max-width: 699px) {                         /* a phone: everything must fit on one row */
+    .row { gap: 0; }
+    .row button { padding: 11px 9px; }
+    .time { white-space: nowrap; margin: 0 6px; }
+    .chap, .theater { display: none; }
   }
 </style>

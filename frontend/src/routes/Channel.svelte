@@ -111,9 +111,9 @@
       </button>
     </header>
 
-    <div class="sorts" role="group" aria-label="Sort videos">
+    <div class="chips sorts" role="group" aria-label="Sort videos">
       {#each SORTS as [k, label]}
-        <a href={`/channel/${id}${k === 'newest' ? '' : '?sort=' + k}`} class:on={k === sort}>{label}</a>
+        <a href={`/channel/${id}${k === 'newest' ? '' : '?sort=' + k}`} class="chip" class:active={k === sort}>{label}</a>
       {/each}
     </div>
 
@@ -130,7 +130,7 @@
     {#if unavailable}
       <p class="muted">{unavailable} <a class="link" href={`/channel/${id}`}>Show newest instead</a></p>
     {:else if !videos.length && !loading && !scanning && !error}
-      <p class="muted">No videos found.</p>
+      <p class="empty">No videos found.</p>
     {/if}
 
     <div class="grid">
@@ -160,20 +160,15 @@
 </div>
 
 <style>
-  .head { display: flex; gap: 24px; align-items: center; margin-bottom: 28px; }
-  .head img, .ph { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; flex: none; }
-  .ph { background: var(--bg-hover); display: grid; place-items: center; font-size: 40px; font-weight: 700; }
+  .head { display: flex; gap: 24px; align-items: center; margin-bottom: 24px; }
+  .head img, .ph { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; flex: none; }
+  .ph { background: var(--bg-hover); display: grid; place-items: center; font-size: 36px; font-weight: 700; }
   .meta { flex: 1; min-width: 0; }
-  h1 { margin: 0 0 4px; font-size: 26px; }
+  .meta h1 { margin: 0 0 4px; }
   .desc { margin: 8px 0 0; max-width: 70ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .sorts { display: flex; gap: 6px; margin-bottom: 18px; }
-  .sorts a { padding: 6px 14px; border-radius: 999px; background: var(--bg-elev); color: var(--text-dim); }
-  .sorts a:hover { background: var(--bg-hover); color: var(--text); }
-  .sorts a.on { background: var(--text); color: var(--bg); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 18px; }
+  .sorts { margin-bottom: 20px; }
   .scan { background: var(--bg-elev); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
   .scan progress { width: 100%; accent-color: var(--accent); }
   .sentinel { height: 1px; }
-  .small { font-size: 13px; }
-  .link { color: var(--accent); background: none; border: 0; padding: 0; }
+  button.link { color: var(--accent); background: none; border: 0; padding: 0; }
 </style>
