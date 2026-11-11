@@ -352,17 +352,21 @@ that browser only); Home is always one click away.
 
 ## How recommendations are ranked
 
-The **Recommended for you** list on Home ranks videos from your subscriptions (last 45 days) and your Watch
-later list. It reads only your own database: it never contacts YouTube. Each video scores the sum of a few
+The **Recommended for you** list on Home ranks videos from five places, all already in your own database (it never
+contacts YouTube): your subscriptions' uploads (last 45 days), your Watch later list, videos related to ones you
+like, other videos from channels you watch but do not subscribe to (last year), and the videos whose title and topic
+are closest to your taste (the embeddings below). At least **40%** of the page is kept for the last four whenever there
+are enough of them, so uploads from your subscriptions cannot fill it on their own. Home loads the best 240 and shows
+48 at a time ("Show more"). Each video scores the sum of a few
 transparent terms, and **Why this?** under a card shows every term with its points and the total:
 
 | Term | Meaning |
 | --- | --- |
 | You watch *channel* a lot / have watched before | Time-decayed interest from your history, likes and watch-later (half-life 180 days). Opening a video in imported history counts a little; real playback in newtube counts by how much you watched. |
 | Uploaded *N* ago | Newer scores higher (half-life 7 days). |
-| From a channel you subscribe to | A flat bonus. |
+| From a channel you subscribe to | A small flat bonus (0.4; the channels' uploads are most of the candidates anyway). |
 | In your Watch later | A flat bonus. |
-| You started this and did not finish | Videos you stopped partway in newtube come back. |
+| You started this and did not finish | A weak nudge (0.3) so videos you stopped partway can come back without taking over. |
 | Shown *N* times without a click | A penalty for videos you keep scrolling past (last 14 days). |
 | *N* higher videos from *channel* already shown | Stops one prolific channel filling the page. |
 
@@ -370,7 +374,8 @@ Never shown: videos you finished or watched before (unless you stopped partway i
 **Not interested**, and channels you marked **Never this channel**. Both buttons are on every For-you card and
 are remembered (locally). **Refresh** re-ranks using what you have done since.
 
-The weights are the `Weights` class in `newtube/recommend/baseline.py`. This is the hand-tuned baseline that a
+The weights are the `Weights` class in `newtube/recommend/baseline.py` (`explore_share` is the 40%; set it to 0 to rank
+purely by score). This is the hand-tuned baseline that a
 learned model will later have to beat in the offline evaluation.
 
 ## Backups

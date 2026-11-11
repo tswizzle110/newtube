@@ -173,3 +173,16 @@ def test_recommendations_still_work_when_the_model_is_missing(conn, tmp_path):
     conn.execute("INSERT INTO subscriptions VALUES (?,1)", (A,)); video(conn, "aaaaaaaaaaa", "Cats", age_days=0.1)
     out = asyncio.run(api.recommendations(10, ctx))
     assert [c["id"] for c in out] == ["aaaaaaaaaaa"]
+
+
+def test_videos_closest_to_your_taste_become_candidates_even_from_channels_you_do_not_know(conn):
+    for i in range(3):
+        watched(conn, f"cat{i:08d}", f"funny cats playing piano {i}")
+    video(conn, "newcat00000", "cats playing piano again", age_days=3)               # not subscribed, never watched
+    video(conn, "newcar00000", "how to change a car tyre", age_days=3)
+    store.embed_pending(conn, EMB, 100)
+    scorer = taste.scorer(conn, EMB.name, NOW)
+    assert scorer.nearest(3)[0] in {"newcat00000", *(f"cat{i:08d}" for i in range(3))}
+    got = [r.video["id"] for r in recommend(conn, now=NOW, taste=scorer)]
+    assert "newcat00000" in got                                                      # surfaced with no subscription at all
+    assert got.index("newcat00000") < got.index("newcar00000") if "newcar00000" in got else True

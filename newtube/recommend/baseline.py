@@ -14,9 +14,10 @@ offline evaluation (phase 4). So it is deliberately simple and every number is e
     taste_similarity   how close its subject is to what you watch (needs embeddings; see ml/)
     shown_unclicked    NEGATIVE: this was shown to you repeatedly and you never clicked it
 
-Candidates are videos already in the database: recent uploads of subscribed channels, your Watch-later items, and
-videos YouTube lists as related to the ones you like (fetched in the background; see services/related.py), which
-is how videos from channels you do not subscribe to get in.
+Candidates are videos already in the database: recent uploads of subscribed channels, your Watch-later items,
+videos listed as related to the ones you like (see services/related.py), other videos from channels you watch but do
+not subscribe to, and the videos whose subject is closest to your taste (embeddings). The last three are how videos
+from channels you do not subscribe to get in; ``explore_share`` makes sure they get a fair share of the page.
 
 Never recommended: videos you finished, videos you watched before (unless you stopped partway in newtube),
 anything you marked "not interested", and channels you marked "don't recommend".
@@ -45,23 +46,27 @@ DAY = 86400
 
 @dataclass(frozen=True)
 class Weights:
-    channel_affinity: float = 3.0
+    channel_affinity: float = 2.0          # (was 3.0: a channel you watch a lot should not crowd out everything else)
     freshness: float = 1.5
-    subscribed: float = 1.0
+    subscribed: float = 0.4                # (was 1.0: being subscribed is already most of the candidate list)
     saved: float = 1.2
-    resume: float = 0.8
-    related: float = 1.5                   # near videos you like, via YouTube's related lists (see services/related.py)
-    related_seeds: int = 60                # how many of your most-liked videos' related lists are consulted
+    resume: float = 0.3                    # (was 0.8: something you stopped watching is a weak reason to show it again)
+    related: float = 2.5                   # near videos you like, via related lists (see services/related.py)
+    related_seeds: int = 150               # how many of your most-liked videos' related lists are consulted
     related_full_at: float = 1.5           # this much support = the full related bonus
-    taste_similarity: float = 2.0          # needs embeddings; see newtube/ml
+    taste_similarity: float = 3.0          # needs embeddings; see newtube/ml
     taste_floor: float = 0.15              # cosine similarity at or below this counts as 'not similar'
     taste_span: float = 0.6                # ...and floor + span counts as 'very similar'
+    taste_candidates: int = 120            # the videos closest to your taste are candidates even from unknown channels
     shown_unclicked: float = -1.5
     repeat_factor: float = 0.7               # per higher-ranked video from the same channel
     freshness_half_life_days: float = 7.0
     unknown_age_freshness: float = 0.2       # saved videos not yet filled in by the backfill
     affinity_half_life_days: float = 180.0
     window_days: int = 45                    # how far back subscribed channels' uploads are considered
+    watched_channel_days: int = 365          # ...and other videos from channels you watch but do not subscribe to
+    watched_channels: int = 80               # how many such channels (the ones you watch most) are consulted
+    explore_share: float = 0.4               # at least this share of the page is NOT subscribed channels, when there is enough
     fatigue_days: int = 14
     fatigue_full_at: int = 5                 # this many unclicked impressions = the full penalty
 
@@ -84,6 +89,7 @@ class Recommendation:
     video: dict[str, Any]
     score: float
     reasons: list[Reason] = field(default_factory=list)
+    explore: bool = False             # from a channel you do not subscribe to (and not saved): see Weights.explore_share
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.video, "why": {"score": round(self.score, 2),
@@ -202,6 +208,18 @@ def _rows_by_id(conn: sqlite3.Connection, ids: list[str]) -> list[sqlite3.Row]:
     return out
 
 
+def _watched_channel_rows(conn: sqlite3.Connection, interest: dict[str, float], since: int, limit: int) -> list[sqlite3.Row]:
+    """Videos this server knows from channels you watch but do not subscribe to (they got here via searches, related
+    lists and channel pages you opened), newest first within the channels you watch most."""
+    top = [c for c, _ in sorted(interest.items(), key=lambda kv: -kv[1])[:limit]]
+    out: list[sqlite3.Row] = []
+    for i in range(0, len(top), 400):
+        chunk = top[i:i + 400]
+        out += conn.execute(_SELECT + f" AND s.channel_id IS NULL AND v.published_at >= ?"
+                            f" AND v.channel_id IN ({','.join('?' * len(chunk))})", [since, *chunk]).fetchall()
+    return out
+
+
 def _age_text(seconds: float) -> str:
     if seconds < 3600:
         return "less than an hour ago"
@@ -226,6 +244,13 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
     support = related_support(conn, now, w)
     have = {r["id"] for r in rows}
     rows += _rows_by_id(conn, [vid for vid in support if vid not in have])    # videos near ones you like, from anywhere
+    have |= {r["id"] for r in rows}
+    rows += [r for r in _watched_channel_rows(conn, interest, now - w.watched_channel_days * DAY, w.watched_channels)
+             if r["id"] not in have]                                           # other videos from channels you watch
+    have |= {r["id"] for r in rows}
+    nearest = getattr(taste, "nearest", None)
+    if nearest:                                                                # videos about what you watch, from anywhere
+        rows += _rows_by_id(conn, [vid for vid in nearest(w.taste_candidates) if vid not in have])
     similar = taste([r["id"] for r in rows]) if taste and rows else {}
     scored: list[Recommendation] = []
     for r in rows:
@@ -263,22 +288,28 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
                                    "resume_position")}
         video["completed"] = False
         video["seen"] = bool(r["watched_before"] or resumable)
-        scored.append(Recommendation(video, sum(x.points for x in reasons), reasons))
+        scored.append(Recommendation(video, sum(x.points for x in reasons), reasons,
+                                     explore=not r["subscribed"] and not r["saved"]))
 
     # Best first; ties broken by newer then id so the order is stable between requests.
     scored.sort(key=lambda x: (-x.score, -(x.video["published_at"] or 0), x.video["id"]))
-    return _diversify(scored, w.repeat_factor, limit)
+    return _diversify(scored, w.repeat_factor, limit, w.explore_share)
 
 
-def _diversify(ranked: list[Recommendation], factor: float, limit: int) -> list[Recommendation]:
-    """Greedy: repeatedly take the best remaining video, discounting channels already picked."""
+def _diversify(ranked: list[Recommendation], factor: float, limit: int, explore_share: float = 0.0) -> list[Recommendation]:
+    """Greedy: repeatedly take the best remaining video, discounting channels already picked. While fewer than
+    ``explore_share`` of the page is from channels you do not subscribe to, the next pick is the best of those (as long
+    as any are left), so a page of subscriptions' uploads cannot crowd everything else out."""
     out: list[Recommendation] = []
     taken: dict[str | None, int] = defaultdict(int)
     pool = list(ranked)
+    explored = 0
     while pool and len(out) < limit:
         def adjusted(rec: Recommendation) -> float:
             return rec.score * factor ** taken[rec.video["channel_id"]] if rec.score > 0 else rec.score
-        i = max(range(len(pool)), key=lambda j: (adjusted(pool[j]), -j))      # ties keep the earlier (better-ordered) one
+        want_explore = explored < math.ceil(explore_share * (len(out) + 1)) and any(r.explore for r in pool)
+        candidates = [j for j in range(len(pool)) if pool[j].explore] if want_explore else list(range(len(pool)))
+        i = max(candidates, key=lambda j: (adjusted(pool[j]), -j))      # ties keep the earlier (better-ordered) one
         best = pool.pop(i)
         k = taken[best.video["channel_id"]]
         if k and best.score > 0:
@@ -287,5 +318,6 @@ def _diversify(ranked: list[Recommendation], factor: float, limit: int) -> list[
                                        -lost))
             best.score = adjusted(best)
         taken[best.video["channel_id"]] += 1
+        explored += best.explore
         out.append(best)
     return out

@@ -207,3 +207,57 @@ def test_a_like_counts_for_as_long_as_it_stays_and_an_undated_one_counts_as_old(
     on_list(conn, "liked", "oldlike0000b", added_at=0)          # a Takeout like with no date
     i = channel_interest(conn, NOW, 180)
     assert i[A] == 1.0 and 0 < i[B] < 0.1
+
+
+# ---- not only your subscriptions ---------------------------------------------------------------------
+
+def test_other_videos_from_a_channel_you_watch_but_do_not_subscribe_to_are_candidates(conn):
+    for i in range(3):                                           # you have watched Gamma (not subscribed) a fair bit
+        video(conn, f"seen{i:07d}c", C, age_days=300 + i, from_import=1)
+        event(conn, "import_watch", f"seen{i:07d}c")
+    video(conn, "gammanew000", C, age_days=10)                    # a video this server knows about, unwatched
+    r = recommend(conn, now=NOW)
+    assert [x.video["id"] for x in r] == ["gammanew000"]
+    assert any(x.label.startswith("You have watched") or x.label.startswith("You watch") for x in r[0].reasons)
+    video(conn, "gammaold000", C, age_days=500)                   # older than the channel window: not offered
+    assert "gammaold000" not in ids(conn)
+
+
+def test_a_channel_you_never_watched_and_do_not_subscribe_to_is_still_not_a_candidate(conn):
+    video(conn, "stranger0001", B, age_days=1)
+    assert ids(conn) == []
+
+
+def test_the_page_gives_other_channels_a_share_even_when_subscriptions_score_higher(conn):
+    sub(conn, A)
+    for i in range(10):
+        video(conn, f"sub{i:08d}a", A, age_days=0.1 + i * 0.01)            # ten fresh uploads from a subscription
+    for i in range(20):                                                     # you mostly watch Alpha ...
+        video(conn, f"hist{i:07d}a", A, age_days=300 + i, from_import=1)
+        event(conn, "import_watch", f"hist{i:07d}a")
+    video(conn, "seen00000c1", C, age_days=300, from_import=1)             # ... and Gamma once
+    event(conn, "import_watch", "seen00000c1")
+    video(conn, "gammanew000", C, age_days=40)
+    video(conn, "gammanew001", C, age_days=41)
+    w = Weights(repeat_factor=1.0)
+    order = [x.video["id"] for x in recommend(conn, now=NOW, weights=w, limit=6)]
+    assert order.count("gammanew000") + order.count("gammanew001") >= 2          # 40% of 6 rounds up to 3, only 2 exist
+    none = [x.video["id"] for x in recommend(conn, now=NOW, weights=Weights(repeat_factor=1.0, explore_share=0.0), limit=6)]
+    assert not ({"gammanew000", "gammanew001"} & set(none))                      # without the share they are crowded out
+
+
+def test_a_video_you_started_and_stopped_is_only_a_weak_reason_to_show_it_again(conn):
+    sub(conn, A)
+    video(conn, "fresh000000a", A, age_days=0.5); video(conn, "stopped0000a", A, age_days=0.5)
+    conn.execute("INSERT INTO video_progress(video_id,position,duration,completed,updated_at) VALUES ('stopped0000a',100,1000,0,1)")
+    conn.execute("INSERT INTO watch_sessions(id,video_id,started_at,intervals,max_position,duration) VALUES ('s','stopped0000a',?,'[[0,100]]',100,1000)",
+                 (NOW - DAY,))
+    r = {x.video["id"]: x for x in recommend(conn, now=NOW)}
+    resume = [p.points for p in r["stopped0000a"].reasons if p.label.startswith("You started")]
+    assert resume and resume[0] <= 0.3 + 1e-9
+    assert Weights().resume < Weights().subscribed + 0.1 and Weights().resume < 0.5
+
+
+def test_the_default_weights_lean_less_on_subscriptions_and_more_on_related_and_taste():
+    w = Weights()
+    assert w.subscribed < 0.5 and w.channel_affinity <= 2.0 and w.related > w.subscribed and w.taste_similarity > w.channel_affinity
