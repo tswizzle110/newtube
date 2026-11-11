@@ -462,11 +462,11 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('the video page has Like and Watch later, both off to start with',
     (await p.locator('.byline button[aria-pressed="false"]').count()) === 2);
   await p.click('.byline button:has-text("Like")');
-  await p.waitForSelector('.byline button[aria-pressed="true"]:has-text("Liked")');
+  await p.waitForSelector('.byline .actions button[aria-pressed="true"]:has-text("Liked")');
   await p.click('.byline button:has-text("Watch later")');
-  await p.waitForSelector('.byline button[aria-pressed="true"]:has-text("In Watch later")');
+  await p.waitForSelector('.byline .actions button[aria-pressed="true"]:has-text("In Watch later")');
   await p.reload(); await p.waitForSelector('.byline .actions');
-  check('...and they stay on after a reload', (await p.locator('.byline button[aria-pressed="true"]').count()) === 2);
+  check('...and they stay on after a reload', (await p.locator('.byline .actions button[aria-pressed="true"]').count()) === 2);
   check('the sidebar Library shows the lists with their counts',
     (await p.locator('aside.side a:has-text("Liked videos") .count').innerText()) === '1' &&
     (await p.locator('aside.side a:has-text("Watch later") .count').innerText()) === '1');
@@ -481,10 +481,10 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('removing takes it off the list, the count and the video page',
     (await p.locator('p:has-text("Nothing here yet")').count()) === 1 && (await p.locator('aside.side a:has-text("Liked videos") .count').count()) === 0);
   await p.goto(BASE + '/watch?v=e2eMUXED001'); await p.waitForSelector('.byline .actions');
-  check('...the video page agrees', (await p.locator('.byline button[aria-pressed="true"]').count()) === 1);
+  check('...the video page agrees', (await p.locator('.byline .actions button[aria-pressed="true"]').count()) === 1);
   await p.click('.byline button:has-text("In Watch later")');
   await p.waitForSelector('.byline button[aria-pressed="false"]:has-text("Watch later")');
-  check('toggling Watch later off works from the video page too', (await p.locator('.byline button[aria-pressed="true"]').count()) === 0);
+  check('toggling Watch later off works from the video page too', (await p.locator('.byline .actions button[aria-pressed="true"]').count()) === 0);
   await p.goto(BASE + '/list/nope'); await p.waitForSelector('.error');
   check('an unknown list says so instead of breaking', (await p.locator('.error').innerText()).includes('no such list'));
 
@@ -513,15 +513,15 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.click('a:has-text("Play all")'); await p.waitForSelector('.plist');
   check('Play all starts with the first video of the new order', new URL(p.url()).searchParams.get('v') === order2[0] && p.url().includes('mylist='));
   await p.goto(BASE + '/list/' + (await p.evaluate(() => 0).then(() => '3'))); await p.waitForSelector('.page h1');
-  await p.click('button:has-text("Rename")'); await p.fill('input[aria-label="Playlist name"]', 'E2E renamed'); await p.click('.rename button:has-text("Save")');
+  await p.click('.page-head [aria-label="Playlist actions"]'); await p.click('button[role=menuitem]:has-text("Rename")'); await p.fill('input[aria-label="Playlist name"]', 'E2E renamed'); await p.click('.rename button:has-text("Save")');
   await p.waitForFunction(() => document.querySelector('.page h1')?.innerText === 'E2E renamed');
   check('Rename changes the title and the sidebar', (await p.locator('aside.side a:has-text("E2E renamed")').count()) === 1);
   p.once('dialog', (d) => d.accept());
-  await p.click('button:has-text("Delete playlist")');
+  await p.click('.page-head [aria-label="Playlist actions"]'); await p.click('button[role=menuitem]:has-text("Delete playlist")');
   await p.waitForFunction(() => location.pathname === '/');
   check('Delete playlist removes it from the sidebar and returns home', (await p.locator('aside.side a:has-text("E2E renamed")').count()) === 0);
   await p.goto(BASE + '/list/liked'); await p.waitForSelector('.page h1');
-  check('Liked videos cannot be renamed or deleted', (await p.locator('button:has-text("Rename")').count()) === 0 && (await p.locator('button:has-text("Delete playlist")').count()) === 0);
+  check('Liked videos cannot be renamed or deleted (no playlist menu)', (await p.locator('[aria-label="Playlist actions"]').count()) === 0);
 
   // ---- History says what actually happened: finished, stopped part-way, or only "opened" (imported)
   const beat = (id, pos, dur, ivs) => ctx.request.post(BASE + '/api/events', { data: { watch: [{ session_id: 's' + id, video_id: id, source: 'direct', position: pos, duration: dur, intervals: ivs, ended: true }] } });
