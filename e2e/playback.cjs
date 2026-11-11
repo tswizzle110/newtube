@@ -338,7 +338,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.waitForSelector('.head');
   check('clicking a channel opens its page, highlighted in the list', p.url().includes('/channel/UC') && (await p.locator('ul.subs a.active').count()) === 1);
   const titles = async () => (await p.locator('.grid .card .title').allInnerTexts()).join(',');
-  check('default order is newest first', (await titles()) === 'Upload A,Upload B,Upload C' && (await p.locator('.sorts a.on').innerText()) === 'Newest');
+  check('default order is newest first', (await titles()) === 'Upload A,Upload B,Upload C' && (await p.locator('.sorts a.active').innerText()) === 'Newest');
   const allTitles = async () => await p.locator('.grid .card .title').allInnerTexts();
   const cards = () => p.locator('.grid .card').count();
   const toBottom = async (n) => {            // scroll down until n videos are loaded (the page loads more by itself)
@@ -362,7 +362,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await toBottom(130);
   const oldest = await allTitles();
   check('Oldest goes all the way back to the very first uploads', oldest.length === 130 && oldest.slice(-3).join(',') === 'Upload C,Upload B,Upload A' && new Set(oldest).size === 130);
-  await p.reload(); await p.waitForSelector('.sorts a.on:has-text("Oldest")');
+  await p.reload(); await p.waitForSelector('.sorts a.active:has-text("Oldest")');
   await p.waitForFunction(() => document.querySelector('.grid .card .title')?.innerText === 'Filler 126', null, { timeout: 8000 });
   check('a reload keeps the chosen sort (and the remembered list)', (await p.locator('.scan').count()) === 0);
   await p.click('.small button:has-text("Rescan")');
