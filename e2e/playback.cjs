@@ -662,14 +662,14 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('offline: a banner says so while the page waits', /offline/i.test(await p.locator('.netbar').innerText()) && (await p.locator('.page .error').count()) === 0);
   await p.waitForTimeout(1500);
   await ctx.setOffline(false);
-  await p.waitForFunction(() => !document.querySelector('.netbar') && document.querySelector('.page h1')?.innerText === 'Watch history' && !document.querySelector('.page .error') && !document.body.innerText.includes('Loading'), null, { timeout: 20000 }).catch(() => {});
-  check('offline: the page loads by itself when the connection returns, with no error shown', (await p.locator('.netbar').count()) === 0 && (await p.locator('.page .error').count()) === 0 && (await p.locator('.page h1').innerText()) === 'Watch history');
+  await p.waitForFunction(() => !document.querySelector('.netbar') && document.querySelector('.page h1')?.innerText === 'History' && !document.querySelector('.page .error') && !document.body.innerText.includes('Loading'), null, { timeout: 20000 }).catch(() => {});
+  check('offline: the page loads by itself when the connection returns, with no error shown', (await p.locator('.netbar').count()) === 0 && (await p.locator('.page .error').count()) === 0 && (await p.locator('.page h1').innerText()) === 'History');
   // a server hiccup (restart): two 503s, then fine. The page should just load.
   let hiccups = 0;
   await p.route('**/api/history?*', async (route) => { if (hiccups < 2) { hiccups++; await route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"restarting"}' }); } else await route.continue(); });
   await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
   await p.click('aside.side a:has-text("History")');
-  await p.waitForFunction(() => document.querySelector('.page h1')?.innerText === 'Watch history' && !document.body.innerText.includes('Loading') && (document.querySelector('.grid .card') || document.body.innerText.includes('Nothing in your history')), null, { timeout: 25000 });
+  await p.waitForFunction(() => document.querySelector('.page h1')?.innerText === 'History' && !document.body.innerText.includes('Loading') && (document.querySelector('.grid .card') || document.body.innerText.includes('Nothing in your history')), null, { timeout: 25000 });
   check('a server hiccup (two 503s) is retried and the page loads without an error', hiccups === 2 && (await p.locator('.page .error').count()) === 0, String(hiccups));
   await p.unroute('**/api/history?*');
   // a longer outage: the page gives up with a clear message, and recovers by itself once the server answers again
