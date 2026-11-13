@@ -12,7 +12,7 @@ from newtube.services import related as rel
 from newtube.services.related import RelatedService
 
 NOW = 1_800_000_000
-A, B = "UC" + "a" * 22, "UC" + "b" * 22
+A, B, C = "UC" + "a" * 22, "UC" + "b" * 22, "UC" + "c" * 22
 V1, V2, V3, V4 = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"
 
 
@@ -281,10 +281,10 @@ def title_row(conn, vid, title):
 def test_an_empty_mix_falls_back_to_searching_for_the_title(conn):
     title_row(conn, V1, "How sourdough works")
     ex = Fake({V1: []})
-    ex.search_results = [vs(V1, "How sourdough works"), vs(V2, "Sourdough starter guide"), vs(V3, "Bread science")]
+    ex.search_results = [vs(V1, "How sourdough works"), vs(V2, "Sourdough starter guide"), vs(V3, "Football goals of the season")]
     svc = RelatedService(conn, ex)
     cards, status = run(svc.lookup(V1))
-    assert status == "ok" and [c["id"] for c in cards] == [V2, V3]                  # (never the video itself)
+    assert status == "ok" and [c["id"] for c in cards] == [V2]                      # (never the video itself, nor another genre)
     assert ex.searches == [("How sourdough works", "video", False)]
 
 
@@ -316,9 +316,9 @@ def test_a_working_mix_resets_the_miss_count(conn):
 
 def test_a_mix_read_as_a_single_video_is_detected_and_not_asked_again_for_a_week(conn):
     from newtube.extract.base import RelatedUnsupported
-    title_row(conn, V1, "one"); title_row(conn, V2, "two")
+    title_row(conn, V1, "sourdough one"); title_row(conn, V2, "sourdough two")
     ex = Fake(fail=RelatedUnsupported("one video"))
-    ex.search_results = [vs(V3, "found by title")]
+    ex.search_results = [vs(V3, "found by title: sourdough")]
     svc = RelatedService(conn, ex)
     assert [c["id"] for c in run(svc.lookup(V1))[0]] == [V3]            # this very video is still served, by title
     run(svc.lookup(V2))
@@ -341,3 +341,86 @@ def test_ytdlp_reading_the_mix_address_as_a_video_is_reported_as_unsupported():
     ex.raw_related = raw.__get__(ex)
     with pytest.raises(RelatedUnsupported):
         asyncio.run(ex.related(V1))
+
+
+# ---- only results about the same subject ---------------------------------------------------------------
+
+def sourdough(conn, tags='["sourdough","bread","baking"]'):
+    conn.execute("INSERT OR IGNORE INTO channels(id,title,created_at) VALUES (?,?,1)", (B, "Beta"))
+    conn.execute("INSERT INTO videos(id,channel_id,title,tags,first_seen_at) VALUES (?,?,?,?,1)",
+                 (V1, B, "Why sourdough starters fail (and how to fix it)", tags))
+
+
+RESULTS = [("same topic", "Sourdough starter guide for beginners"), ("adjacent", "No-knead bread recipe, crusty loaf at home"),
+           ("same words, other genre", "Why Python starters fail: how to fix your build"), ("unrelated", "Minecraft survival episode 14"),
+           ("generic how-to", "How to fix it: ten tips and why they fail")]
+
+
+def search_with(conn, results=RESULTS, channel=A, **kw):
+    ex = Fake({V1: []})
+    ex.search_results = [VideoSummary(f"r{i:010d}", title, channel, "Some Channel", 100, 5) for i, (_k, title) in enumerate(results)]
+    conn.execute("DELETE FROM related_fetched"); conn.execute("DELETE FROM related_videos")       # (each call asks afresh)
+    svc = RelatedService(conn, ex, type("S", (), {"related_strictness": kw.get("level", "normal"), "embedding_model": ""})())
+    cards, status = run(svc.lookup(V1))
+    return [c["title"] for c in cards], status, svc
+
+
+def test_results_about_other_genres_are_dropped(conn):
+    sourdough(conn)
+    titles, status, _svc = search_with(conn)
+    assert "Sourdough starter guide for beginners" in titles and "No-knead bread recipe, crusty loaf at home" in titles
+    assert not any(w in " ".join(titles) for w in ("Python", "Minecraft", "How to fix it"))
+
+
+def test_strictness_changes_how_many_get_through(conn):
+    sourdough(conn)
+    loose, _s, _v = search_with(conn, level="loose")
+    strict, _s, _v = search_with(conn, level="strict")
+    assert set(strict) <= set(loose) and "Sourdough starter guide for beginners" in strict
+    assert "No-knead bread recipe, crusty loaf at home" not in strict               # shares only one defining word
+
+
+def test_a_channel_you_know_is_judged_more_leniently(conn):
+    sourdough(conn)
+    conn.execute("INSERT INTO channels(id,title,created_at) VALUES (?,?,1)", (C, "Known"))
+    conn.execute("INSERT INTO subscriptions VALUES (?,1)", (C,))
+    ex = Fake({V1: []})
+    ex.search_results = [VideoSummary("known000001", "Bread prices in 2024", C, "Known", 100, 5),
+                         VideoSummary("stranger0001", "Bread prices in 2024", A, "Stranger", 100, 5)]
+    svc = RelatedService(conn, ex, type("S", (), {"related_strictness": "strict", "embedding_model": ""})())
+    got = [c["id"] for c in run(svc.lookup(V1))[0]]
+    assert got == ["known000001"]                  # the subscribed channel's video passes one level looser; the stranger's does not
+
+
+def test_the_videos_own_channel_always_counts(conn):
+    sourdough(conn)
+    ex = Fake({V1: []})
+    ex.search_results = [VideoSummary("own00000001", "Q&A livestream replay", B, "Beta", 100, 5)]
+    svc = RelatedService(conn, ex, type("S", (), {"related_strictness": "strict", "embedding_model": ""})())
+    assert [c["id"] for c in run(svc.lookup(V1))[0]] == ["own00000001"]
+
+
+def test_a_real_language_model_adds_a_similarity_floor(conn):
+    sourdough(conn)
+    ex = Fake({V1: []})
+    ex.search_results = [VideoSummary("close0000001", "Sourdough starter guide", A, "X", 100, 5),
+                         VideoSummary("far000000001", "Sourdough bread merchandise unboxing", A, "X", 100, 5)]
+
+    class Model:                                   # vectors: the video and 'close' point the same way, 'far' is at right angles
+        name, dim = "fake", 2
+        def embed(self, texts):
+            return [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]][:len(texts)]
+
+    plain = RelatedService(conn, ex, type("S", (), {"related_strictness": "normal", "embedding_model": ""})())
+    assert {c["id"] for c in run(plain.lookup(V1))[0]} == {"close0000001", "far000000001"}      # no model: words only
+    conn.execute("DELETE FROM related_fetched"); conn.execute("DELETE FROM related_videos")
+    svc = RelatedService(conn, ex, type("S", (), {"related_strictness": "normal", "embedding_model": "x"})())
+    svc._embedder = Model()
+    assert [c["id"] for c in run(svc.lookup(V1))[0]] == ["close0000001"]                         # the model drops the far one
+
+
+def test_a_title_of_nothing_but_filler_cannot_be_judged_so_nothing_unknown_gets_through(conn):
+    conn.execute("INSERT INTO videos(id,title,first_seen_at) VALUES (?,?,1)", (V1, "How to: top 10 tips"))
+    ex = Fake({V1: []})
+    ex.search_results = [vs(V2, "Anything at all")]
+    assert run(RelatedService(conn, ex).lookup(V1))[0] == []

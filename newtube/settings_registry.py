@@ -88,6 +88,11 @@ FIELDS: tuple[Field, ...] = (
           "Where `newtube backup` writes. Empty means the backups folder inside the data folder.", "text", "storage",
           placeholder="/mnt/other-disk/newtube-backups"),
 
+    Field("related_strictness", "How closely Up next must match the video",
+          "When YouTube's own list is not available, Up next searches for the video's title and keeps only results about the "
+          "same subject. Strict shows fewer, closer ones; loose shows more, looser ones. A result from a channel you watch is "
+          "judged one step more leniently. Applies to videos you open from now on.",
+          "choice", "recs", choices=("loose", "normal", "strict")),
     Field("embedding_model", "Language model for \"similar to what you watch\"",
           "Empty uses the built-in simple method. Otherwise the name of a model folder under data/models/ (see the docs).",
           "text", "recs", live=False, placeholder="paraphrase-multilingual-MiniLM-L12-v2"),

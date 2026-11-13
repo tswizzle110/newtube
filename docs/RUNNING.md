@@ -283,6 +283,17 @@ On current yt-dlp versions the Mix address is read as one ordinary video, not a 
 newtube notices this (one wasted lookup), remembers it for a week (also across restarts), and uses the title search
 described next. After a yt-dlp update it tries a Mix again once the week is up.
 
+**Only the same subject.** A title search returns anything that shares words with the title, so newtube keeps only
+results about the same subject (`newtube/services/relevance.py`). It takes the words that define the video (its title and
+tags, minus filler such as "how", "why", "best", "tutorial", numbers; tags count extra, because that is where creators
+name the genre) and requires a result to share enough of them. A result from a channel you subscribe to or watch is judged
+one step more leniently, and one from the video's own channel always counts. **Settings → Recommendations → "How closely
+Up next must match the video"** picks *loose*, *normal* (default) or *strict*; it applies to videos you open from then on.
+With a real language model configured (see Embeddings) it also has to be close in meaning, which separates genres much
+better than words can: the built-in word-hashing method cannot (it sees "starters" in a sourdough video and a Python one
+as the same word), so it is not used for this. If a video has too few matches, Up next falls back to the channel's other
+videos and similar titles from your library, and shows fewer rather than unrelated ones.
+
 If YouTube's Mix comes back empty, Up next **searches YouTube for the video's title** instead (one ordinary search request,
 like using the search box) and shows those results. After three empty Mixes in a row it stops asking for Mixes for six
 hours and searches directly, so a Mix that has stopped working costs one request per video, not two.

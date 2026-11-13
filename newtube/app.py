@@ -54,7 +54,7 @@ class Context:
 
     def __post_init__(self) -> None:
         if self.related is None:
-            self.related = RelatedService(self.conn, self.extractor)
+            self.related = RelatedService(self.conn, self.extractor, self.settings)
         if self.lists is None:
             self.lists = ListService(self.conn, self.extractor)
         if self.comments is None:

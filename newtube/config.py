@@ -43,6 +43,8 @@ class Settings:
     # Related-video lists fetched in the background per rolling 24 h, to find videos from channels you do not
     # subscribe to for the recommender (0 = never; opening a video still fetches its own list).
     related_daily_cap: int = 10
+    # How closely a video in Up next must match the one you are watching: "loose", "normal" or "strict".
+    related_strictness: str = "normal"
 
     # Watch every outside connection this server makes (`newtube privacy-check --log` shows them).
     # "record" (default): note everything, block nothing. "enforce": refuse anything off the allowlist,
@@ -118,6 +120,9 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             setattr(s, name, _coerce(env[env_key], typ))
     if s.egress_mode not in ("record", "enforce", "off"):
         raise ValueError(f"egress_mode must be \"record\", \"enforce\" or \"off\", not {s.egress_mode!r}")
+    s.related_strictness = str(s.related_strictness)
+    if s.related_strictness not in ("loose", "normal", "strict"):
+        raise ValueError(f"related_strictness must be \"loose\", \"normal\" or \"strict\", not {s.related_strictness!r}")
     s.ip_version = str(s.ip_version)
     if s.ip_version not in ("auto", "4", "6"):
         raise ValueError(f"ip_version must be \"auto\", \"4\" or \"6\", not {s.ip_version!r}")

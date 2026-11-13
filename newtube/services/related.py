@@ -19,8 +19,10 @@ from ..db.queries.seen import SEEN_SQL
 from ..db.queries import settings as saved
 from ..extract.base import BotCheck, ExtractionError, Extractor, RelatedUnsupported, VideoSummary
 from ..ml import store as ml_store
+from ..ml.embedder import HashingEmbedder, load_embedder
 from ..net.ratelimit import DailyCapReached
-from ..recommend.baseline import DAY, interest_rows
+from ..recommend.baseline import DAY, channel_interest, interest_rows
+from . import relevance
 
 log = logging.getLogger("newtube.related")
 TTL = 3 * DAY
@@ -36,8 +38,9 @@ LOCAL_SIMILAR = 12         # ... then the closest by title/topic among videos th
 
 
 class RelatedService:
-    def __init__(self, conn: sqlite3.Connection, extractor: Extractor) -> None:
-        self.conn, self.extractor = conn, extractor
+    def __init__(self, conn: sqlite3.Connection, extractor: Extractor, settings=None) -> None:
+        self.conn, self.extractor, self.settings = conn, extractor, settings
+        self._embedder: Any = False                 # False: not looked for yet; None: no real model to use
         self._inflight: dict[str, asyncio.Task[int]] = {}
         self._mix_misses = 0
         self._mix_skip_until = float(saved.get(conn, MIX_SKIP_KEY, 0) or 0)       # (remembered across restarts)
@@ -165,16 +168,64 @@ class RelatedService:
         self._mix_skip_until, self._mix_misses = time.time() + seconds, 0
         saved.put(self.conn, MIX_SKIP_KEY, self._mix_skip_until)
 
+    # ---- the title search, filtered to the same subject ---------------------------------------------------
+    def strictness(self) -> str:
+        level = getattr(self.settings, "related_strictness", "normal")
+        return level if level in relevance.LEVELS else "normal"
+
+    def known_channels(self, now: int | None = None) -> set[str]:
+        """Channels you subscribe to or watch: results from them are trusted a step more."""
+        now = now if now is not None else int(time.time())
+        known = {r[0] for r in self.conn.execute("SELECT channel_id FROM subscriptions")}
+        known |= {c for c, v in channel_interest(self.conn, now, 180.0).items() if v >= 0.05}
+        return known
+
+    async def _real_embedder(self):
+        """A real language model if one is configured and loads (it can tell genres apart); otherwise None. The built-in
+        word-hashing embedder is deliberately not used for this."""
+        if self._embedder is False:
+            self._embedder = None
+            if getattr(self.settings, "embedding_model", ""):
+                try:
+                    self._embedder = await asyncio.to_thread(load_embedder, self.settings)
+                except Exception as e:                  # noqa: BLE001 - a missing model must not break Up next
+                    log.warning("related: the language model could not be loaded (%s); using word matching only", e)
+        return self._embedder
+
+    SEMANTIC_FLOOR = {"loose": 0.25, "normal": 0.35, "strict": 0.5}     # cosine to the video a real model must reach
+
     async def _by_title(self, video_id: str, background: bool) -> list[VideoSummary]:
-        """When YouTube's own Mix is not available: the results of searching for the video's title, which are
-        videos on the same subject (and often the same channel). One ordinary search request, the kind you make
-        yourself from the search box."""
-        row = self.conn.execute("SELECT title FROM videos WHERE id=?", (video_id,)).fetchone()
-        title = (row["title"] if row else "").strip()[:200]
+        """When YouTube's own Mix is not available: the results of searching for the video's title, kept only if they are
+        about the same subject (see services/relevance.py). One ordinary search request, the kind you make yourself."""
+        row = self.conn.execute("SELECT v.title, v.tags, v.category, v.channel_id, COALESCE(c.title, '') AS channel_title,"
+                                " v.description FROM videos v LEFT JOIN channels c ON c.id = v.channel_id WHERE v.id=?",
+                                (video_id,)).fetchone()
+        title = ((row["title"] if row else "") or "").strip()[:200]
         if not title:
             return []
-        hits = await self.extractor.search(title, "video", LIMIT + 5, background=background)
-        return [h for h in hits if isinstance(h, VideoSummary) and h.id != video_id][:LIMIT]
+        hits = [h for h in await self.extractor.search(title, "video", LIMIT + 15, background=background)
+                if isinstance(h, VideoSummary) and h.id != video_id]
+        topic = relevance.topic_of(row["title"], row["tags"], row["category"], relevance.corpus_for(self.conn))
+        level, known = self.strictness(), self.known_channels()
+        sims: dict[str, float] = {}
+        model = await self._real_embedder() if hits else None
+        if model:
+            texts = [ml_store.video_text(row["title"], row["channel_title"], row["category"], row["tags"], row["description"])]
+            texts += [ml_store.video_text(h.title, h.channel_title, None, None, None) for h in hits]
+            vecs = await asyncio.to_thread(model.embed, texts)
+            sims = {h.id: ml_store.dot(vecs[0], v) for h, v in zip(hits, vecs[1:])}
+        kept: list[tuple[float, int, VideoSummary]] = []
+        for i, h in enumerate(hits):
+            own = bool(h.channel_id) and h.channel_id == row["channel_id"]
+            trusted = own or h.channel_id in known
+            score = relevance.judge(topic, h.title, relevance.relax(level) if trusted else level)
+            if score is None and not own:
+                continue
+            if model and not own and sims.get(h.id, 0.0) < self.SEMANTIC_FLOOR[relevance.relax(level) if trusted else level]:
+                continue
+            kept.append((-(score or 0.0) - (0.25 if trusted else 0.0) - sims.get(h.id, 0.0) * 0.5, i, h))
+        kept.sort(key=lambda k: (k[0], k[1]))             # best match first; ties keep YouTube's own order
+        return [h for _s, _i, h in kept][:LIMIT]
 
     def store(self, video_id: str, found: list[VideoSummary], now: int | None = None) -> int:
         now = now if now is not None else int(time.time())

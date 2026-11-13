@@ -43,6 +43,7 @@ def test_host_port_and_folders_cannot_be_edited_here():
     ("backfill_daily_cap", 30, 30), ("backfill_daily_cap", "30", 30), ("backfill_daily_cap", 30.0, 30), ("backfill_daily_cap", 0, 0),
     ("min_request_interval", "2.5", 2.5), ("request_jitter", 0, 0.0),
     ("rss_poll_interval", 14400, 14400), ("ip_version", "4", "4"), ("egress_mode", "enforce", "enforce"),
+    ("related_strictness", "strict", "strict"), ("related_strictness", "loose", "loose"),
     ("outbound_proxy", " http://127.0.0.1:8888 ", "http://127.0.0.1:8888"), ("outbound_proxy", "socks5h://vpn:1080", "socks5h://vpn:1080"),
     ("outbound_proxy", "", ""), ("embedding_model", "paraphrase-multilingual-MiniLM-L12-v2", "paraphrase-multilingual-MiniLM-L12-v2"),
     ("backup_dir", " /mnt/backups ", "/mnt/backups"),
@@ -55,7 +56,7 @@ def test_good_values_are_accepted(name, raw, expected):
     ("backfill_daily_cap", -1), ("backfill_daily_cap", 99999), ("backfill_daily_cap", 1.5), ("backfill_daily_cap", ""),
     ("backfill_daily_cap", "abc"), ("backfill_daily_cap", None), ("backfill_daily_cap", True), ("backfill_daily_cap", float("nan")),
     ("backfill_daily_cap", float("inf")), ("min_request_interval", 0.01), ("request_jitter", -1), ("rss_poll_interval", 60),
-    ("ip_version", "5"), ("egress_mode", "paranoid"), ("embedding_device", "tpu"),
+    ("ip_version", "5"), ("egress_mode", "paranoid"), ("embedding_device", "tpu"), ("related_strictness", "extreme"),
     ("outbound_proxy", "ftp://x:1"), ("outbound_proxy", "just words"), ("outbound_proxy", "http://a b:1"), ("outbound_proxy", "http://"),
     ("embedding_model", "../etc"), ("embedding_model", "a/b"), ("embedding_model", ".."), ("backup_dir", "x" * 400), ("backup_dir", "a\x00b"),
 ])
