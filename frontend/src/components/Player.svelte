@@ -784,7 +784,7 @@
         {/if}
       </div>
       <div class="menuwrap">
-        <button title={chosenQuality === 'auto' && shownHeight && activeHeight && shownHeight !== activeHeight ? `Playing ${shownHeight}p, loading ${activeHeight}p next` : 'Quality'}
+        <button title="Quality"
                 onclick={() => (menu = menu === 'quality' ? null : 'quality')}>
           {chosenQuality === 'auto' ? `Auto${(shownHeight || activeHeight) ? ` ${shownHeight || activeHeight}p` : ''}` : qname(chosenQuality, qualities.find((x) => x.h === chosenQuality)?.fps)}
         </button>
