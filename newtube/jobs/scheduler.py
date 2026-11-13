@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from ..config import Settings
 from ..db.queries import cache, subscriptions as subs
 from ..db.queries.events import log_event
-from ..extract.base import ExtractionError, Extractor
+from ..extract.base import BotCheck, ExtractionError, Extractor
 from ..extract.rss import feed_url, parse_feed
 from ..net.http import OutboundClient
 from ..net.ratelimit import DailyCapReached, Lane
@@ -66,7 +66,7 @@ class Scheduler:
         self._rss_failures = 0
         self._rss_skip_until = 0.0
         self._last_purge = 0.0
-        self.related = RelatedService(conn, extractor) if extractor is not None else None
+        self.related = RelatedService(conn, extractor, settings) if extractor is not None else None
         self._embedder = None
         self._embed_off = False
         self.backfiller = (Backfiller(conn, extractor, settings.backfill_daily_cap)
@@ -132,6 +132,34 @@ class Scheduler:
                               (int(time.time()) - self.settings.rss_poll_interval + RETRY_AFTER, cid))
         return "polled"
 
+    async def picture_step(self) -> str:
+        """Find the picture of one subscribed channel that has none, within ``channel_picture_daily_cap`` a day (counted in
+        the event log, before asking, so a restart does not hand back a fresh allowance). 'pictured', 'capped', 'paused',
+        'retry' or 'idle'."""
+        cap = self.settings.channel_picture_daily_cap
+        if self.extractor is None or cap <= 0:
+            return "idle"
+        used = self.conn.execute("SELECT count(*) FROM events WHERE type='avatar_lookup' AND ts > ?",
+                                 (int(time.time()) - 86400,)).fetchone()[0]
+        if used >= cap:
+            return "capped"
+        missing = subs.channels_missing_picture(self.conn, 1)
+        if not missing:
+            return "idle"
+        cid = missing[0]
+        log_event(self.conn, "avatar_lookup", channel_id=cid)
+        try:
+            subs.upsert_channel(self.conn, await self.extractor.resolve_channel(cid, background=True))
+        except DailyCapReached:
+            return "capped"
+        except BotCheck:
+            return "paused"
+        except Exception as e:  # noqa: BLE001 - one channel must not stop the loop; it is not asked again for three days
+            log.warning("picture of %s: %s", cid, e)
+            return "retry"
+        log.info("picture of %s found", cid)
+        return "pictured"
+
     async def embed_step(self) -> str:
         """Embed a batch of videos for the similarity feature. Local work only; 'embedded' or 'idle'."""
         if self._embed_off:
@@ -173,6 +201,8 @@ class Scheduler:
             result = await self.backfiller.step()
         if result in ("idle", "capped", "paused") and await self.embed_step() == "embedded":
             result = "embedded"            # (the backfill having nothing to do leaves time for this)
+        if result in ("idle", "capped", "paused") and await self.picture_step() == "pictured":
+            result = "pictured"            # (local and cheap, and you can see it: so before the related lists)
         if result in ("idle", "capped", "paused") and self.related is not None:
             if await self.related.expand_step(self.settings.related_daily_cap) == "fetched":
                 result = "related"         # ...and so does this, within its own budget
@@ -187,7 +217,7 @@ class Scheduler:
         s = self.settings
         return {"polled": 5.0, "embedded": 3.0, "error": 60.0,
                 "fetched": spread(s.backfill_daily_cap), "gone": spread(s.backfill_daily_cap), "retry": spread(s.backfill_daily_cap),
-                "related": spread(s.related_daily_cap)}.get(result, 300.0)
+                "related": spread(s.related_daily_cap), "pictured": spread(s.channel_picture_daily_cap)}.get(result, 300.0)
 
     async def run(self) -> None:
         while True:

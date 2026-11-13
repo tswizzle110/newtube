@@ -25,6 +25,9 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   let s = await state(p);
   check('dash: plays and advances', s.t > 1.5 && !s.paused, JSON.stringify(s));
   check('dash: decoded 640px wide (auto picks 360p)', s.w === 640);
+  const autoLabel = await p.locator('.player button:has-text("Auto")').first().innerText();
+  const onScreen = await p.evaluate(() => document.querySelector('video').videoHeight);
+  check('the Auto label names the quality on screen, not the one being fetched', autoLabel.trim() === `Auto ${onScreen}p`, `${autoLabel.trim()} vs ${onScreen}p`);
   check('chapters listed', (await p.locator('.chapters li').count()) === 3);
   check('seek bar has 3 chapter segments', (await p.locator('.bar .seg').count()) === 3);
   await p.screenshot({ path: require('os').tmpdir() + '/newtube-watch.png' });

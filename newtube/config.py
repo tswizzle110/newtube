@@ -43,6 +43,9 @@ class Settings:
     # Related-video lists fetched in the background per rolling 24 h, to find videos from channels you do not
     # subscribe to for the recommender (0 = never; opening a video still fetches its own list).
     related_daily_cap: int = 10
+    # Channel pictures (the round pictures in the sidebar) looked up per rolling 24 h for subscribed channels that have none
+    # (0 = never). One ordinary channel lookup each, spread over the day. See jobs/scheduler.py.
+    channel_picture_daily_cap: int = 40
     # How closely a video in Up next must match the one you are watching: "loose", "normal" or "strict".
     related_strictness: str = "normal"
 

@@ -11,6 +11,7 @@
   const is = (p) => router.pathname === p
   const activeList = $derived(router.pathname.startsWith('/list/') ? router.pathname.split('/')[2] : null)
   let adding = $state(false)
+  let broken = $state({})          // channels whose picture would not load: show their letter instead of an empty circle
   let newName = $state('')
   let addError = $state('')
   async function newPlaylist(e) {
@@ -73,8 +74,8 @@
         {#each subs.list as c (c.id)}
           <li>
             <a href={`/channel/${c.id}`} class:active={activeChannel === c.id} title={c.title}>
-              {#if c.has_avatar}
-                <img src={`/api/avatar/${c.id}`} alt="" loading="lazy" />
+              {#if c.has_avatar && !broken[c.id]}
+                <img src={`/api/avatar/${c.id}`} alt="" loading="lazy" onerror={() => (broken[c.id] = true)} />
               {:else}
                 <span class="ph">{c.title[0]}</span>
               {/if}

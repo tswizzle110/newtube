@@ -39,6 +39,17 @@ def unsubscribe(conn: sqlite3.Connection, channel_id: str) -> bool:
     return bool(cur.rowcount)
 
 
+def channels_missing_picture(conn: sqlite3.Connection, limit: int = 1, retry_after: int = 3 * 86400,
+                             now: int | None = None) -> list[str]:
+    """Subscribed channels with no picture, newest subscription first, skipping any looked up within ``retry_after`` seconds
+    (a channel that has no picture to find must not be asked about again and again)."""
+    now = now if now is not None else int(time.time())
+    return [r[0] for r in conn.execute(
+        "SELECT s.channel_id FROM subscriptions s JOIN channels c ON c.id = s.channel_id WHERE c.avatar_url IS NULL"
+        " AND NOT EXISTS (SELECT 1 FROM events e WHERE e.type='avatar_lookup' AND e.channel_id = s.channel_id AND e.ts > ?)"
+        " ORDER BY s.subscribed_at DESC LIMIT ?", (now - retry_after, limit))]
+
+
 def list_subscriptions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT c.*, s.subscribed_at FROM subscriptions s JOIN channels c ON c.id = s.channel_id"

@@ -68,6 +68,10 @@ async def avatar(channel_id: str, ctx: Context = Depends(get_ctx)) -> Response:
         body, ctype = hit
     else:
         r = await ctx.http.get_media(absolute_url(row["avatar_url"]))
+        if r.status_code in (403, 404, 410):
+            # The stored address has gone stale. Forget it, so the background job finds the channel's current picture
+            # (a connection hiccup, which is not an answer, does not forget anything).
+            ctx.conn.execute("UPDATE channels SET avatar_url=NULL WHERE id=?", (channel_id,))
         if r.status_code != 200:
             raise HTTPException(404, "no avatar")
         body, ctype = r.content, r.headers.get("content-type", "image/jpeg")

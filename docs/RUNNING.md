@@ -177,6 +177,7 @@ obeys the bot gate, so a future change cannot quietly bypass it):
 | Channel-page lookup, only when a feed is broken | **heavy** | 6 an hour (counted in the database, failures included); a broken-feed channel is revisited every 12 h |
 | Backfill of imported videos | **heavy** | `backfill_daily_cap` a day, spread over the day; counted in the database |
 | Related lists for recommendations | **heavy** | `related_daily_cap` a day, spread over the day; counted in the database |
+| Channel pictures (sidebar) | background | one channel lookup per subscription that has no picture, within `channel_picture_daily_cap` a day (default 40, spread over the day: about one every 36 minutes; 0 turns it off); each channel is tried once, then not again for 3 days |
 | Opening a video (info, Up next, comments, search, channel page) | **heavy** | only what you click; results are cached (video 4 h, related 3 days, search 1 h, channel 15 min); a failed lookup is remembered for 45 s so retries cost nothing |
 | Thumbnails and channel pictures | image server | fetched once, then kept in the disk cache |
 | Video data | video servers | only while you watch |
@@ -273,6 +274,14 @@ They are passed to YouTube the way its own site does (the `sp` parameter), they 
 filtered search can be bookmarked), and your search log records which ones you used. They apply to video searches
 only. `uv run newtube selftest` has a **search_filters** check that asks for "over 20 minutes" and confirms the
 results really are long, so a change on YouTube's side would show up there.
+
+## Channel pictures
+
+The round pictures in the sidebar come from the channel's own page. A subscription added without them (an import, or an older
+version) gets its picture filled in slowly in the background, one lookup at a time (`channel_picture_daily_cap`, on the
+Settings page; see the request table in the bot-check section). Until then, and if a picture ever fails to load, the
+channel's letter is shown. A stored picture address that YouTube no longer serves (403, 404 or 410) is forgotten and looked
+up again the same way.
 
 ## Up next (related videos)
 

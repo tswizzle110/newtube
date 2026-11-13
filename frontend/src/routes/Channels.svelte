@@ -8,6 +8,7 @@
   let busy = $state(false)
   let error = $state('')
   let note = $state('')
+  let broken = $state({})          // channels whose picture would not load: show their letter instead
 
   const load = async () => { channels = await api.get('/api/subscriptions'); loadSubs() }   // and the sidebar's copy
   onMount(load)
@@ -56,8 +57,8 @@
     {#each channels as c (c.id)}
       <li>
         <a class="who" href={`/channel/${c.id}`}>
-          {#if c.has_avatar}
-            <img src={`/api/avatar/${c.id}`} alt="" />
+          {#if c.has_avatar && !broken[c.id]}
+            <img src={`/api/avatar/${c.id}`} alt="" onerror={() => (broken[c.id] = true)} />
           {:else}
             <span class="ph">{c.title[0]}</span>
           {/if}

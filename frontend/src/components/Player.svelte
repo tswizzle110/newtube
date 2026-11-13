@@ -33,7 +33,8 @@
   let error = $state('')
   let qualities = $state([]) // [{ h: height, fps }], high to low
   let chosenQuality = $state('auto')
-  let activeHeight = $state(0)
+  let activeHeight = $state(0)   // the quality Shaka is fetching NEXT (it buffers well ahead of what you see)
+  let shownHeight = $state(0)    // the quality of the picture on screen right now (what the label should say)
   let capLang = $state(null)
   let audioLang = $state(initialAudio()) // 'original' or a language code like 'es-US'
   let hover = $state(null) // { frac, time }
@@ -388,6 +389,7 @@
     for (const x of tracks) if (x.height) fps.set(x.height, Math.max(fps.get(x.height) ?? 0, x.frameRate ?? 0))
     qualities = [...fps].map(([h, f]) => ({ h, fps: f })).sort((a, b) => b.h - a.h)
     activeHeight = tracks.find((x) => x.active)?.height ?? 0
+    shownHeight = el?.videoHeight || shownHeight
   }
 
   function setQuality(q) {
@@ -630,7 +632,7 @@
     bind:paused bind:volume bind:muted
     ontimeupdate={onTime} onprogress={onTime}
     ondurationchange={() => Number.isFinite(el.duration) && (dur = el.duration)}
-    onpause={onPause} onplay={onPlay}
+    onpause={onPause} onplay={onPlay} onresize={() => (shownHeight = el.videoHeight || shownHeight)}
     onplaying={wake}                                  /* start the hide timer: a touch screen has no mouse movement to do it */
     onended={() => onended?.()}
     onpointerdown={fingerDown} onclick={videoClick} ondblclick={() => lastPointer !== 'touch' && toggleFullscreen()}
@@ -782,8 +784,9 @@
         {/if}
       </div>
       <div class="menuwrap">
-        <button title="Quality" onclick={() => (menu = menu === 'quality' ? null : 'quality')}>
-          {chosenQuality === 'auto' ? `Auto${activeHeight ? ` ${activeHeight}p` : ''}` : qname(chosenQuality, qualities.find((x) => x.h === chosenQuality)?.fps)}
+        <button title={chosenQuality === 'auto' && shownHeight && activeHeight && shownHeight !== activeHeight ? `Playing ${shownHeight}p, loading ${activeHeight}p next` : 'Quality'}
+                onclick={() => (menu = menu === 'quality' ? null : 'quality')}>
+          {chosenQuality === 'auto' ? `Auto${(shownHeight || activeHeight) ? ` ${shownHeight || activeHeight}p` : ''}` : qname(chosenQuality, qualities.find((x) => x.h === chosenQuality)?.fps)}
         </button>
         {#if menu === 'quality'}
           <ul class="menu">

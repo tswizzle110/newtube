@@ -55,6 +55,9 @@ FIELDS: tuple[Field, ...] = (
     Field("related_daily_cap", "Related-video lookups per day",
           "Finds videos related to ones you like, for recommendations from channels you do not subscribe to. 0 turns it off.",
           "int", "traffic", minimum=0, maximum=500),
+    Field("channel_picture_daily_cap", "Channel pictures looked up per day",
+          "Fills in the round pictures in the sidebar for subscriptions that have none, one lookup at a time, spread over the day "
+          "(40 a day is one about every 36 minutes). 0 turns it off.", "int", "traffic", minimum=0, maximum=500),
     Field("rss_poll_interval", "Check each channel for new videos every",
           "How often each subscribed channel's feed is checked. Longer is quieter; new uploads show up later.",
           "int", "traffic", minimum=900, maximum=172_800, scale=3600, unit="hours"),
@@ -104,10 +107,10 @@ BY_NAME = {f.name: f for f in FIELDS}
 # One-click starting points. They only fill the form: nothing changes until you press Save.
 PRESETS: dict[str, dict[str, Any]] = {
     "quiet": {"label": "Quiet profile", "help": "What one person's server can sustain without drawing attention.",
-              "values": {"backfill_daily_cap": 30, "related_daily_cap": 10, "rss_poll_interval": 14400,
+              "values": {"backfill_daily_cap": 30, "related_daily_cap": 10, "channel_picture_daily_cap": 20, "rss_poll_interval": 14400,
                          "min_request_interval": 2.0, "request_jitter": 2.0}},
     "paused": {"label": "Pause background lookups", "help": "Use while YouTube is asking for a bot check.",
-               "values": {"backfill_daily_cap": 0, "related_daily_cap": 0}},
+               "values": {"backfill_daily_cap": 0, "related_daily_cap": 0, "channel_picture_daily_cap": 0}},
     "defaults": {"label": "Built-in defaults", "help": "The values newtube ships with.", "values": None},
 }
 
