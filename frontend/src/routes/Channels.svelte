@@ -8,6 +8,9 @@
   let busy = $state(false)
   let error = $state('')
   let note = $state('')
+  let fetching = $state(false)
+  let pictureNote = $state('')
+  const missing = $derived(channels.filter((c) => !c.has_avatar).length)       // subscriptions that show a letter instead of a picture
   let broken = $state({})          // channels whose picture would not load: show their letter instead
 
   const load = async () => { channels = await api.get('/api/subscriptions'); loadSubs() }   // and the sidebar's copy
@@ -23,6 +26,18 @@
       ref = ''
       await load()
     } catch (err) { error = err.message } finally { busy = false }
+  }
+
+  // Find the missing pictures now, a small batch at a time (the background job does the same, slowly).
+  async function fetchPictures() {
+    fetching = true; pictureNote = ''; error = ''
+    try {
+      const r = await api.post('/api/subscriptions/pictures?limit=15')
+      pictureNote = r.stopped === 'bot'
+        ? `YouTube asked for a bot check, so newtube stopped. Found ${r.found}. Try again in a while.`
+        : `Found ${r.found} of ${r.tried}.${r.left ? ` ${r.left} more to go: press the button again.` : ''}`
+      await load()
+    } catch (err) { error = err.message } finally { fetching = false }
   }
 
   // Unsubscribing happens at once (no "are you sure?" click); the note below it offers Undo instead.
@@ -52,6 +67,14 @@
   {#if error}<p class="error">{error}</p>{/if}
   {#if note}<p class="muted">{note}</p>{/if}
   {#if undo}<p class="muted">Unsubscribed from {undo.title}. <button class="link-btn" onclick={restore}>Undo</button></p>{/if}
+
+  {#if missing}
+    <p class="muted">
+      {missing} channel{missing === 1 ? ' has' : 's have'} no picture yet (newtube is filling them in slowly in the background).
+      <button class="btn small" onclick={fetchPictures} disabled={fetching}>{fetching ? 'Fetching…' : 'Fetch them now'}</button>
+      {#if pictureNote}<span>{pictureNote}</span>{/if}
+    </p>
+  {:else if pictureNote}<p class="muted">{pictureNote}</p>{/if}
 
   <ul>
     {#each channels as c (c.id)}

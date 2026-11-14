@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ..app import Context
 from ..db.queries import subscriptions as subs
-from ..extract.base import ExtractionError
+from ..db.queries.events import log_event
+from ..extract.base import BotCheck, ExtractionError
 from ..jobs.scheduler import poll_channel
 from ..net.ratelimit import Lane
 from .deps import get_ctx, valid_channel_id
@@ -49,6 +50,28 @@ async def add_sub(body: SubscribeIn, ctx: Context = Depends(get_ctx)) -> dict[st
         poll_error = f"{type(e).__name__}: {e}"
     return {"id": ch.id, "title": ch.title, "created": created, "new_videos": new,
             "poll_error": poll_error}
+
+
+@router.post("/subscriptions/pictures")
+async def fetch_pictures(limit: int = Query(15, ge=1, le=30), ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
+    """Find the pictures of subscriptions that have none, now, in a small batch (the background job does the same, slowly).
+    One ordinary channel lookup each, one after another. Stops at once if YouTube asks for a bot check. A channel tried in the
+    last few minutes is skipped, so pressing the button again moves on to the next ones instead of asking the same again."""
+    todo = subs.channels_missing_picture(ctx.conn, limit, retry_after=300)
+    found, stopped = 0, None
+    for cid in todo:
+        log_event(ctx.conn, "avatar_lookup", channel_id=cid)
+        try:
+            ch = await ctx.extractor.resolve_channel(cid)
+        except BotCheck:
+            stopped = "bot"
+            break
+        except ExtractionError:
+            continue
+        subs.upsert_channel(ctx.conn, ch)
+        found += bool(ch.avatar_url)
+    return {"tried": len(todo), "found": found, "stopped": stopped,
+            "left": len(subs.channels_missing_picture(ctx.conn, 10_000, retry_after=300))}
 
 
 @router.delete("/subscriptions/{channel_id}")

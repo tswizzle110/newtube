@@ -301,6 +301,8 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.click('.grid a.card:has-text("Sourdough basics")'); await p.waitForSelector('h1:has-text("E2E playlist")');
   check('a channel playlist opens the playlist page', p.url().includes('/playlist?list=PLe2eplaylist00'));
   await p.goBack(); await p.waitForSelector('.head');
+  check('going back returns to the Playlists tab', (await p.locator('nav[aria-label="Channel"] .chip.active').innerText()) === 'Playlists');
+  await p.click('nav[aria-label="Channel"] a:has-text("Videos")'); await p.waitForSelector('.grid .card');
 
   check('channel page: header and uploads', (await p.locator('.head h1').innerText()) === 'E2E Channel' && (await p.locator('.grid .card').count()) === 3);
   await p.click('.head button'); await p.waitForFunction(() => document.querySelector('.head button')?.innerText.includes('Subscribed'));

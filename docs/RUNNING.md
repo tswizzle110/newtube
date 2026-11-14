@@ -279,7 +279,9 @@ results really are long, so a change on YouTube's side would show up there.
 
 The round pictures in the sidebar come from the channel's own page. A subscription added without them (an import, or an older
 version) gets its picture filled in slowly in the background, one lookup at a time (`channel_picture_daily_cap`, on the
-Settings page; see the request table in the bot-check section). Until then, and if a picture ever fails to load, the
+Settings page; see the request table in the bot-check section). To get them sooner, **Manage channels** shows how many are missing and a **Fetch them now** button: it looks up to 15 per press,
+one after another, as ordinary channel lookups (stopping at once if YouTube asks for a bot check); press again for the next 15.
+Until then, and if a picture ever fails to load, the
 channel's letter is shown. A stored picture address that YouTube no longer serves (403, 404 or 410) is forgotten and looked
 up again the same way.
 

@@ -140,3 +140,53 @@ def test_a_stale_picture_address_is_forgotten_so_it_is_found_again(tmp_path, sta
         subs.subscribe(ctx.conn, ChannelInfo(A, "Alpha", None, "https://yt3.ggpht.com/old=s176"))
         assert client.get(f"/api/avatar/{A}").status_code == 404
         assert has_picture(ctx.conn, A) is (not forgotten)
+
+
+# ---- "fetch the missing pictures now" ---------------------------------------------------------------------
+
+class FetchEx:
+    def __init__(self, bot_after=None, no_picture=()):
+        self.calls, self.bot_after, self.no_picture = [], bot_after, set(no_picture)
+
+    async def resolve_channel(self, ref, *, background=False):
+        self.calls.append((ref, background))
+        if self.bot_after is not None and len(self.calls) > self.bot_after:
+            raise BotCheck("Sign in to confirm you're not a bot")
+        return ChannelInfo(ref, "T", None, None if ref in self.no_picture else "//yt3.ggpht.com/p")
+
+
+def test_the_button_fetches_a_batch_on_the_interactive_lane(env):
+    client, ctx, _ex, seen = env
+    for cid in (A, B, C):
+        subs.subscribe(ctx.conn, ChannelInfo(cid, "x"))
+    ctx.extractor = ex = FetchEx()
+    r = client.post("/api/subscriptions/pictures?limit=2").json()
+    assert r == {"tried": 2, "found": 2, "stopped": None, "left": 1}
+    assert all(bg is False for _ref, bg in ex.calls) and len(ex.calls) == 2           # (a click, not background work)
+    r = client.post("/api/subscriptions/pictures?limit=2").json()
+    assert r["found"] == 1 and r["left"] == 0 and len(ex.calls) == 3                    # the next press moves on to the last one
+
+
+def test_a_channel_with_no_picture_is_not_asked_again_by_the_next_press(env):
+    client, ctx, _ex, seen = env
+    for cid in (A, B):
+        subs.subscribe(ctx.conn, ChannelInfo(cid, "x"))
+    ctx.extractor = ex = FetchEx(no_picture={A})
+    first = client.post("/api/subscriptions/pictures").json()
+    assert first["tried"] == 2 and first["found"] == 1 and first["left"] == 0            # A has none to find: not counted as waiting
+    assert client.post("/api/subscriptions/pictures").json()["tried"] == 0 and len(ex.calls) == 2
+
+
+def test_the_button_stops_at_a_bot_check(env):
+    client, ctx, _ex, seen = env
+    for cid in (A, B, C):
+        subs.subscribe(ctx.conn, ChannelInfo(cid, "x"))
+    ctx.extractor = ex = FetchEx(bot_after=1)
+    r = client.post("/api/subscriptions/pictures").json()
+    assert r["stopped"] == "bot" and r["found"] == 1 and len(ex.calls) == 2              # it asked once more, was refused, and stopped
+
+
+def test_the_batch_size_is_bounded(env):
+    client, ctx, _ex, seen = env
+    assert client.post("/api/subscriptions/pictures?limit=500").status_code == 422
+    assert client.post("/api/subscriptions/pictures?limit=0").status_code == 422
