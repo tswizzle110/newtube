@@ -148,6 +148,7 @@
     say(audioOnly ? 'Audio only' : 'Video on')
     try {
       await shakaPlayer.load(manifestUrl(audioLang, codecUsed), at)
+      applyRate()
       syncQualities()
       if (wasPlaying) el.play().catch(() => {})
     } catch (e) {
@@ -165,6 +166,7 @@
     const pos = el.currentTime, wasPlaying = !el.paused
     try {
       await shakaPlayer.load(manifestUrl(lang), pos) // same position, new audio track
+      applyRate()
       syncQualities()
       if (chosenQuality !== 'auto') setQuality(chosenQuality)
       if (wasPlaying) el.play().catch(() => {})
@@ -244,7 +246,7 @@
         mode = 'dash'
         syncQualities()
         const r = savedRate()                                                // this channel's usual speed
-        if (r !== 1) { rate = r; el.playbackRate = r }
+        if (r !== 1) { rate = r; applyRate(r) }
         let wantCaptions = ''
         try { wantCaptions = localStorage.getItem('captionLang') || '' } catch { /* private mode */ }
         if (wantCaptions && video.captions?.some((c) => c.lang === wantCaptions)) setCaptions(wantCaptions, { quiet: true, remember: false })
@@ -351,6 +353,7 @@
     say(message)
     try {
       await loadManifest(at)
+      applyRate()
       if (chosenQuality !== 'auto') setQuality(chosenQuality)
       syncQualities()
       netNote = ''
@@ -390,6 +393,7 @@
         const resumed = shakaPlayer.retryStreaming(0.1)
         if (!(await progressed(resumed ? 5000 : 3000))) {
           await shakaPlayer.load(manifestUrl(audioLang, codecUsed), at)       // start over from here: new connections
+          applyRate()
           if (chosenQuality !== 'auto') setQuality(chosenQuality)
           syncQualities()
         }
@@ -489,8 +493,14 @@
       localStorage.setItem(RATES_KEY, JSON.stringify(all))
     } catch { /* private mode */ }
   }
+  // Shaka owns the element's playback rate (it sets it to 0 while buffering and restores ITS rate afterwards, and a reload
+  // resets it), so the speed has to be given to Shaka, not just written to the element, or a rebuffer quietly undoes it.
+  function applyRate(r = rate) {
+    if (shakaPlayer && mode === 'dash') { try { shakaPlayer.trickPlay(r, false) } catch { el.playbackRate = r } }
+    else el.playbackRate = r
+  }
   function setRate(r) {
-    rate = r; el.playbackRate = r; menu = null; say(`Speed ${r}×`); saveRate(r)
+    rate = r; applyRate(r); menu = null; say(`Speed ${r}×`); saveRate(r)
     tracker?.event('speed_change', { rate: r, position: Math.round(el.currentTime) })
   }
   function stepRate(dir) {

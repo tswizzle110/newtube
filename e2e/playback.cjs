@@ -979,6 +979,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     await p.goto(BASE + '/watch?v=e2eLONG0001&src=direct');
     await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
     await p.waitForFunction(() => [...document.querySelector('video').textTracks].some((x) => x.mode === 'showing'), null, { timeout: 8000 }).catch(() => {});
+    await p.waitForFunction(() => document.querySelector('video').playbackRate === 1.5, null, { timeout: 8000 }).catch(() => {});      // (the rate reads 0 for a moment while the player buffers)
     const restored = await p.evaluate(() => ({ rate: document.querySelector('video').playbackRate, cc: [...document.querySelector('video').textTracks].some((x) => x.mode === 'showing') }));
     check('another video of that channel starts at its speed with the captions on', restored.rate === 1.5 && restored.cc, JSON.stringify(restored));
     await p.hover('.player video'); await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1×")');
