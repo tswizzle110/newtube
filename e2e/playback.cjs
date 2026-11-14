@@ -947,19 +947,18 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   // ---- player extras: hover previews, audio only, speed and captions remembered
   {
     const manifests = [];
-    p.on('request', (r) => { if (r.url().includes('/api/dash/e2eVIDEO001.mpd')) manifests.push(r.url()); });
-    await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+    p.on('request', (r) => { if (r.url().includes('/api/dash/e2eLONG0001.mpd')) manifests.push(r.url()); });
+    await p.goto(BASE + '/watch?v=e2eLONG0001&src=direct');
     await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
     await p.hover('.player .bar', { position: { x: 120, y: 6 } });
     await p.waitForSelector('.thumbprev');
     await p.hover('.player .bar', { position: { x: 300, y: 6 } });
     const prev = await p.evaluate(() => { const e = document.querySelector('.thumbprev'); const s = getComputedStyle(e); return { img: s.backgroundImage, w: s.width, h: s.height, size: s.backgroundSize }; });
-    check('hovering the seek bar shows a preview picture from the stored sheet', prev.img.includes('/api/sb/e2eVIDEO001/0') && prev.w === '160px' && prev.h === '90px' && prev.size === '800px 450px', JSON.stringify(prev));
+    check('hovering the seek bar shows a preview picture from the stored sheet', prev.img.includes('/api/sb/e2eLONG0001/0') && prev.w === '160px' && prev.h === '90px' && prev.size === '800px 450px', JSON.stringify(prev));
     const sbHits = (await (await ctx.request.get(BASE + '/__hits')).json()).filter((h) => h[0].startsWith('/sb/'));
     check('...fetched from YouTube once, however often you hover', sbHits.length === 1, JSON.stringify(sbHits));
-    await p.mouse.move(5, 5);
-
     const before = manifests.length;
+    await p.hover('.player video');                                   // (the controls show while the pointer is over the player)
     await p.click('button[title^="Audio only"]');
     await p.waitForSelector('.audiocover');
     await p.waitForTimeout(1800);
@@ -967,21 +966,21 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     await p.waitForTimeout(1200);
     const audioT2 = await p.evaluate(() => document.querySelector('video').currentTime);
     check('Audio only asks for a manifest without any picture, and keeps playing', manifests.length > before && manifests.at(-1).includes('audio_only=true') && audioT2 > audioT, `${audioT} -> ${audioT2} ${manifests.at(-1)}`);
-    await p.click('button[title^="Audio only"]');
+    await p.hover('.player video'); await p.click('button[title^="Audio only"]');
     await p.waitForFunction(() => !document.querySelector('.audiocover') && document.querySelector('video').videoWidth > 0, null, { timeout: 15000 });
     check('...and turning it off brings the picture back', !manifests.at(-1).includes('audio_only'));
 
-    await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1.5×")');
+    await p.hover('.player video'); await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1.5×")');
     const savedRates = await p.evaluate(() => JSON.parse(localStorage.getItem('rates') || '{}'));
     check('speed is remembered for the channel', savedRates['UC' + 'a'.repeat(22)] === 1.5, JSON.stringify(savedRates));
     await p.keyboard.press('c');
     check('captions choice is remembered', (await p.evaluate(() => localStorage.getItem('captionLang'))) === 'en');
-    await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+    await p.goto(BASE + '/watch?v=e2eLONG0001&src=direct');
     await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
     await p.waitForFunction(() => [...document.querySelector('video').textTracks].some((x) => x.mode === 'showing'), null, { timeout: 8000 }).catch(() => {});
     const restored = await p.evaluate(() => ({ rate: document.querySelector('video').playbackRate, cc: [...document.querySelector('video').textTracks].some((x) => x.mode === 'showing') }));
     check('another video of that channel starts at its speed with the captions on', restored.rate === 1.5 && restored.cc, JSON.stringify(restored));
-    await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1×")');
+    await p.hover('.player video'); await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1×")');
     await p.keyboard.press('c');
     check('...and turning them back off is remembered too', (await p.evaluate(() => localStorage.getItem('captionLang'))) === '' && (await p.evaluate(() => JSON.parse(localStorage.getItem('rates') || '{}'))['UC' + 'a'.repeat(22)] === undefined));
   }
