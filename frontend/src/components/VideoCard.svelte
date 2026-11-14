@@ -3,10 +3,14 @@
   import { impression, trackClick, trackEvent } from '../lib/tracker.js'
   import { navigate } from '../lib/router.svelte.js'
   import Menu from './Menu.svelte'
+  import { api } from '../lib/api.js'
+  import { enqueue } from '../lib/queue.svelte.js'
+  import { say } from '../lib/toast.svelte.js'
+  import { loadLists } from '../lib/nav.svelte.js'
 
   // extra: query string appended to the watch link (e.g. '&list=PL...'); searchQuery: set on search pages
   // why: {score, reasons[{label, points}]} for recommended cards; ondismiss(type): 'not_interested' | 'dont_recommend_channel'
-  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '', onup = null, ondown = null, compact = false, showSeen = true } = $props()
+  let { video, surface, position, requestId, extra = '', searchQuery = null, why = null, ondismiss = null, onremove = null, removeLabel = 'Remove from this list', note = '', onup = null, ondown = null, compact = false, showSeen = true, quick = true } = $props()
   let showWhy = $state(false)
   const href = $derived(`/watch?v=${video.id}&src=${surface}${extra}`)
 
@@ -20,7 +24,17 @@
   const thumbFailed = () => (thumbSize === 'best' ? (thumbSize = 'mqdefault') : (imgFailed = true))
 
   // The rare actions live behind the ⋯ button, so the grid itself stays clean.
+  async function saveLater() {
+    try {
+      const r = await api.post('/api/mylists/watch_later/items', { video_id: video.id })
+      say(r.added ? 'Saved to Watch later' : 'Already in Watch later')
+      loadLists()
+    } catch (e) { say(e.message) }
+  }
+  // Every video card can be queued or saved without opening it; `quick={false}` where that makes no sense (the queue itself).
   const items = $derived([
+    ...(quick ? [{ label: 'Play next', onclick: () => enqueue(video, true) }, { label: 'Add to queue', onclick: () => enqueue(video) },
+                 { label: 'Save to Watch later', onclick: saveLater }] : []),
     ...(why ? [{ label: showWhy ? 'Hide why this' : 'Why this?', onclick: () => (showWhy = !showWhy) }] : []),
     ...(why && ondismiss ? [{ label: 'Not interested', onclick: () => ondismiss('not_interested') }] : []),
     ...(why && ondismiss && video.channel_id ? [{ label: 'Never this channel', danger: true, onclick: () => ondismiss('dont_recommend_channel') }] : []),

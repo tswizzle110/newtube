@@ -3,10 +3,11 @@
   import { api } from '../lib/api.js'
   import { uid } from '../lib/tracker.js'
   import VideoCard from './VideoCard.svelte'
+  import { prefs, setAutoplay } from '../lib/prefs.svelte.js'
 
   // "Up next": videos related to the one being watched. Asked for a moment AFTER playback has had its chance to
   // start, so it never competes with the video for the first requests.
-  let { videoId } = $props()
+  let { videoId, onloaded = null } = $props()
   const requestId = uid()
   let videos = $state([])
   let loading = $state(true)
@@ -18,6 +19,7 @@
     try {
       const r = await api.get(`/api/related/${videoId}?limit=20${force ? '&force=1' : ''}`)
       videos = r.videos
+      onloaded?.(r.videos)
       status = r.status
       source = r.source ?? 'youtube'
     } catch {
@@ -34,7 +36,12 @@
 </script>
 
 <section aria-label="Up next">
-  <h2>Up next</h2>
+  <div class="head">
+    <h2>Up next</h2>
+    <label class="auto" title="When a video ends with nothing queued and no playlist, go on to the first unwatched video in this list">
+      <input type="checkbox" checked={prefs.autoplay} onchange={(e) => setAutoplay(e.target.checked)} /> Autoplay
+    </label>
+  </div>
   {#if loading}
     <p class="muted small">Looking for related videos…</p>
   {:else if !videos.length}
@@ -64,7 +71,9 @@
 </section>
 
 <style>
-  h2 { font-size: 15px; margin: 0 0 10px; }
+  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  h2 { font-size: 15px; margin: 0; }
+  .auto { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
   .list { display: flex; flex-direction: column; gap: 12px; }
   .small { font-size: 13px; }
   .retry { font-size: 13px; padding: 4px 10px; }

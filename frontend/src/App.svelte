@@ -16,6 +16,9 @@
   import Channel from './routes/Channel.svelte'
   import Playlist from './routes/Playlist.svelte'
   import Settings from './routes/Settings.svelte'
+  import Queue from './routes/Queue.svelte'
+  import { toast } from './lib/toast.svelte.js'
+  import { loadQueue } from './lib/queue.svelte.js'
   import Sidebar from './components/Sidebar.svelte'
 
   let sidebar = $state()
@@ -54,7 +57,7 @@
   let started = false
   $effect(() => {
     if (!auth.loggedIn) return
-    loadSubs(); loadLists()                        // the sidebar's channel list and your lists
+    loadSubs(); loadLists(); loadQueue()           // the sidebar's channel list, your lists and the queue
     if (!started) {                                // only when newtube is first opened, never on later visits to Home
       started = true
       if (router.pathname === '/for-you') navigate('/', { replace: true })           // the old address of Home
@@ -84,6 +87,8 @@
 </script>
 
 <svelte:window onclick={interceptLinks} onkeydown={onKey} />
+
+{#if toast.text}<div class="toast" role="status">{toast.text}</div>{/if}
 
 {#if net.offline || net.unreachable}
   <div class="netbar" role="status">
@@ -115,6 +120,8 @@
           <History />
         {:else if router.pathname.startsWith('/list/')}
           <MyList />
+        {:else if is('/queue')}
+          <Queue />
         {:else if is('/channels')}
           <Channels />
         {:else if is('/search')}
@@ -154,6 +161,8 @@
   .netbar { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 90; max-width: min(92vw, 640px);
     background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 7px 16px; font-size: 13px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+  .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 95; max-width: min(92vw, 420px);
+    background: var(--text); color: var(--bg); border-radius: 8px; padding: 9px 16px; font-size: 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }
   .backdrop { display: none; }
   @media (max-width: 899px) {
     .layout, .layout.collapsed { grid-template-columns: minmax(0, 1fr); }

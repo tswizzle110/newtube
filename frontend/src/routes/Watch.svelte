@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
   import { navigate } from '../lib/router.svelte.js'
   import { duration as fmt, ago, views } from '../lib/format.js'
@@ -9,6 +9,10 @@
   import ListButtons from '../components/ListButtons.svelte'
   import SubscribeButton from '../components/SubscribeButton.svelte'
   import RelatedList from '../components/RelatedList.svelte'
+  import QueuePanel from '../components/QueuePanel.svelte'
+  import { prefs } from '../lib/prefs.svelte.js'
+  import { loadQueue, dequeue } from '../lib/queue.svelte.js'
+  import { trackEvent } from '../lib/tracker.js'
 
   // The video to play comes from the host (App), not from the address bar, so the same page can keep playing in a
   // small corner player (`mini`) while you browse elsewhere. list: a YouTube playlist; mylist: one of your own lists.
@@ -33,6 +37,7 @@
 
   onMount(() => {
     let timer
+    api.del(`/api/queue/${id}`).then((r) => r.removed && loadQueue()).catch(() => {})       // what is playing is no longer "waiting" in the queue
     // Start the slow parts in parallel with the metadata request instead of after it:
     // the player library chunk, and the manifest (the server then extracts the video and probes the
     // stream layouts once; the player's own manifest request a moment later is a cheap cache hit).
@@ -55,8 +60,43 @@
   const at = $derived(pl ? pl.videos.findIndex((v) => v.id === id) : -1)
   const next = $derived(at >= 0 ? pl.videos[at + 1] : null)
   const watchHref = (vid) => (mylist ? `/watch?v=${vid}&src=playlist&mylist=${mylist}` : `/watch?v=${vid}&src=playlist&list=${list}`)
-  // Playlist autoplay: when this video ends, go to the next one.
-  const advance = () => { if (next) (onnavigate ?? navigate)(watchHref(next.id)) }
+  // ---- what plays when this video ends: the queue, then the playlist, then the first unwatched video of Up next ----------
+  let relatedFirst = $state(null)
+  let target = $state(null)          // the video the countdown is about to start
+  let count = $state(0)
+  let ticker = null
+  const related = (vids) => (relatedFirst = vids.find((v) => !v.seen && !v.completed) ?? null)
+
+  async function pickNext() {
+    try {
+      const q = await api.get('/api/queue?limit=1')
+      if (q.videos.length) { const v = q.videos[0]; return { id: v.id, title: v.title || v.id, href: `/watch?v=${v.id}&src=queue`, via: 'queue', fromQueue: true } }
+    } catch { /* no queue: carry on */ }
+    if (next) return { id: next.id, title: next.title, href: watchHref(next.id), via: 'playlist' }
+    if (prefs.autoplay && relatedFirst) return { id: relatedFirst.id, title: relatedFirst.title, href: `/watch?v=${relatedFirst.id}&src=related`, via: 'related' }
+    return null
+  }
+  async function handleEnded() {
+    const t = await pickNext()
+    if (!t) return
+    target = t; count = 5
+    clearInterval(ticker)
+    ticker = setInterval(() => { count -= 1; if (count <= 0) go() }, 1000)
+  }
+  function cancelNext() {
+    clearInterval(ticker); ticker = null
+    trackEvent('autoplay_cancel', { video_id: id })
+    target = null
+  }
+  async function go() {
+    const t = target
+    if (!t) return
+    clearInterval(ticker); ticker = null; target = null
+    trackEvent('autoplay_next', { video_id: id, payload: { to: t.id, via: t.via } })
+    if (t.fromQueue) await dequeue(t.id)
+    ;(onnavigate ?? navigate)(t.href)
+  }
+  onDestroy(() => clearInterval(ticker))
 </script>
 
 <div class="watch" class:theater class:mini>
@@ -67,9 +107,19 @@
     <p class="muted">Loading…</p>
   {:else}
     <div class="stage">
-    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={list || mylist ? advance : null}
+    <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={handleEnded}
       sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null}
       {theater} ontheater={mini ? null : toggleTheater} compact={mini} keys={!mini} />
+      {#if target}
+        <div class="autonext" class:small={mini} role="alert">
+          <div class="an-label">Up next in {count}</div>
+          <div class="an-title">{target.title}</div>
+          <div class="an-actions">
+            <button class="btn primary small" onclick={go}>Play now</button>
+            <button class="btn small" onclick={cancelNext}>Cancel</button>
+          </div>
+        </div>
+      {/if}
       {#if mini}
         <div class="minibar">
           <span class="mt" title={video.title}>{video.title}</span>
@@ -126,7 +176,7 @@
     </section>
 
     </div>
-    <aside class="related"><RelatedList videoId={video.id} /></aside>
+    <aside class="related"><QueuePanel /><RelatedList videoId={video.id} onloaded={related} /></aside>
     <div class="discussion"><Comments videoId={video.id} {player} /></div>
   {/if}
 </div>
@@ -151,6 +201,13 @@
   .minibar .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .minibar button { background: none; border: 0; color: #fff; font-size: 16px; padding: 4px 8px; border-radius: 6px; }
   .minibar button:hover { background: rgba(255, 255, 255, 0.2); }
+  .autonext { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    background: rgba(0, 0, 0, 0.78); color: #fff; text-align: center; padding: 16px; }
+  .an-label { font-size: 14px; opacity: 0.8; }
+  .an-title { font-size: 18px; font-weight: 700; max-width: 40ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .an-actions { display: flex; gap: 10px; }
+  .autonext.small .an-title { font-size: 13px; }
+  .autonext.small .an-label { font-size: 12px; }
   .details { grid-area: details; min-width: 0; }
   .related { grid-area: related; margin-top: 24px; min-width: 0; }
   .discussion { grid-area: comments; min-width: 0; }

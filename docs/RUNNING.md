@@ -386,6 +386,16 @@ most recently watched first, with a progress bar. Clicking one carries on where 
 leaves the row and counts as finished; it stays in History). Removing a video from History forgets where you stopped and so
 removes it from the row too. It is all local: no request to YouTube.
 
+## Queue and autoplay
+
+The ⋯ menu on every video card has **Play next**, **Add to queue** and **Save to Watch later**. The queue is kept on the server
+(so your phone and computer share it): the **Queue** item appears in the sidebar once something is queued, with a page where you
+can reorder, remove, clear or play it, and the watch page shows it beside the video. When a video ends, newtube goes on to,
+in this order: the **queue**, then the next video of the **playlist** you are in, then (only if **Autoplay** is on, a switch
+above Up next and on the Settings page) the first video in **Up next** you have not watched. There is a 5-second countdown
+over the player with **Play now** and **Cancel**; cancelling leaves the queue as it was. Whatever is playing is removed from
+the queue. None of this asks YouTube for anything beyond the videos you play.
+
 ## How recommendations are ranked
 
 The **Recommended for you** list on Home ranks videos from five places, all already in your own database (it never

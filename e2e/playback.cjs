@@ -8,6 +8,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
 (async () => {
   const b = await chromium.launch();
   const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } });
+  await ctx.addInitScript(() => { try { localStorage.setItem('autoplay', '0') } catch {} });   // (a test video that ends must not wander off to Up next)
   const p = await ctx.newPage();
   const problems = [];
   p.on('pageerror', e => problems.push('pageerror: ' + e.message));
@@ -315,7 +316,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('watch page shows playlist position', (await p.locator('.plist h2').innerText()).includes('1 / 2'));
   await p.waitForFunction(() => document.querySelector('video')?.readyState >= 3, null, { timeout: 20000 });
   await p.keyboard.press('9');                          // jump to 90%: the video ends in a couple of seconds
-  const advanced = await p.waitForURL(/v=e2eMUXED001/, { timeout: 15000 }).then(() => true).catch(() => false);
+  const advanced = await p.waitForURL(/v=e2eMUXED001/, { timeout: 25000 }).then(() => true).catch(() => false);
   check('playlist autoplays the next video when one ends', advanced, p.url());
   await p.evaluate(() => navigator.sendBeacon('/api/events', new Blob(['{}'], { type: 'application/json' }))); // flush path
   await p.waitForTimeout(300);
@@ -774,6 +775,34 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.click('button[role=menuitem]:has-text("Mark as watched")');
   await p.waitForFunction(() => !document.querySelector('section[aria-label="Continue watching"] a.title[href*="e2eMUXED001"]'));
   check('Mark as watched takes it out of Continue watching', true);
+  // ---- the queue and autoplay
+  await p.locator('.grid:not(section .grid) .card').first().locator('.dots').click();
+  await p.click('button[role=menuitem]:has-text("Add to queue")');
+  await p.waitForSelector('.toast:has-text("Added to the queue")');
+  await p.waitForSelector('aside.side a[href="/queue"]');
+  check('Add to queue (card menu) shows a message and a Queue item in the sidebar', (await p.locator('aside.side a[href="/queue"] .count').innerText()) === '1');
+  await p.goto(BASE + '/queue'); await p.waitForSelector('.grid .card');
+  check('the Queue page lists it, and the card menu removes it', (await p.locator('.grid .card').count()) === 1);
+  await p.locator('.grid .card .dots').click(); await p.click('button[role=menuitem]:has-text("Remove from the queue")');
+  await p.waitForSelector('.empty:has-text("Nothing queued")');
+  check('removing empties the queue', (await p.locator('aside.side a[href="/queue"] .count').count()) === 0);
+  await ctx.request.post(BASE + '/api/queue', { data: { video_id: 'e2eMUXED001' } });
+  await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+  await p.waitForFunction(() => document.querySelector('video')?.readyState >= 3, null, { timeout: 20000 });
+  await p.waitForSelector('aside.related section[aria-label="Queue"]');
+  check('the watch page shows the queue beside the video', (await p.locator('section[aria-label="Queue"] .card').count()) === 1);
+  await p.keyboard.press('9');                                       // jump near the end
+  await p.waitForSelector('.autonext', { timeout: 20000 });
+  check('when the video ends a countdown names the queued video, with Play now and Cancel', (await p.locator('.autonext .an-label').innerText()).startsWith('Up next in') && (await p.locator('.autonext button').allInnerTexts()).join() === 'Play now,Cancel');
+  await p.click('.autonext button:has-text("Cancel")');
+  check('Cancel stops the countdown and keeps the video queued', (await p.locator('.autonext').count()) === 0 && (await (await ctx.request.get(BASE + '/api/queue')).json()).count === 1);
+  await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+  await p.waitForFunction(() => document.querySelector('video')?.readyState >= 3, null, { timeout: 20000 });
+  await p.keyboard.press('9');
+  const queuedNext = await p.waitForURL(/v=e2eMUXED001&src=queue/, { timeout: 30000 }).then(() => true).catch(() => false);
+  check('with nothing cancelled, the queued video plays next, and leaves the queue', queuedNext && (await (await ctx.request.get(BASE + '/api/queue')).json()).count === 0, p.url());
+  await p.goto(BASE + '/');
+  await p.waitForSelector('.grid .card');
   await menuItem('Related two', 'Why this?');
   const why = await p.locator('.why li').allInnerTexts();
   check('"Why this?" (in the card menu) lists each reason with its points, then the total', why.length >= 3 && why.some(t => /Related to videos you have watched/.test(t)) &&

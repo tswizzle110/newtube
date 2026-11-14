@@ -4,6 +4,7 @@
   import { COLORS } from '../lib/sponsorblock.js'
   import { nav, setStartPage } from '../lib/nav.svelte.js'
   import AppSettings from '../components/AppSettings.svelte'
+  import { prefs, setAutoplay } from '../lib/prefs.svelte.js'
 
   const ACTIONS = [['auto', 'Skip automatically'], ['button', 'Show skip button'], ['mark', 'Only mark on the bar'], ['ignore', 'Ignore']]
   let s = $state(null)
@@ -66,6 +67,9 @@
 
   {#if pb}
     <h2>Playback <span class="status muted">{status}</span></h2>
+    <div class="row">
+      <label><input type="checkbox" checked={prefs.autoplay} onchange={(e) => setAutoplay(e.target.checked)} /> Autoplay: when a video ends and nothing is queued and it is not in a playlist, go on to the first unwatched video in Up next. (The queue and playlists always carry on.) Remembered by this browser.</label>
+    </div>
     <p class="muted">
       Above 1080p YouTube only offers VP9 and AV1, which take more computer power to decode than H.264.
       If 1440p/4K stutters, limit the resolution or choose H.264. Takes effect the next time you open a video.

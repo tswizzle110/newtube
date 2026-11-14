@@ -3,6 +3,7 @@
   import { router, navigate } from '../lib/router.svelte.js'
   import { nav, subs, mylists, setCollapsed, setSubsOpen, loadLists } from '../lib/nav.svelte.js'
   import { api } from '../lib/api.js'
+  import { queue } from '../lib/queue.svelte.js'
 
   let { theme, ontheme, onlogout } = $props()
   let searchEl = $state()
@@ -101,6 +102,9 @@
     {/if}
     <a class="item" class:active={is('/history')} href="/history">History</a>
     <a class="item" class:active={is('/stats')} href="/stats">Watch time</a>
+    {#if queue.count || is('/queue')}
+      <a class="item" class:active={is('/queue')} href="/queue"><span class="lname">Queue</span>{#if queue.count}<span class="count muted">{queue.count.toLocaleString()}</span>{/if}</a>
+    {/if}
     {#each mylists.list as l (l.id)}
       <a class="item" class:active={activeList === listRef(l)} href={`/list/${listRef(l)}`}>
         <span class="lname">{l.name}</span>{#if l.count}<span class="count muted">{l.count.toLocaleString()}</span>{/if}
