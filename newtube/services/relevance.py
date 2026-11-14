@@ -94,15 +94,16 @@ class Corpus:
 _cache: dict[int, tuple[float, tuple, Corpus]] = {}
 
 
-def corpus_for(conn: sqlite3.Connection, ttl: float = 600.0) -> Corpus:
-    """The corpus of every known title, rebuilt when the set of titles changes or after ``ttl`` seconds."""
-    # (a fingerprint of the content, not just the count: an object id can be reused by a different database)
-    stamp = tuple(conn.execute("SELECT count(*), COALESCE(max(rowid), 0), COALESCE(sum(length(title)), 0)"
-                               " FROM videos WHERE title <> ''").fetchone())
+def corpus_for(conn: sqlite3.Connection, ttl: float = 3600.0, sample: int = 20_000) -> Corpus:
+    """The corpus of the known titles (the newest ``sample`` of them: it only has to spot filler words, and reading every title
+    of a big library takes long), rebuilt when the library has grown by about 10% or after ``ttl`` seconds."""
+    n = conn.execute("SELECT count(*) FROM videos WHERE title <> ''").fetchone()[0]
+    step = max(500, n // 10)
+    stamp = (n // step, step)                         # (the library size, to within about 10%)
     hit = _cache.get(id(conn))
     if hit and hit[1] == stamp and time.monotonic() - hit[0] < ttl:
         return hit[2]
-    corpus = Corpus(r[0] for r in conn.execute("SELECT title FROM videos WHERE title <> ''"))
+    corpus = Corpus(r[0] for r in conn.execute("SELECT title FROM videos WHERE title <> '' ORDER BY rowid DESC LIMIT ?", (sample,)))
     _cache[id(conn)] = (time.monotonic(), stamp, corpus)
     return corpus
 

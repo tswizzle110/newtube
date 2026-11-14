@@ -27,6 +27,7 @@ CACHE_VERSION = 1
 TTL_SEARCH = 3600
 TTL_CHANNEL = 900
 TTL_PLAYLIST = 1800
+TTL_CHANNEL_PLAYLISTS = 6 * 3600       # a channel's playlists change rarely
 SCAN_LIMIT = 10_000   # uploads read to sort a channel (about 100 requests); beyond that Popular is partial and Oldest unavailable
 FULL_RESCAN_AFTER = 30 * 24 * 3600   # a stored upload list is re-read in full this often (refreshes view counts)
 TOPUP_AFTER = 6 * 3600               # ...and checked for NEW uploads (one request) when opened after this long
@@ -221,6 +222,15 @@ class ListService:
                 "has_more": offset + limit < n and "unavailable" not in extra, "total_videos": n,
                 "fetched_at": info["scanned_at"], "checked_at": info["topped_up_at"],
                 "refreshing": refreshing, **extra}
+
+    async def channel_playlists(self, channel_id: str) -> list[dict[str, Any]]:
+        """The playlists a channel has made (its Playlists tab): one request, then kept for six hours."""
+        key = f"channel_playlists:{channel_id}"
+        items = self._cached(key)
+        if items is None:
+            items = [dataclasses.asdict(p) for p in await self.extractor.channel_playlists(channel_id)]
+            self._store(key, items, TTL_CHANNEL_PLAYLISTS)
+        return items
 
     async def playlist(self, playlist_id: str, limit: int = 100) -> dict[str, Any]:
         key = f"playlist:{playlist_id}:{limit}"

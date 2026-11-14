@@ -96,9 +96,12 @@ def create_app(ctx: Context | None = None) -> FastAPI:
         task = None
         if c.run_scheduler:
             task = asyncio.create_task(Scheduler(c.settings, c.conn, c.http, extractor=c.extractor).run())
+        from .loopwatch import LoopWatch
+        watch = asyncio.create_task(LoopWatch().run())             # says in the log what blocks the server, if anything does
         try:
             yield
         finally:
+            watch.cancel()
             if task:
                 task.cancel()
             from .net import audit

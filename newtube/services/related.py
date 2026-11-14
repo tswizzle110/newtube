@@ -21,7 +21,7 @@ from ..extract.base import BotCheck, ExtractionError, Extractor, RelatedUnsuppor
 from ..ml import store as ml_store
 from ..ml.embedder import HashingEmbedder, load_embedder
 from ..net.ratelimit import DailyCapReached
-from ..recommend.baseline import DAY, channel_interest, interest_rows
+from ..recommend.baseline import DAY, interest_rows
 from . import relevance
 
 log = logging.getLogger("newtube.related")
@@ -80,12 +80,11 @@ class RelatedService:
                 (me["channel_id"], video_id, LOCAL_CHANNEL))]
         emb = self.conn.execute("SELECT model FROM video_embeddings WHERE video_id=? LIMIT 1", (video_id,)).fetchone()
         if emb:
-            vectors = ml_store.load_vectors(self.conn, emb["model"])
-            mine = vectors.pop(video_id, None)
-            if mine:
-                titled = {r[0] for r in self.conn.execute("SELECT id FROM videos WHERE title<>''")}
-                ranked = sorted(((ml_store.dot(mine, v), i) for i, v in vectors.items() if i in titled and i not in ids),
-                                reverse=True)
+            mine = ml_store.load_vectors(self.conn, emb["model"], [video_id]).get(video_id)
+            pool = self._similar_pool(video_id, ids)
+            vectors = ml_store.load_vectors(self.conn, emb["model"], pool) if pool else {}
+            if mine and vectors:
+                ranked = sorted(((ml_store.dot(mine, v), i) for i, v in vectors.items()), reverse=True)
                 ids += [i for _s, i in ranked[:LOCAL_SIMILAR]]
         ids = ids[:limit]
         if not ids:
@@ -93,6 +92,25 @@ class RelatedService:
         rows = {r["id"]: r for r in self.conn.execute(f"{select} WHERE v.id IN ({','.join('?' * len(ids))})", ids)}
         return [{**dict(rows[i]), "completed": bool(rows[i]["completed"]), "seen": bool(rows[i]["seen"])}
                 for i in ids if i in rows]
+
+    POOL = 400                 # how many videos are compared by meaning (not the whole library: that takes seconds)
+
+    def _similar_pool(self, video_id: str, exclude: list[str]) -> list[str]:
+        """Videos worth comparing with this one: those whose title shares one of its defining words. SQLite scans the titles in
+        C, so this is fast even for a library of tens of thousands, and only these few hundred vectors are then read."""
+        row = self.conn.execute("SELECT title, tags, category FROM videos WHERE id=?", (video_id,)).fetchone()
+        if not row:
+            return []
+        topic = relevance.topic_of(row["title"], row["tags"], row["category"], relevance.Corpus([]))
+        words = [w.replace("%", "").replace("_", "") for w in topic.defining[:4] if len(w) >= 3]
+        if not words:
+            return []
+        like = " OR ".join("title LIKE ? ESCAPE '\\'" for _ in words)
+        rows = self.conn.execute(f"SELECT id FROM videos WHERE title <> '' AND id <> ? AND ({like})"
+                                 f" ORDER BY COALESCE(published_at, 0) DESC LIMIT ?",
+                                 [video_id, *[f"%{w}%" for w in words], self.POOL]).fetchall()
+        skip = set(exclude)
+        return [r[0] for r in rows if r[0] not in skip]
 
     async def lookup(self, video_id: str, limit: int = 20, *, background: bool = False,
                      force: bool = False) -> tuple[list[dict[str, Any]], str]:
@@ -173,11 +191,15 @@ class RelatedService:
         level = getattr(self.settings, "related_strictness", "normal")
         return level if level in relevance.LEVELS else "normal"
 
-    def known_channels(self, now: int | None = None) -> set[str]:
-        """Channels you subscribe to or watch: results from them are trusted a step more."""
-        now = now if now is not None else int(time.time())
-        known = {r[0] for r in self.conn.execute("SELECT channel_id FROM subscriptions")}
-        known |= {c for c, v in channel_interest(self.conn, now, 180.0).items() if v >= 0.05}
+    def known_channels(self) -> set[str]:
+        """Channels you subscribe to, have watched, or have liked or saved from: results from them are trusted a step more."""
+        c = self.conn
+        known = {r[0] for r in c.execute("SELECT channel_id FROM subscriptions")}
+        known |= {r[0] for r in c.execute("SELECT DISTINCT v.channel_id FROM watch_sessions w JOIN videos v ON v.id = w.video_id"
+                                          " WHERE v.channel_id IS NOT NULL")}
+        known |= {r[0] for r in c.execute("SELECT DISTINCT v.channel_id FROM playlist_items i JOIN playlists p ON p.id = i.playlist_id"
+                                          " JOIN videos v ON v.id = i.video_id WHERE p.kind IN ('liked', 'watch_later')"
+                                          " AND v.channel_id IS NOT NULL")}
         return known
 
     async def _real_embedder(self):
@@ -205,8 +227,10 @@ class RelatedService:
             return []
         hits = [h for h in await self.extractor.search(title, "video", LIMIT + 15, background=background)
                 if isinstance(h, VideoSummary) and h.id != video_id]
-        topic = relevance.topic_of(row["title"], row["tags"], row["category"], relevance.corpus_for(self.conn))
-        level, known = self.strictness(), self.known_channels()
+        # (these two read the whole library: on a worker thread, so a video that is starting is not kept waiting)
+        topic, known = await asyncio.to_thread(
+            lambda: (relevance.topic_of(row["title"], row["tags"], row["category"], relevance.corpus_for(self.conn)), self.known_channels()))
+        level = self.strictness()
         sims: dict[str, float] = {}
         model = await self._real_embedder() if hits else None
         if model:

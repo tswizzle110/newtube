@@ -38,7 +38,7 @@ def taste_vector(conn: sqlite3.Connection, model: str, now: int, half_life_days:
 
 
 _cache: dict[tuple, tuple[float, list[float] | None]] = {}
-_near: dict[tuple, tuple[int, list[str]]] = {}
+_near: dict[tuple, tuple[float, int, list[str]]] = {}      # (conn, model) -> (valid until, how many, ids)
 CACHE_SECONDS = 600
 
 
@@ -63,13 +63,15 @@ def scorer(conn: sqlite3.Connection, model: str, now: int):
         return {vid: dot(taste, vec) for vid, vec in load_vectors(conn, model, ids).items()}
 
     def nearest(k: int) -> list[str]:
-        """The ``k`` embedded videos closest to your taste, from any channel (kept for as long as the taste vector is)."""
-        got = _near.get(key)
-        if got is None or got[0] < k:
-            ranked = sorted(((dot(taste, vec), vid) for vid, vec in load_vectors(conn, model).items()), reverse=True)
-            _near.clear()
-            _near[key] = got = (k, [vid for _s, vid in ranked[:k]])
-        return got[1][:k]
+        """The ``k`` embedded videos closest to your taste, from any channel. Going through every video's vector is slow on a
+        big library, and your taste moves slowly, so the answer is reused for ten minutes however many events came in."""
+        got = _near.get((id(conn), model))
+        if got and got[0] > time.monotonic() and got[1] >= k:
+            return got[2][:k]
+        ranked = sorted(((dot(taste, vec), vid) for vid, vec in load_vectors(conn, model).items()), reverse=True)
+        ids = [vid for _s, vid in ranked[:max(k, 120)]]
+        _near[(id(conn), model)] = (time.monotonic() + CACHE_SECONDS, len(ids), ids)
+        return ids[:k]
 
     score.nearest = nearest
     return score

@@ -61,6 +61,16 @@ async def channel(channel_id: str, sort: str = "newest", limit: int = Query(30, 
         raise _fail(e) from e
 
 
+@router.get("/channel/{channel_id}/playlists")
+async def channel_playlists(channel_id: str, ctx: Context = Depends(get_ctx)) -> list[dict[str, Any]]:
+    """The playlists the channel has made."""
+    valid_channel_id(channel_id)
+    try:
+        return await ctx.lists.channel_playlists(channel_id)
+    except ExtractionError as e:
+        raise _fail(e) from e
+
+
 @router.get("/playlist/{playlist_id}")
 async def playlist(playlist_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
     valid_playlist_id(playlist_id)

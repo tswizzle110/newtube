@@ -523,6 +523,20 @@ class YtDlpExtractor:
             v.channel_id, v.channel_title = v.channel_id or channel_id, v.channel_title or ch.title
         return ch, videos
 
+    async def raw_channel_playlists(self, channel_id: str, limit: int = 60, *, background: bool = False) -> dict[str, Any]:
+        if not CHANNEL_ID_RE.match(channel_id):
+            raise ExtractionError("bad channel request")
+        return await self._extract(f"https://www.youtube.com/channel/{channel_id}/playlists",
+                                   self._flat(max(1, min(limit, 100))), background)
+
+    async def channel_playlists(self, channel_id: str, limit: int = 60, *, background: bool = False) -> list[PlaylistSummary]:
+        info = await self.raw_channel_playlists(channel_id, limit, background=background)
+        out = []
+        for p in (i for i in parse_entries(info) if isinstance(i, PlaylistSummary)):
+            p.channel_title = p.channel_title or info.get("channel") or info.get("uploader")   # (the tab does not repeat the owner)
+            out.append(p)
+        return out
+
     async def playlist_page(self, playlist_id: str, limit: int = 100, *,
                             background: bool = False) -> tuple[PlaylistSummary, list[VideoSummary]]:
         info = await self.raw_playlist(playlist_id, limit, background=background)

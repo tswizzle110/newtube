@@ -159,6 +159,10 @@ class Ex:
                 progress(min(page * 26, 130), 130)
         return vids, 130
 
+    async def channel_playlists(self, channel_id, limit=60, *, background=False):
+        return [PlaylistSummary("PLe2eplaylist00", "Sourdough basics", "E2E Channel", 2, "https://i.ytimg.com/vi/e2eVIDEO001/hq720.jpg"),
+                PlaylistSummary("PLe2eplaylist01", "Trail notes", "E2E Channel", None, None)]
+
     async def playlist_page(self, playlist_id, limit=100, *, background=False):
         cid = "UC" + "a" * 22
         return (PlaylistSummary(playlist_id, "E2E playlist", "E2E Channel", 2),

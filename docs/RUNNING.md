@@ -283,6 +283,12 @@ Settings page; see the request table in the bot-check section). Until then, and 
 channel's letter is shown. A stored picture address that YouTube no longer serves (403, 404 or 410) is forgotten and looked
 up again the same way.
 
+## Channel playlists
+
+A channel page has **Videos** and **Playlists** tabs. Playlists shows the playlists the channel itself has made (its
+Playlists tab on YouTube); opening one plays it like any other playlist. It costs one ordinary channel lookup (the kind
+opening the channel page makes), when you click the tab, and the list is then kept for six hours.
+
 ## Up next (related videos)
 
 Beside the video you are watching (below it on a narrow window) is **Up next**: videos related to it, taken from

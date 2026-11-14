@@ -9,7 +9,7 @@
   function open(e) {
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
     e.preventDefault()
-    trackEvent('search_click', { payload: { q: searchQuery, kind: 'playlist', position, id: playlist.id } })
+    if (searchQuery) trackEvent('search_click', { payload: { q: searchQuery, kind: 'playlist', position, id: playlist.id } })     // (only from a search)
     navigate(href)
   }
 </script>

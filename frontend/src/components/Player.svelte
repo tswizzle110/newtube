@@ -160,7 +160,11 @@
             // A dropped connection must not end playback: retry each segment for a good while (1, 2, 4, 8... s), and when
             // Shaka gives up on one, tell the watchdog below to step in rather than leaving the picture frozen.
             retryParameters: { maxAttempts: 6, baseDelay: 1000, backoffFactor: 2, fuzzFactor: 0.5, timeout: 30_000, stallTimeout: 8000, connectionTimeout: 10_000 },
-            failureCallback: (err) => { console.warn('streaming failure:', err?.code); stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000) },
+            failureCallback: (err) => {
+              console.warn('streaming failure:', err?.code)
+              if (err?.code === 1001 && err.data?.[1] === 429) return botBlocked()      // not a connection problem, and asking again makes it worse
+              stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000)
+            },
           },
           abr: { enabled: true, defaultBandwidthEstimate: 25_000_000 },
           // (The manifest keeps Shaka's default of two tries: a 404 there means "no adaptive streams, use the plain file",
@@ -171,7 +175,8 @@
         shakaPlayer.addEventListener('error', (ev) => {
           const e = ev.detail
           console.warn('player error:', e?.category, e?.code)
-          trackEvent('player_error', { video_id: video.id, payload: { category: e?.category, code: e?.code } })
+          trackEvent('player_error', { video_id: video.id, payload: { category: e?.category, code: e?.code, status: e?.data?.[1] } })
+          if (e?.code === 1001 && e.data?.[1] === 429) return botBlocked()                 // YouTube's bot check, mid-video
           if (e?.category === 3 && !recovering) stuckFor = STUCK_AFTER      // 3 = media: the pipeline itself broke
           else stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000)
         })

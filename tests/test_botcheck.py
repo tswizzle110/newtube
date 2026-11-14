@@ -243,6 +243,8 @@ def test_with_the_gate_closed_no_yt_dlp_route_reaches_youtube():
         lambda bg: ex.playlist("PL" + "a" * 16, 5, background=bg),
         lambda bg: ex.playlist_page("PL" + "a" * 16, 5, background=bg),
         lambda bg: ex.channel_page(CHAN, 5, background=bg),
+        lambda bg: ex.channel_playlists(CHAN, 5, background=bg),
+        lambda bg: ex.raw_channel_playlists(CHAN, 5, background=bg),
         lambda bg: ex.related("aaaaaaaaaaa", 5, background=bg),
         lambda bg: ex.comments("aaaaaaaaaaa", "top", 5, background=bg),
     ]

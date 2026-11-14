@@ -293,6 +293,15 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   await p.waitForFunction(() => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 }).catch(() => {});
   check('channel result avatar loads via /api/img (protocol-relative url handled)', await V(p, () => { const i = document.querySelector('main .row img'); return !!i && i.complete && i.naturalWidth > 0 && i.src.includes('/api/img'); }));
   await p.click('main .row'); await p.waitForSelector('.head');
+  // ---- a channel's own playlists
+  check('the channel page has Videos and Playlists tabs, Videos first', (await p.locator('nav[aria-label="Channel"] .chip').allInnerTexts()).join() === 'Videos,Playlists' && (await p.locator('nav[aria-label="Channel"] .chip.active').innerText()) === 'Videos');
+  await p.click('nav[aria-label="Channel"] a:has-text("Playlists")'); await p.waitForSelector('.grid a.card');
+  check('Playlists lists what the channel made (and hides the video sorting)', (await p.locator('.grid a.card .title').allInnerTexts()).join() === 'Sourdough basics,Trail notes' &&
+    (await p.locator('.sorts').count()) === 0 && (await p.locator('.grid .card.card .badge').first().innerText()).includes('2'));
+  await p.click('.grid a.card:has-text("Sourdough basics")'); await p.waitForSelector('h1:has-text("E2E playlist")');
+  check('a channel playlist opens the playlist page', p.url().includes('/playlist?list=PLe2eplaylist00'));
+  await p.goBack(); await p.waitForSelector('.head');
+
   check('channel page: header and uploads', (await p.locator('.head h1').innerText()) === 'E2E Channel' && (await p.locator('.grid .card').count()) === 3);
   await p.click('.head button'); await p.waitForFunction(() => document.querySelector('.head button')?.innerText.includes('Subscribed'));
   const subs = await V(p, async () => (await (await fetch('/api/subscriptions')).json()));

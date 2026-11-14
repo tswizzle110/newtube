@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -22,6 +23,6 @@ async def related(video_id: str, limit: int = 20, force: bool = False, ctx: Cont
     videos, status = await ctx.related.lookup(vid, limit, force=force)
     source = "youtube"
     if not videos:            # YouTube's list is not available: fill the page from what this server already knows
-        videos = ctx.related.local_cards(vid, limit)
+        videos = await asyncio.to_thread(ctx.related.local_cards, vid, limit)
         source = "local" if videos else source
     return {"videos": videos, "status": status, "source": source}

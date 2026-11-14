@@ -226,6 +226,11 @@ class Extractor(Protocol):
     async def playlist_page(self, playlist_id: str, limit: int = 100, *,
                             background: bool = False) -> tuple[PlaylistSummary, list[VideoSummary]]: ...
 
+    async def channel_playlists(self, channel_id: str, limit: int = 60, *,
+                                background: bool = False) -> list[PlaylistSummary]:
+        """The playlists the channel itself has made (its Playlists tab), in YouTube's order."""
+        ...
+
     async def comments(self, video_id: str, sort: str = "top", limit: int = 20, *,
                        replies_for: int = 0, replies_per_thread: int = 10,
                        background: bool = False) -> CommentPage:
