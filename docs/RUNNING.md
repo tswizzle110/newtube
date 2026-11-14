@@ -378,6 +378,14 @@ subscriptions, Watch later and videos related to what you like. **Subscriptions*
 of your channels, as before. In **Settings → Start page** you choose which one newtube opens on (remembered by
 that browser only); Home is always one click away.
 
+## Continue watching
+
+The top of **Home** is **Continue watching**: every video you started in newtube and did not finish (at least 10 seconds in),
+most recently watched first, with a progress bar. Clicking one carries on where you stopped. A video you have started is
+**never** in the Recommended grid below it, so it cannot appear in both places. The ⋯ menu has **Mark as watched** (it
+leaves the row and counts as finished; it stays in History). Removing a video from History forgets where you stopped and so
+removes it from the row too. It is all local: no request to YouTube.
+
 ## How recommendations are ranked
 
 The **Recommended for you** list on Home ranks videos from five places, all already in your own database (it never
@@ -394,11 +402,10 @@ transparent terms, and **Why this?** under a card shows every term with its poin
 | Uploaded *N* ago | Newer scores higher (half-life 7 days). |
 | From a channel you subscribe to | A small flat bonus (0.4; the channels' uploads are most of the candidates anyway). |
 | In your Watch later | A flat bonus. |
-| You started this and did not finish | A weak nudge (0.3) so videos you stopped partway can come back without taking over. |
 | Shown *N* times without a click | A penalty for videos you keep scrolling past (last 14 days). |
 | *N* higher videos from *channel* already shown | Stops one prolific channel filling the page. |
 
-Never shown: videos you finished or watched before (unless you stopped partway in newtube), videos you marked
+Never shown: videos you finished or watched before (one you stopped partway is in Continue watching instead), videos you marked
 **Not interested**, and channels you marked **Never this channel**. Both buttons are on every For-you card and
 are remembered (locally). **Refresh** re-ranks using what you have done since.
 

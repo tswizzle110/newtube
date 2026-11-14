@@ -94,14 +94,12 @@ def test_watched_finished_and_hidden_things_are_never_recommended(conn):
     assert ids(conn) == ["fine00000a1"]
 
 
-def test_something_you_started_in_newtube_comes_back_with_a_reason(conn):
+def test_something_you_started_is_in_continue_watching_not_in_the_recommendations(conn):
     sub(conn, A)
     video(conn, "started0000a", A, age_days=2); video(conn, "other00000a1", A, age_days=2)
     conn.execute("INSERT INTO watch_sessions(id,video_id,started_at,max_position,duration) VALUES ('s','started0000a',?,50,200)", (NOW - 3600,))
     conn.execute("INSERT INTO video_progress(video_id,position,duration,completed,updated_at) VALUES ('started0000a',50,200,0,1)")
-    r = {x.video["id"]: x for x in recommend(conn, now=NOW)}
-    assert "started0000a" in r and any("started" in x.label for x in r["started0000a"].reasons)
-    assert r["started0000a"].video["resume_position"] == 50
+    assert ids(conn) == ["other00000a1"]                               # (it waits at the top of Home instead)
 
 
 # ---- signals ----------------------------------------------------------------------------------------
@@ -246,16 +244,13 @@ def test_the_page_gives_other_channels_a_share_even_when_subscriptions_score_hig
     assert not ({"gammanew000", "gammanew001"} & set(none))                      # without the share they are crowded out
 
 
-def test_a_video_you_started_and_stopped_is_only_a_weak_reason_to_show_it_again(conn):
+def test_a_half_watched_video_never_comes_back_into_the_grid_however_fresh_it_is(conn):
     sub(conn, A)
-    video(conn, "fresh000000a", A, age_days=0.5); video(conn, "stopped0000a", A, age_days=0.5)
+    video(conn, "fresh000000a", A, age_days=0.5); video(conn, "stopped0000a", A, age_days=0.1)
     conn.execute("INSERT INTO video_progress(video_id,position,duration,completed,updated_at) VALUES ('stopped0000a',100,1000,0,1)")
     conn.execute("INSERT INTO watch_sessions(id,video_id,started_at,intervals,max_position,duration) VALUES ('s','stopped0000a',?,'[[0,100]]',100,1000)",
                  (NOW - DAY,))
-    r = {x.video["id"]: x for x in recommend(conn, now=NOW)}
-    resume = [p.points for p in r["stopped0000a"].reasons if p.label.startswith("You started")]
-    assert resume and resume[0] <= 0.3 + 1e-9
-    assert Weights().resume < Weights().subscribed + 0.1 and Weights().resume < 0.5
+    assert ids(conn) == ["fresh000000a"]
 
 
 def test_the_default_weights_lean_less_on_subscriptions_and_more_on_related_and_taste():

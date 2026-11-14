@@ -9,7 +9,6 @@ offline evaluation (phase 4). So it is deliberately simple and every number is e
     freshness          newer uploads score higher (half-life ``freshness_half_life_days``)
     subscribed         the channel is one you subscribe to
     saved              the video is in your Watch later
-    resume             you started it in newtube and did not finish
     related            YouTube lists it as related to videos you like (it may be from a channel you do not subscribe to)
     taste_similarity   how close its subject is to what you watch (needs embeddings; see ml/)
     shown_unclicked    NEGATIVE: this was shown to you repeatedly and you never clicked it
@@ -19,8 +18,8 @@ videos listed as related to the ones you like (see services/related.py), other v
 not subscribe to, and the videos whose subject is closest to your taste (embeddings). The last three are how videos
 from channels you do not subscribe to get in; ``explore_share`` makes sure they get a fair share of the page.
 
-Never recommended: videos you finished, videos you watched before (unless you stopped partway in newtube),
-anything you marked "not interested", and channels you marked "don't recommend".
+Never recommended: videos you finished or watched before (one you stopped partway is in Continue watching on Home, not
+here), anything you marked "not interested", and channels you marked "don't recommend".
 
 After scoring, a light diversity pass multiplies a video's score by ``repeat_factor`` for every higher-ranked
 video from the same channel, so one prolific channel cannot fill the page.
@@ -50,7 +49,6 @@ class Weights:
     freshness: float = 1.5
     subscribed: float = 0.4                # (was 1.0: being subscribed is already most of the candidate list)
     saved: float = 1.2
-    resume: float = 0.3                    # (was 0.8: something you stopped watching is a weak reason to show it again)
     related: float = 2.5                   # near videos you like, via related lists (see services/related.py)
     related_seeds: int = 150               # how many of your most-liked videos' related lists are consulted
     related_full_at: float = 1.5           # this much support = the full related bonus
@@ -256,8 +254,7 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
     for r in rows:
         if r["id"] in hidden_videos or r["channel_id"] in hidden_channels or r["completed"]:
             continue
-        resumable = bool(r["resume_position"]) and r["resume_position"] > 0
-        if r["watched_before"] and not resumable:
+        if r["watched_before"]:                          # (a video you STARTED waits in Continue watching, not in this list)
             continue
         reasons: list[Reason] = []
 
@@ -275,7 +272,6 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
             term(w.freshness, w.unknown_age_freshness, "Upload date not known yet")
         term(w.subscribed, 1.0 if r["subscribed"] else 0.0, "From a channel you subscribe to")
         term(w.saved, 1.0 if r["saved"] else 0.0, "In your Watch later")
-        term(w.resume, 1.0 if resumable else 0.0, "You started this and did not finish")
         term(w.related, support.get(r["id"], 0.0), "Related to videos you have watched")
         if r["id"] in similar:
             term(w.taste_similarity, min(1.0, max(0.0, (similar[r["id"]] - w.taste_floor) / w.taste_span)),
@@ -287,7 +283,7 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
         video = {k: r[k] for k in ("id", "title", "channel_id", "channel_title", "published_at", "duration", "view_count",
                                    "resume_position")}
         video["completed"] = False
-        video["seen"] = bool(r["watched_before"] or resumable)
+        video["seen"] = bool(r["watched_before"])
         scored.append(Recommendation(video, sum(x.points for x in reasons), reasons,
                                      explore=not r["subscribed"] and not r["saved"]))
 

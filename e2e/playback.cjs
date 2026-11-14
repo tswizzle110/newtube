@@ -763,6 +763,17 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   check('Home is one grid of recommendations, new subscription uploads ranked in, with no shelf and no tab bar',
     ranked.includes('Recommended 1') && ranked.includes('Recommended 2') && ranked.includes('Related two') &&
     (await p.locator('.shelf, nav.tabs').count()) === 0 && (await p.locator('h1:has-text("Home")').count()) === 1, JSON.stringify(ranked));
+  // Continue watching: a video you started sits at the top and is NOT in the recommended grid below
+  await ctx.request.post(BASE + '/api/events', { data: { watch: [{ session_id: 'e2e-continue-1', video_id: 'e2eMUXED001', source: 'direct', position: 12, duration: 24, intervals: [[0, 12]] }] } });
+  await p.reload(); await p.waitForSelector('section[aria-label="Continue watching"] .card');
+  const resumeTitles = await p.locator('section[aria-label="Continue watching"] .card a.title').evaluateAll((as) => as.map((a) => a.href));
+  const gridHrefs = await p.locator('.grid:not(section .grid) .card a.title').evaluateAll((as) => as.map((a) => a.href));
+  check('Continue watching shows what you started, at the top of Home', resumeTitles.some((h) => h.includes('e2eMUXED001')) && (await p.locator('h2:has-text("Continue watching")').count()) === 1, JSON.stringify(resumeTitles));
+  check('...and a half-watched video is never in the recommended grid', !gridHrefs.some((h) => h.includes('e2eMUXED001')), JSON.stringify(gridHrefs));
+  await p.locator('section[aria-label="Continue watching"] .card').first().locator('.dots').click();
+  await p.click('button[role=menuitem]:has-text("Mark as watched")');
+  await p.waitForFunction(() => !document.querySelector('section[aria-label="Continue watching"] a.title[href*="e2eMUXED001"]'));
+  check('Mark as watched takes it out of Continue watching', true);
   await menuItem('Related two', 'Why this?');
   const why = await p.locator('.why li').allInnerTexts();
   check('"Why this?" (in the card menu) lists each reason with its points, then the total', why.length >= 3 && why.some(t => /Related to videos you have watched/.test(t)) &&
