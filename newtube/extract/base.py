@@ -89,6 +89,17 @@ class Caption:
 
 
 @dataclass
+class Storyboard:
+    """The little preview pictures YouTube makes for the seek bar: sheets of ``columns`` x ``rows`` tiles of
+    ``width`` x ``height`` pixels, one sheet per fragment, each covering that many seconds of the video."""
+    width: int
+    height: int
+    columns: int
+    rows: int
+    fragments: list[list]          # [[url, seconds], ...] in order; the URLs stay on the server
+
+
+@dataclass
 class VideoInfo:
     id: str
     title: str
@@ -107,6 +118,7 @@ class VideoInfo:
     formats: list[Format] = field(default_factory=list)
     captions: list[Caption] = field(default_factory=list)
     fetched_at: int = 0
+    storyboard: Storyboard | None = None
 
 
 @dataclass

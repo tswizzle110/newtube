@@ -56,6 +56,32 @@ async def thumbnail(video_id: str, name: str, ctx: Context = Depends(get_ctx)) -
     return Response(body, media_type=ctype, headers={"Cache-Control": "private, max-age=86400"})
 
 
+@router.get("/sb/{video_id}/{index}")
+async def storyboard_sheet(video_id: str, index: int, ctx: Context = Depends(get_ctx)) -> Response:
+    """One sheet of the seek-bar preview pictures, fetched from YouTube once and then kept on this server. It is the same kind
+    of image request as a thumbnail, and only happens for a video you are watching and hover the seek bar of."""
+    valid_video_id(video_id)
+    key = f"sb:{video_id}:{index}"
+    hit = ctx.images.get(key)
+    if hit:
+        body, ctype = hit
+        return Response(body, media_type=ctype, headers={"Cache-Control": "private, max-age=604800"})
+    for attempt in (0, 1):
+        info = await ctx.videos.get(video_id, refresh=attempt == 1)
+        sb = info.storyboard
+        if not sb or not 0 <= index < len(sb.fragments):
+            raise HTTPException(404, "no preview")
+        r = await ctx.http.get_media(sb.fragments[index][0])
+        if r.status_code in (403, 404, 410) and attempt == 0:
+            continue                                     # the signed address went stale: ask for a fresh one once
+        break
+    if r.status_code != 200:
+        raise HTTPException(404, "no preview")
+    body, ctype = r.content, r.headers.get("content-type", "image/jpeg")
+    ctx.images.put(key, body, ctype)
+    return Response(body, media_type=ctype, headers={"Cache-Control": "private, max-age=604800"})
+
+
 @router.get("/avatar/{channel_id}")
 async def avatar(channel_id: str, ctx: Context = Depends(get_ctx)) -> Response:
     valid_channel_id(channel_id)
@@ -217,7 +243,8 @@ async def _ranges_for(ctx: Context, video_id: str, fmt: Format) -> Ranges | None
     return ranges
 
 
-async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None, *, avc_only: bool = False):
+async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None, *, avc_only: bool = False,
+                audio_only: bool = False):
     """The video and audio streams to offer (with their byte layout), re-extracting once if the signed URLs went stale.
     Returns (info, video reps, audio reps), or None when no combination a player can use exists."""
     prefs = playback.load(ctx.conn)            # ?codec= overrides the preference (the player's fallback)
@@ -227,12 +254,14 @@ async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None
                                                 prefs["max_height"])
         if avc_only:
             video_fmts = [f for f in video_fmts if codec_family(f) == "avc1"]
+        if audio_only:
+            video_fmts = []                       # (audio only: no picture is asked for at all, which saves data)
         results = await asyncio.gather(*(_ranges_for(ctx, video_id, f)
                                          for f in video_fmts + audio_fmts))
         reps = {f.format_id: Rep(f, r) for f, r in zip(video_fmts + audio_fmts, results) if r}
         video = [reps[f.format_id] for f in video_fmts if f.format_id in reps]
         audio = [reps[f.format_id] for f in audio_fmts if f.format_id in reps]
-        if video and audio:
+        if (video or audio_only) and audio:
             return info, video, audio   # (a stale signed URL makes every probe fail; attempt 1 re-extracts once)
     return None
 
@@ -245,12 +274,12 @@ def _check_options(lang: str | None, codec: str | None = None) -> None:
 
 
 @router.get("/dash/{video_id}.mpd")
-async def dash_manifest(video_id: str, lang: str | None = None, codec: str | None = None,
+async def dash_manifest(video_id: str, lang: str | None = None, codec: str | None = None, audio_only: bool = False,
                         ctx: Context = Depends(get_ctx)) -> Response:
     """DASH manifest for adaptive playback (up to 1080p H.264). 404 means: use the muxed fallback."""
     valid_video_id(video_id)
     _check_options(lang, codec)
-    found = await _reps(ctx, video_id, lang, codec)
+    found = await _reps(ctx, video_id, lang, codec, audio_only=audio_only)
     if not found:
         raise HTTPException(404, "no DASH-compatible formats")
     info, video, audio = found

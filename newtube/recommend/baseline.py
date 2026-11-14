@@ -156,7 +156,7 @@ def _blocked(conn: sqlite3.Connection) -> tuple[set[str], set[str]]:
 
 _SELECT = """
 SELECT v.id, v.title, v.channel_id, COALESCE(c.title, '') AS channel_title, v.published_at, v.duration,
-       v.view_count, p.position AS resume_position, p.completed AS completed,
+       v.view_count, v.category AS category, p.position AS resume_position, p.completed AS completed,
        (s.channel_id IS NOT NULL) AS subscribed,
        EXISTS (SELECT 1 FROM playlist_items i JOIN playlists pl ON pl.id = i.playlist_id
                WHERE i.video_id = v.id AND pl.kind = 'watch_later') AS saved,
@@ -281,7 +281,7 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
             reasons.append(Reason(f"Shown {n} time{'s' if n != 1 else ''} without a click",
                                   w.shown_unclicked * min(1.0, n / w.fatigue_full_at)))
         video = {k: r[k] for k in ("id", "title", "channel_id", "channel_title", "published_at", "duration", "view_count",
-                                   "resume_position")}
+                                   "resume_position", "category")}
         video["completed"] = False
         video["seen"] = bool(r["watched_before"])
         scored.append(Recommendation(video, sum(x.points for x in reasons), reasons,

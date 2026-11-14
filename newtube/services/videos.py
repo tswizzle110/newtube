@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from ..db.queries import cache
-from ..extract.base import Caption, Chapter, ChannelInfo, Extractor, Format, VideoInfo
+from ..extract.base import Caption, Chapter, ChannelInfo, Extractor, Format, Storyboard, VideoInfo
 
 INFO_TTL = 4 * 3600          # used when the stream links carry no expiry time
 MAX_TTL = 5 * 3600           # even when they are good for longer
@@ -24,7 +24,7 @@ EXPIRY_MARGIN = 30 * 60      # stop using the links this long before they die, s
 MIN_TTL = 5 * 60
 # Bump when the fields we cache change (e.g. a new Format attribute), so entries cached by older
 # code are ignored instead of being served with missing data for up to INFO_TTL.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def cache_seconds(info: VideoInfo, now: int | None = None) -> int:
@@ -44,6 +44,7 @@ def info_from_dict(d: dict[str, Any]) -> VideoInfo:
     d["chapters"] = [Chapter(**c) for c in d.get("chapters", [])]
     d["formats"] = [Format(**f) for f in d.get("formats", [])]
     d["captions"] = [Caption(**c) for c in d.get("captions", [])]
+    d["storyboard"] = Storyboard(**d["storyboard"]) if d.get("storyboard") else None
     return VideoInfo(**d)
 
 

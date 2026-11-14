@@ -88,3 +88,15 @@ def test_manifest_defaults_to_original_audio_and_probes_only_one_audio_stream(tm
         meta = client.get("/api/video/aaaaaaaaaaa").json()
         assert [(t["lang"], t["original"]) for t in meta["audio_tracks"]][0] == ("en-US", True)
         assert {t["lang"] for t in meta["audio_tracks"]} == {"en-US", "es-US", "de-DE"}
+
+
+def test_audio_only_manifest_has_no_video_and_probes_no_video_stream(tmp_path):
+    handler, seen = mp4_server(stale_sig="none")
+    with make_client(tmp_path, handler, DashExtractor()) as (client, ctx):
+        r = client.get("/api/dash/aaaaaaaaaaa.mpd?audio_only=true")
+        root = ET.fromstring(r.text)
+        kinds = [a.get("contentType") for a in root.iter(f"{{{NS}}}AdaptationSet")]
+        assert r.status_code == 200 and kinds == ["audio"]
+        assert all("/v?" not in str(req.url) for req in seen)                      # the video stream was never even looked at
+        full = ET.fromstring(client.get("/api/dash/aaaaaaaaaaa.mpd").text)
+        assert [a.get("contentType") for a in full.iter(f"{{{NS}}}AdaptationSet")] == ["video", "audio"]

@@ -33,7 +33,7 @@ from ..net.http import absolute_url, ytdlp_network_opts
 from ..net.ratelimit import Lane, RateLimiter
 from .base import (
     AgeRestricted, BotCheck, Caption, Chapter, ChannelInfo, ChannelSummary, Comment, CommentPage,
-    ExtractionError, Format, PlaylistSummary, RelatedUnsupported, SearchItem, VideoInfo, VideoSummary, VideoUnavailable,
+    ExtractionError, Format, PlaylistSummary, RelatedUnsupported, SearchItem, Storyboard, VideoInfo, VideoSummary, VideoUnavailable,
 )
 
 log = logging.getLogger("newtube.ytdlp")
@@ -104,6 +104,25 @@ def parse_formats(raw: list[dict[str, Any]]) -> list[Format]:
     return out
 
 
+PREVIEW_WIDTH = 160          # the smallest preview that is still sharp enough on a seek bar
+
+
+def parse_storyboard(raw: list[dict[str, Any]]) -> Storyboard | None:
+    """The seek-bar preview sheets, from the "storyboard" entries yt-dlp lists among a video's formats (no extra request: they
+    come with the video's own information). Picks the smallest set at least PREVIEW_WIDTH wide (else the biggest there is)."""
+    sets = []
+    for f in raw or []:
+        frags = [[fr["url"], float(fr.get("duration") or 0)] for fr in (f.get("fragments") or [])
+                 if str(fr.get("url") or "").startswith("https://") and fr.get("duration")]
+        if (f.get("format_note") == "storyboard" or f.get("ext") == "mhtml") and frags and f.get("width") and f.get("height") \
+                and f.get("columns") and f.get("rows"):
+            sets.append(Storyboard(int(f["width"]), int(f["height"]), int(f["columns"]), int(f["rows"]), frags))
+    if not sets:
+        return None
+    big_enough = [s for s in sets if s.width >= PREVIEW_WIDTH]
+    return min(big_enough, key=lambda s: s.width) if big_enough else max(sets, key=lambda s: s.width)
+
+
 def parse_captions(info: dict[str, Any]) -> list[Caption]:
     caps: list[Caption] = []
 
@@ -149,6 +168,7 @@ def parse_video_info(info: dict[str, Any], now: int | None = None) -> VideoInfo:
         formats=parse_formats(info.get("formats") or []),
         captions=parse_captions(info),
         fetched_at=now if now is not None else int(time.time()),
+        storyboard=parse_storyboard(info.get("formats") or []),
     )
 
 

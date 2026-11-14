@@ -45,6 +45,8 @@ async def video(video_id: str, ctx: Context = Depends(get_ctx)) -> dict[str, Any
                      "vcodec": f.vcodec, "acodec": f.acodec, "muxed": f.is_muxed,
                      "tbr": f.tbr} for f in v.formats],
         "resume_position": prog["position"] if prog and not prog["completed"] else 0,
+        "storyboard": ({"w": v.storyboard.width, "h": v.storyboard.height, "cols": v.storyboard.columns, "rows": v.storyboard.rows,
+                        "seconds": [f[1] for f in v.storyboard.fragments]} if v.storyboard else None),
         "subscribed": subscribed,
         **lists_state,
     }

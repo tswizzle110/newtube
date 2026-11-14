@@ -7,9 +7,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..app import Context
+from ..db.queries import localsearch
 from ..db.queries.events import log_event
 from ..extract.base import BotCheck, ExtractionError
 from ..extract.searchfilter import BadFilter, SearchFilter, check
+from ..services.lists import enrich_videos
 from .deps import get_ctx, valid_channel_id, valid_playlist_id
 
 router = APIRouter(prefix="/api")
@@ -46,6 +48,20 @@ async def search(q: str = Query(min_length=1, max_length=200), kind: str = "vide
         payload["filters"] = {"date": filters.upload_date, "duration": filters.duration, "sort": filters.sort}
     log_event(ctx.conn, "search", payload=payload)
     return {"query": q, "kind": kind, "results": results}
+
+
+@router.get("/search/suggest")
+async def suggest(q: str = Query("", max_length=200), ctx: Context = Depends(get_ctx)) -> list[str]:
+    """What you could search for: your own past searches. Local only (nothing is sent to YouTube while you type)."""
+    return localsearch.suggestions(ctx.conn, q)
+
+
+@router.get("/channel/{channel_id}/search")
+async def channel_search(channel_id: str, q: str = Query(min_length=1, max_length=200), ctx: Context = Depends(get_ctx)) -> dict[str, Any]:
+    """Search inside one channel, among the videos this server already has saved. No request to YouTube."""
+    valid_channel_id(channel_id)
+    videos, searched = localsearch.channel_videos(ctx.conn, channel_id, q)
+    return {"videos": enrich_videos(ctx.conn, videos), "searched": searched}
 
 
 @router.get("/channel/{channel_id}")

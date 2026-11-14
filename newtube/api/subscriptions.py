@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from ..app import Context
 from ..db.queries import subscriptions as subs
 from ..db.queries.events import log_event
-from ..extract.base import BotCheck, ExtractionError
+from ..extract.base import BotCheck, ChannelInfo, ExtractionError
+from ..importers import opml
 from ..jobs.scheduler import poll_channel
 from ..net.ratelimit import Lane
 from .deps import get_ctx, valid_channel_id
@@ -50,6 +51,42 @@ async def add_sub(body: SubscribeIn, ctx: Context = Depends(get_ctx)) -> dict[st
         poll_error = f"{type(e).__name__}: {e}"
     return {"id": ch.id, "title": ch.title, "created": created, "new_videos": new,
             "poll_error": poll_error}
+
+
+class OpmlIn(BaseModel):
+    opml: str
+
+
+@router.get("/subscriptions/export.opml")
+async def export_subscriptions(ctx: Context = Depends(get_ctx)) -> Response:
+    """Your subscriptions as an OPML file (the standard list every feed reader and YouTube client can import)."""
+    text = opml.export_opml((r["id"], r["title"]) for r in subs.list_subscriptions(ctx.conn))
+    return Response(text, media_type="text/x-opml", headers={"Content-Disposition": 'attachment; filename="newtube-subscriptions.opml"'})
+
+
+@router.post("/subscriptions/import")
+async def import_subscriptions(body: OpmlIn, ctx: Context = Depends(get_ctx)) -> dict[str, int]:
+    """Subscribe to every channel in an OPML file. Nothing is asked of YouTube: the file has each channel's id and name, and
+    the pictures and uploads fill in afterwards in the background."""
+    try:
+        channels = opml.parse_opml(body.opml)
+    except opml.BadOpml as e:
+        raise HTTPException(400, str(e)) from e
+    added = sum(subs.subscribe(ctx.conn, ChannelInfo(cid, title), source="opml") for cid, title in channels)
+    return {"found": len(channels), "added": added, "already": len(channels) - added}
+
+
+@router.get("/subscriptions/new")
+async def new_uploads(ctx: Context = Depends(get_ctx)) -> dict[str, int]:
+    """How many new uploads are waiting (the number beside Subscriptions in the sidebar). Local only."""
+    return {"count": subs.new_count(ctx.conn)}
+
+
+@router.post("/subscriptions/seen")
+async def seen(ctx: Context = Depends(get_ctx)) -> dict[str, bool]:
+    """You opened Subscriptions: what is there now is no longer new."""
+    subs.mark_seen(ctx.conn)
+    return {"ok": True}
 
 
 @router.post("/subscriptions/pictures")

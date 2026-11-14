@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 from .events import log_event
+from . import settings as saved
 from .seen import SEEN_SQL
 from ...extract.base import ChannelInfo, VideoSummary
 from ...extract.rss import Feed
@@ -138,6 +139,29 @@ def due_for_poll(conn: sqlite3.Connection, interval: int, now: int | None = None
         (now - interval,),
     ).fetchall()
     return [r["id"] for r in rows]
+
+
+NEW_WINDOW = 14 * 86400          # an upload older than this is never "new", however long you were away
+SEEN_KEY = "subscriptions_seen_at"
+
+
+def new_count(conn: sqlite3.Connection, now: int | None = None) -> int:
+    """How many uploads from your subscriptions arrived since you last opened Subscriptions (and that you have not watched).
+    The first time it is asked, "now" is the starting point, so nothing old is announced as new."""
+    now = now if now is not None else int(time.time())
+    since = saved.get(conn, SEEN_KEY)
+    if since is None:
+        saved.put(conn, SEEN_KEY, now)
+        return 0
+    return conn.execute(
+        "SELECT count(*) FROM videos v JOIN subscriptions s ON s.channel_id = v.channel_id"
+        " LEFT JOIN video_progress p ON p.video_id = v.id"
+        " WHERE v.from_import = 0 AND v.title <> '' AND v.first_seen_at > ? AND COALESCE(v.published_at, v.first_seen_at) > ?"
+        " AND NOT " + SEEN_SQL, (since, now - NEW_WINDOW)).fetchone()[0]
+
+
+def mark_seen(conn: sqlite3.Connection, now: int | None = None) -> None:
+    saved.put(conn, SEEN_KEY, now if now is not None else int(time.time()))
 
 
 def get_feed(conn: sqlite3.Connection, *, limit: int = 60,
