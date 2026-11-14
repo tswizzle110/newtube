@@ -30,6 +30,17 @@
   let timer = null
   let playlists = $state(null)       // the playlists the channel has made (its Playlists tab); null until loaded
   let playlistsError = $state('')
+  let find = $state('')              // search inside this channel's saved videos (local: no request to YouTube)
+  let found = $state(null)           // { videos, searched } for the current search
+  let findTimer
+  function onFind() {
+    clearTimeout(findTimer)
+    const q = find.trim()
+    if (!q) { found = null; return }
+    findTimer = setTimeout(async () => {
+      try { found = await api.get(`/api/channel/${id}/search?q=${encodeURIComponent(q)}`) } catch { found = { videos: [], searched: 0 } }
+    }, 250)
+  }
   let sentinel = $state()
 
   // Fetch one page. `first` starts the list over; otherwise the page is appended.
@@ -128,6 +139,7 @@
     </nav>
 
     {#if tab === 'videos'}
+      <input class="input find" type="search" bind:value={find} oninput={onFind} placeholder="Search this channel's saved videos" aria-label="Search this channel" maxlength="200" />
       <div class="chips sorts" role="group" aria-label="Sort videos">
         {#each SORTS as [k, label]}
           <a href={`/channel/${id}${k === 'newest' ? '' : '?sort=' + k}`} class="chip" class:active={k === sort}>{label}</a>
@@ -144,6 +156,16 @@
           {#each playlists as pl, i (pl.id)}<PlaylistResult playlist={pl} position={i} />{/each}
         </div>
       {/if}
+    {:else if found}
+      <p class="muted small">
+        {found.videos.length ? `${found.videos.length} match${found.videos.length === 1 ? '' : 'es'}` : 'No matches'} among the {found.searched.toLocaleString()} video{found.searched === 1 ? '' : 's'} saved on this server.
+        {#if found.searched < 60}Sort by Oldest or Popular once to save every upload of this channel, then this searches all of them.{/if}
+      </p>
+      <div class="grid">
+        {#each found.videos as v, i (v.id)}
+          <VideoCard video={v} surface="channel" position={i} {requestId} />
+        {/each}
+      </div>
     {:else}
     {#if scanning}
       <div class="scan" role="status">
@@ -197,6 +219,7 @@
   .desc { margin: 8px 0 0; max-width: 70ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .tabs { margin-bottom: 14px; }
   .sorts { margin-bottom: 20px; }
+  .find { width: min(100%, 360px); margin-bottom: 14px; display: block; }
   .scan { background: var(--bg-elev); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
   .scan progress { width: 100%; accent-color: var(--accent); }
   .sentinel { height: 1px; }

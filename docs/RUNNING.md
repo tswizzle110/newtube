@@ -177,6 +177,8 @@ obeys the bot gate, so a future change cannot quietly bypass it):
 | Channel-page lookup, only when a feed is broken | **heavy** | 6 an hour (counted in the database, failures included); a broken-feed channel is revisited every 12 h |
 | Backfill of imported videos | **heavy** | `backfill_daily_cap` a day, spread over the day; counted in the database |
 | Related lists for recommendations | **heavy** | `related_daily_cap` a day, spread over the day; counted in the database |
+| Seek-bar preview pictures | per video watched | an image sheet from `i.ytimg.com`, fetched when you first hover the seek bar (one to three per video, depending on its length), then kept on this server; the addresses come with the video's own information, so there is no extra lookup |
+| Captions you chose to keep on | per video watched | the same caption download as turning them on by hand, done for you on each video that has them in your language |
 | Channel pictures (sidebar) | background | one channel lookup per subscription that has no picture, within `channel_picture_daily_cap` a day (default 40, spread over the day: about one every 36 minutes; 0 turns it off); each channel is tried once, then not again for 3 days |
 | Opening a video (info, Up next, comments, search, channel page) | **heavy** | only what you click; results are cached (video 4 h, related 3 days, search 1 h, channel 15 min); a failed lookup is remembered for 45 s so retries cost nothing |
 | Thumbnails and channel pictures | image server | fetched once, then kept in the disk cache |
@@ -395,6 +397,29 @@ in this order: the **queue**, then the next video of the **playlist** you are in
 above Up next and on the Settings page) the first video in **Up next** you have not watched. There is a 5-second countdown
 over the player with **Play now** and **Cancel**; cancelling leaves the queue as it was. Whatever is playing is removed from
 the queue. None of this asks YouTube for anything beyond the videos you play.
+
+## Browsing and watching extras
+
+All of these use data the server already has; the only thing that asks YouTube for anything is the seek-bar preview (see below).
+
+- **Subscriptions** is grouped under *Today*, *Yesterday* and the date, with a **Hide watched** switch (remembered), a *channel*
+  menu to look at one channel, and **a number beside Subscriptions in the sidebar** counting new uploads (unwatched, under two
+  weeks old) that arrived since you last opened the page. Opening Subscriptions clears it.
+- **Home topic chips** (*All*, *Music*, *Science & Technology* ...) filter the recommended grid by the category YouTube gave each
+  video. They appear once at least two categories have two or more videos each; a video whose details are not stored yet has no
+  category and shows only under *All*.
+- **Search suggestions:** the sidebar search box suggests *your own* past searches as you type (and the latest ones when you
+  click it). Nothing is sent anywhere while you type. **Search this channel** on a channel page looks through the videos this
+  server has saved for that channel: every upload once you have sorted the channel by Oldest or Popular (that reads and saves
+  the whole list), otherwise whatever it has seen of it. No request to YouTube.
+- **Seek-bar previews:** hovering (or dragging on) the seek bar shows the frame at that moment. YouTube makes small picture sheets
+  for this and lists them with the video's information. The server fetches a sheet from `i.ytimg.com` the first time you
+  hover (one to three per video, depending on length), keeps it, and never hands YouTube's address to the browser.
+- **Player:** *Picture in picture* (⧉), **Audio only** (♪: asks for no picture at all, a fraction of the data), and on a touch
+  screen a **double tap** on the left or right side skips 10 seconds. The speed you choose is remembered **per channel**, and
+  your captions choice (language or off) is remembered and applied to later videos. All of it lives in this browser.
+- **Export and import subscriptions** (Manage channels): an OPML file, the standard list feed readers and other YouTube apps use.
+  Import asks YouTube for nothing (the file carries each channel's id and name); pictures and uploads then fill in by themselves.
 
 ## How recommendations are ranked
 

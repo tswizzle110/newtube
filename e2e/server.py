@@ -8,7 +8,7 @@ from newtube.auth import Auth
 from newtube.config import Settings
 from newtube.db.connection import connect, migrate
 from newtube.extract.base import (
-    Caption, ChannelInfo, ChannelSummary, Chapter, Comment, CommentPage, Format, PlaylistSummary, VideoInfo, VideoSummary,
+    Caption, ChannelInfo, ChannelSummary, Chapter, Comment, CommentPage, Format, PlaylistSummary, Storyboard, VideoInfo, VideoSummary,
 )
 from newtube.media.diskcache import DiskCache
 from newtube.net.http import OutboundClient
@@ -113,7 +113,8 @@ class Ex:
                          1_700_000_000, 1234, None, [], None, False, 0,
                          chapters=[Chapter(0, "Intro"), Chapter(8, "Middle part"), Chapter(16, "Outro")],
                          captions=[Caption("en", "English", "https://www.youtube.com/api/timedtext?x=1", "vtt")],
-                         formats=fm, fetched_at=1)
+                         formats=fm, fetched_at=1,
+                         storyboard=Storyboard(160, 90, 5, 5, [["https://i.ytimg.com/sb/e2e/M0.jpg?sigh=a", 25.0]]))
     async def resolve_channel(self, ref, *, background=False):
         return ChannelInfo(ref, "E2E Channel", "@e2e", "https://yt3.ggpht.com/av", None, 1200)
 
@@ -221,6 +222,7 @@ async def _seed_demo():
     titles = ["Why sourdough starters fail (and how to fix it)", "Ten minutes of rain on a tin roof", "Restoring a 1987 home computer, part {n}",
               "Nocturne in E flat, slow practice", "Walking Tokyo at night, no talking", "Building a workbench from pallets",
               "The opening trap nobody teaches", "What the new telescope images really show", "A very long title that goes on and on to check how wrapping behaves in a narrow card layout"]
+    categories = ["Howto & Style", "Travel & Events", "Science & Technology", "Music", "Travel & Events", "Autos & Vehicles", "Gaming", "Education"]
     for ci, name in enumerate(names):
         cid = "UC" + chr(97 + ci) * 22
         conn.execute("INSERT OR IGNORE INTO channels(id,title,created_at) VALUES (?,?,1)", (cid, name))
@@ -228,9 +230,9 @@ async def _seed_demo():
             conn.execute("INSERT OR IGNORE INTO subscriptions VALUES (?,1)", (cid,))
         for vi in range(8):
             vid = f"demo{ci}{vi:06d}"
-            conn.execute("INSERT OR REPLACE INTO videos(id,channel_id,title,published_at,duration,view_count,first_seen_at) VALUES (?,?,?,?,?,?,1)",
+            conn.execute("INSERT OR REPLACE INTO videos(id,channel_id,title,published_at,duration,view_count,category,first_seen_at) VALUES (?,?,?,?,?,?,?,1)",
                          (vid, cid, titles[(ci + vi) % len(titles)].replace("{n}", str(vi + 1)), now - int((vi * 2.5 + ci * 0.7 + 0.3) * 86400),
-                          240 + 97 * ci + 61 * vi, 1200 * (vi + 1) * (ci + 1)))
+                          240 + 97 * ci + 61 * vi, 1200 * (vi + 1) * (ci + 1), categories[ci]))
     vids = [r[0] for r in conn.execute("SELECT id FROM videos WHERE id LIKE 'demo%' ORDER BY id")]
     for i, vid in enumerate(vids[:14]):                     # watched: some finished, some stopped partway
         dur = conn.execute("SELECT duration FROM videos WHERE id=?", (vid,)).fetchone()[0]

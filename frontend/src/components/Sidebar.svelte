@@ -1,12 +1,20 @@
 <script>
   import { tick } from 'svelte'
   import { router, navigate } from '../lib/router.svelte.js'
-  import { nav, subs, mylists, setCollapsed, setSubsOpen, loadLists } from '../lib/nav.svelte.js'
+  import { nav, subs, subsNew, mylists, setCollapsed, setSubsOpen, loadLists } from '../lib/nav.svelte.js'
   import { api } from '../lib/api.js'
   import { queue } from '../lib/queue.svelte.js'
 
   let { theme, ontheme, onlogout } = $props()
   let searchEl = $state()
+  let suggestions = $state([])     // your own past searches (local: nothing is sent to YouTube while you type)
+  let suggestTimer
+  function suggest() {
+    clearTimeout(suggestTimer)
+    suggestTimer = setTimeout(async () => {
+      try { suggestions = await api.get(`/api/search/suggest?q=${encodeURIComponent(q.trim())}`) } catch { suggestions = [] }
+    }, 120)
+  }
   let q = $state(new URLSearchParams(location.search).get('q') ?? '')
 
   const is = (p) => router.pathname === p
@@ -59,13 +67,15 @@
 
   <form class="search" onsubmit={doSearch} role="search">
     <input class="input" bind:this={searchEl} bind:value={q} placeholder="Search  ( / )" aria-label="Search" maxlength="200"
+           list="search-suggestions" autocomplete="off" oninput={suggest} onfocus={suggest}
            onkeydown={(e) => e.key === 'Escape' && e.target.blur()} />
+    <datalist id="search-suggestions">{#each suggestions as s}<option value={s}></option>{/each}</datalist>
   </form>
 
   <nav>
     <a class="item" class:active={is('/')} href="/">Home</a>
     <div class="row" class:active={is('/subscriptions')}>
-      <a class="label" href="/subscriptions" onclick={openSubscriptions}>Subscriptions</a>
+      <a class="label" href="/subscriptions" onclick={openSubscriptions}>Subscriptions{#if subsNew.count}<span class="newbadge" title="New uploads since you last looked">{subsNew.count > 99 ? '99+' : subsNew.count}</span>{/if}</a>
       <button class="chev" aria-expanded={nav.subsOpen} aria-controls="sub-list" title={nav.subsOpen ? 'Hide channels' : 'Show channels'}
               onclick={() => setSubsOpen(!nav.subsOpen)}>{nav.subsOpen ? '▾' : '▸'}</button>
     </div>
@@ -134,7 +144,8 @@
   .row, .item { display: flex; align-items: center; border-radius: 8px; color: var(--text-dim); }
   .row:hover, .item:hover { background: var(--bg-hover); color: var(--text); }
   .row.active, .item.active { background: var(--bg-hover); color: var(--text); }
-  .label { flex: 1; padding: 8px 12px; }
+  .label { flex: 1; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+  .newbadge { background: var(--accent); color: var(--accent-fg); border-radius: 999px; font-size: 11px; font-weight: 700; padding: 0 7px; min-width: 18px; text-align: center; line-height: 18px; }
   .item { padding: 8px 12px; }
   .lib { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
   .plus { background: none; border: 0; color: var(--text-dim); font-size: 15px; padding: 0 4px; border-radius: 6px; }

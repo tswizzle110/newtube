@@ -9,6 +9,7 @@
   let error = $state('')
   let note = $state('')
   let fetching = $state(false)
+  let opmlNote = $state('')
   let pictureNote = $state('')
   const missing = $derived(channels.filter((c) => !c.has_avatar).length)       // subscriptions that show a letter instead of a picture
   let broken = $state({})          // channels whose picture would not load: show their letter instead
@@ -40,6 +41,19 @@
     } catch (err) { error = err.message } finally { fetching = false }
   }
 
+  // Import subscriptions from an OPML file (no request to YouTube: the file has each channel's id and name).
+  async function importOpml(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    opmlNote = ''; error = ''
+    try {
+      const r = await api.post('/api/subscriptions/import', { opml: await file.text() })
+      opmlNote = `Found ${r.found} channel${r.found === 1 ? '' : 's'}: ${r.added} new, ${r.already} already subscribed.${r.added ? ' Their pictures and videos fill in over the next while.' : ''}`
+      await load()
+    } catch (err) { error = err.message }
+  }
+
   // Unsubscribing happens at once (no "are you sure?" click); the note below it offers Undo instead.
   let undo = $state(null)
   async function remove(c) {
@@ -65,6 +79,12 @@
     <button class="btn primary" disabled={busy || !ref.trim()}>{busy ? 'Adding…' : 'Subscribe'}</button>
   </form>
   {#if error}<p class="error">{error}</p>{/if}
+  <p class="muted small io">
+    Subscriptions as a file (OPML, the standard that feed readers and other YouTube apps use):
+    <a class="btn small" href="/api/subscriptions/export.opml" download>Export</a>
+    <label class="btn small">Import<input type="file" accept=".opml,.xml,text/xml,text/x-opml" hidden onchange={importOpml} /></label>
+    {#if opmlNote}<span>{opmlNote}</span>{/if}
+  </p>
   {#if note}<p class="muted">{note}</p>{/if}
   {#if undo}<p class="muted">Unsubscribed from {undo.title}. <button class="link-btn" onclick={restore}>Undo</button></p>{/if}
 
@@ -95,6 +115,7 @@
 </div>
 
 <style>
+  .io { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .add { display: flex; gap: 8px; margin-bottom: 12px; }
   .add .input { flex: 1; }
   ul { list-style: none; padding: 0; margin: 16px 0; display: flex; flex-direction: column; gap: 4px; }

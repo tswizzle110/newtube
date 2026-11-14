@@ -15,7 +15,32 @@
   // were hidden when the finger went down.)
   let tapRevealsOnly = false, lastPointer = 'mouse'
   const fingerDown = (e) => { lastPointer = e.pointerType; tapRevealsOnly = e.pointerType === 'touch' && !showControls }
-  function videoClick() {
+  // Touch: a double tap on the left or right side skips 10 s back or forward (like YouTube's phone app). To tell a double
+  // tap from a single one, a single tap waits a moment before it pauses or plays.
+  let tapTimer = null, lastTapAt = 0
+  function skip(delta) {
+    el.currentTime = Math.max(0, Math.min((el.duration || Infinity) - 0.1, el.currentTime + delta))
+    say(delta > 0 ? `+${delta} s` : `−${-delta} s`)
+    trackEvent('seek', { video_id: video.id, payload: { from: Math.round(el.currentTime - delta), to: Math.round(el.currentTime), via: 'double-tap' } })
+  }
+  function videoClick(e) {
+    if (lastPointer === 'touch') {
+      const now = Date.now()
+      if (now - lastTapAt < 300) {                                   // the second tap
+        clearTimeout(tapTimer); tapTimer = null; lastTapAt = 0; tapRevealsOnly = false
+        const r = el.getBoundingClientRect()
+        const x = (e.clientX - r.left) / r.width
+        if (x < 0.4) skip(-10)
+        else if (x > 0.6) skip(10)
+        wake()
+        return
+      }
+      lastTapAt = now
+      if (tapRevealsOnly) { tapRevealsOnly = false; wake(); return }
+      clearTimeout(tapTimer)
+      tapTimer = setTimeout(() => { tapTimer = null; toggle() }, 260)
+      return
+    }
     if (tapRevealsOnly) { tapRevealsOnly = false; wake(); return }
     toggle()
   }
@@ -33,11 +58,13 @@
   let error = $state('')
   let qualities = $state([]) // [{ h: height, fps }], high to low
   let chosenQuality = $state('auto')
+  const pipOk = typeof document !== 'undefined' && !!document.pictureInPictureEnabled
+  let audioOnly = $state(false)  // sound only: no picture is fetched at all (saves data; a cover is shown)
   let activeHeight = $state(0)   // the quality Shaka is fetching NEXT (it buffers well ahead of what you see)
   let shownHeight = $state(0)    // the quality of the picture on screen right now (what the label should say)
   let capLang = $state(null)
   let audioLang = $state(initialAudio()) // 'original' or a language code like 'es-US'
-  let hover = $state(null) // { frac, time }
+  let hover = $state(null) // { frac, time, px }  (px: where the preview sits, kept inside the bar)
   let scrubbing = $state(false)
   let toast = $state('')
   let help = $state(false)
@@ -106,10 +133,29 @@
     const q = []
     if (lang && lang !== 'original') q.push(`lang=${encodeURIComponent(lang)}`)
     if (codec) q.push(`codec=${codec}`)
+    if (audioOnly) q.push('audio_only=true')
     return `/api/dash/${video.id}.mpd` + (q.length ? '?' + q.join('&') : '')
   }
   // "1080p60", "1440p (2K)", "2160p (4K)"
   const qname = (h, fps = 0) => `${h}p${fps >= 50 ? Math.round(fps) : ''}${h >= 2160 ? ' (4K)' : h >= 1440 ? ' (2K)' : ''}`
+
+  // Sound only, from here: the same stream without any picture (a quarter of the data, and the screen can stay off).
+  async function toggleAudioOnly() {
+    if (!shakaPlayer || mode !== 'dash' || refreshing || recovering) return
+    audioOnly = !audioOnly
+    const at = el.currentTime, wasPlaying = !el.paused
+    trackEvent('audio_only', { video_id: video.id, payload: { on: audioOnly } })
+    say(audioOnly ? 'Audio only' : 'Video on')
+    try {
+      await shakaPlayer.load(manifestUrl(audioLang, codecUsed), at)
+      syncQualities()
+      if (wasPlaying) el.play().catch(() => {})
+    } catch (e) {
+      audioOnly = !audioOnly
+      say('Could not switch')
+      console.warn(e)
+    }
+  }
 
   async function setAudio(lang) {
     menu = null
@@ -197,6 +243,11 @@
         netNote = ''
         mode = 'dash'
         syncQualities()
+        const r = savedRate()                                                // this channel's usual speed
+        if (r !== 1) { rate = r; el.playbackRate = r }
+        let wantCaptions = ''
+        try { wantCaptions = localStorage.getItem('captionLang') || '' } catch { /* private mode */ }
+        if (wantCaptions && video.captions?.some((c) => c.lang === wantCaptions)) setCaptions(wantCaptions, { quiet: true, remember: false })
         el.play().catch(() => {})
       } catch (e) {
         if (gone) return
@@ -423,13 +474,35 @@
     say(`Volume ${Math.round(volume * 100)}%`)
   }
   function toggleMute() { muted = !muted; el.muted = muted; say(muted ? 'Muted' : 'Unmuted') }
+  // Speed is remembered for each channel (a lecture channel at 1.5x, a music channel at 1x), in this browser.
+  const RATES_KEY = 'rates'
+  function savedRate() {
+    try { return Number(JSON.parse(localStorage.getItem(RATES_KEY) || '{}')[video.channel_id]) || 1 } catch { return 1 }
+  }
+  function saveRate(r) {
+    if (!video.channel_id) return
+    try {
+      const all = JSON.parse(localStorage.getItem(RATES_KEY) || '{}')
+      if (r === 1) delete all[video.channel_id]; else all[video.channel_id] = r
+      const keys = Object.keys(all)
+      for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete all[k]
+      localStorage.setItem(RATES_KEY, JSON.stringify(all))
+    } catch { /* private mode */ }
+  }
   function setRate(r) {
-    rate = r; el.playbackRate = r; menu = null; say(`Speed ${r}×`)
+    rate = r; el.playbackRate = r; menu = null; say(`Speed ${r}×`); saveRate(r)
     tracker?.event('speed_change', { rate: r, position: Math.round(el.currentTime) })
   }
   function stepRate(dir) {
     const i = SPEEDS.indexOf(rate)
     setRate(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 3 : i) + dir))])
+  }
+  async function togglePip() {
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture()
+      else await el.requestPictureInPicture()
+      trackEvent('pip', { video_id: video.id })
+    } catch { say("Picture in picture isn't available here") }
   }
   function toggleFullscreen() {
     if (document.fullscreenElement) document.exitFullscreen()
@@ -443,11 +516,12 @@
     seekTo(target.start); say(target.title)
   }
 
-  function setCaptions(lang) {
+  function setCaptions(lang, { quiet = false, remember = true } = {}) {
     menu = null
+    if (remember) { try { localStorage.setItem('captionLang', lang ?? '') } catch { /* private mode */ } }
     for (const tt of el.textTracks) tt.mode = 'disabled'
     capLang = lang
-    if (!lang) { say('Captions off'); return }
+    if (!lang) { if (!quiet) say('Captions off'); return }
     let node = [...el.querySelectorAll('track')].find((x) => x.srclang === lang)
     if (!node) { // created on demand so no caption request is made unless you ask for one
       node = document.createElement('track')
@@ -457,7 +531,7 @@
       el.appendChild(node)
     }
     node.track.mode = 'showing'
-    say(`Captions: ${node.label}`)
+    if (!quiet) say(`Captions: ${node.label}`)
   }
   function cycleCaptions() {
     const langs = video.captions.map((c) => c.lang)
@@ -617,9 +691,28 @@
   }
   function barMove(e) {
     const f = fracAt(e.clientX)
-    hover = { frac: f, time: f * total }
+    const half = (video.storyboard?.w ?? 80) / 2
+    const width = bar.getBoundingClientRect().width
+    hover = { frac: f, time: f * total, px: Math.max(half, Math.min(width - half, f * width)) }
     if (scrubbing) t = f * total
   }
+  // The little picture for the moment under the pointer: one tile of a sheet YouTube made for this video (see /api/sb).
+  function previewAt(time) {
+    const sb = video.storyboard
+    if (!sb || !sb.seconds?.length) return null
+    let start = 0
+    for (let i = 0; i < sb.seconds.length; i++) {
+      const d = sb.seconds[i]
+      if (time < start + d || i === sb.seconds.length - 1) {
+        const tile = Math.max(0, Math.min(sb.cols * sb.rows - 1, Math.floor((time - start) / (d / (sb.cols * sb.rows)))))
+        return { sheet: i, x: (tile % sb.cols) * sb.w, y: Math.floor(tile / sb.cols) * sb.h }
+      }
+      start += d
+    }
+    return null
+  }
+  const preview = $derived(hover ? previewAt(hover.time) : null)
+
   function barUp(e) {
     if (!scrubbing) return
     scrubbing = false
@@ -643,6 +736,7 @@
     onpointerdown={fingerDown} onclick={videoClick} ondblclick={() => lastPointer !== 'touch' && toggleFullscreen()}
     onerror={() => mode === 'muxed' && (stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000))}></video>
 
+  {#if audioOnly}<div class="audiocover" style:background-image={`url(/api/thumb/${video.id}/best)`}><span>Audio only</span></div>{/if}
   {#if mode === 'loading'}<div class="center muted">Loading…</div>{/if}
   {#if mode === 'error' || error}
     <div class="center error"><div class="errbox">{error}{#if botBlock} <button class="errbtn" onclick={() => location.reload()}>Try again</button>{/if}</div></div>
@@ -736,7 +830,13 @@
         {/each}
       </div>
       {#if hover}
-        <div class="tip" style:left={hover.frac * 100 + '%'}>
+        <div class="tip" style:left={hover.px + 'px'}>
+          {#if preview}
+            <div class="thumbprev" style:width={video.storyboard.w + 'px'} style:height={video.storyboard.h + 'px'}
+                 style:background-image={`url(/api/sb/${video.id}/${preview.sheet})`}
+                 style:background-size={`${video.storyboard.cols * video.storyboard.w}px ${video.storyboard.rows * video.storyboard.h}px`}
+                 style:background-position={`-${preview.x}px -${preview.y}px`}></div>
+          {/if}
           {#if chapterAt(hover.time)}<div>{chapterAt(hover.time)}</div>{/if}{fmt(hover.time)}
         </div>
       {/if}
@@ -805,6 +905,8 @@
         <button class="theater" class:on={theater} aria-pressed={theater} title={theater ? 'Default view (t)' : 'Theater mode (t)'}
                 onclick={ontheater}>▭</button>
       {/if}
+      {#if mode === 'dash'}<button class:on={audioOnly} aria-pressed={audioOnly} title="Audio only: no picture, much less data" onclick={toggleAudioOnly}>♪</button>{/if}
+      {#if pipOk}<button title="Picture in picture" onclick={togglePip}>⧉</button>{/if}
       <button title="Fullscreen (f)" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
     </div>
   </div>
@@ -870,6 +972,9 @@
   .sbskip:hover { background: var(--accent); color: var(--accent-fg); }
   .sbtoast button { margin-left: 10px; background: none; border: 0; color: var(--accent); font-weight: 700; }
   kbd { font: inherit; font-size: 11px; opacity: 0.7; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .audiocover { position: absolute; inset: 0; background-size: cover; background-position: center; pointer-events: none; display: grid; place-items: end start; }
+  .audiocover span { margin: 12px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 2px 10px; border-radius: 4px; font-size: 13px; }
+  .thumbprev { margin: 0 auto 4px; border-radius: 4px; background-repeat: no-repeat; background-color: #111; }
   .tip { position: absolute; bottom: 22px; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); padding: 3px 8px;
     border-radius: 6px; font-size: 12px; text-align: center; pointer-events: none; white-space: nowrap; }
   /* the mini-player: only the essentials fit */

@@ -869,11 +869,24 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     relTop: document.querySelector('.related').getBoundingClientRect().top, stageBottom: document.querySelector('.stage').getBoundingClientRect().bottom }));
   check('phone: the video fills the width and Up next is below it', mw.player === mw.vw && mw.relTop >= mw.stageBottom - 1 && (await overflow()) <= 0, JSON.stringify(mw));
   await m.waitForSelector('.player.idle', { timeout: 8000 });                   // controls hide themselves while playing
-  await m.tap('.player video'); await m.waitForTimeout(200);
+  await m.tap('.player video'); await m.waitForTimeout(450);        // (a single tap waits a moment, in case a second one makes it a double tap)
   const afterTap = await m.evaluate(() => ({ idle: document.querySelector('.player').classList.contains('idle'), paused: document.querySelector('video').paused }));
   check('phone: the first tap on a playing video shows the controls instead of pausing it', !afterTap.idle && !afterTap.paused, JSON.stringify(afterTap));
-  await m.tap('.player video'); await m.waitForTimeout(200);
+  await m.tap('.player video'); await m.waitForTimeout(450);
   check('phone: the next tap pauses', await m.evaluate(() => document.querySelector('video').paused));
+  {
+    await m.evaluate(() => document.querySelector('video').play());            // playing again, then a double tap on the right side
+    await m.waitForTimeout(600);
+    const box = await m.locator('.player video').boundingBox();
+    const t0 = await m.evaluate(() => document.querySelector('video').currentTime);
+    await m.touchscreen.tap(box.x + box.width * 0.85, box.y + box.height * 0.5);
+    await m.waitForTimeout(80);
+    await m.touchscreen.tap(box.x + box.width * 0.85, box.y + box.height * 0.5);
+    await m.waitForTimeout(500);
+    const after = await m.evaluate(() => ({ t: document.querySelector('video').currentTime, paused: document.querySelector('video').paused }));
+    check('phone: a double tap on the right side skips forward 10 s and does not pause', after.t - t0 > 8 && !after.paused, `${t0.toFixed(1)} -> ${after.t.toFixed(1)}, paused=${after.paused}`);
+    await m.evaluate(() => document.querySelector('video').pause());
+  }
   const targets = await m.evaluate(() => [...document.querySelectorAll('.player .row button')].filter((x) => x.offsetParent).map((x) => Math.round(x.getBoundingClientRect().height)));
   check('phone: player buttons are big enough to tap (at least 40px tall)', targets.length > 4 && targets.every((h) => h >= 40), JSON.stringify(targets));
   await m.tap('.reopen'); await m.waitForSelector('aside.side'); await m.tap('aside.side a:has-text("Settings")');
@@ -930,6 +943,90 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     check('frozen picture: playback carries on afterwards', (await state(lp)).t > t1 + 0.8 && !afterFreeze.paused, JSON.stringify(afterFreeze));
     await lctx.close();
   }
+
+  // ---- player extras: hover previews, audio only, speed and captions remembered
+  {
+    const manifests = [];
+    p.on('request', (r) => { if (r.url().includes('/api/dash/e2eVIDEO001.mpd')) manifests.push(r.url()); });
+    await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+    await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
+    await p.hover('.player .bar', { position: { x: 120, y: 6 } });
+    await p.waitForSelector('.thumbprev');
+    await p.hover('.player .bar', { position: { x: 300, y: 6 } });
+    const prev = await p.evaluate(() => { const e = document.querySelector('.thumbprev'); const s = getComputedStyle(e); return { img: s.backgroundImage, w: s.width, h: s.height, size: s.backgroundSize }; });
+    check('hovering the seek bar shows a preview picture from the stored sheet', prev.img.includes('/api/sb/e2eVIDEO001/0') && prev.w === '160px' && prev.h === '90px' && prev.size === '800px 450px', JSON.stringify(prev));
+    const sbHits = (await (await ctx.request.get(BASE + '/__hits')).json()).filter((h) => h[0].startsWith('/sb/'));
+    check('...fetched from YouTube once, however often you hover', sbHits.length === 1, JSON.stringify(sbHits));
+    await p.mouse.move(5, 5);
+
+    const before = manifests.length;
+    await p.click('button[title^="Audio only"]');
+    await p.waitForSelector('.audiocover');
+    await p.waitForTimeout(1800);
+    const audioT = await p.evaluate(() => document.querySelector('video').currentTime);
+    await p.waitForTimeout(1200);
+    const audioT2 = await p.evaluate(() => document.querySelector('video').currentTime);
+    check('Audio only asks for a manifest without any picture, and keeps playing', manifests.length > before && manifests.at(-1).includes('audio_only=true') && audioT2 > audioT, `${audioT} -> ${audioT2} ${manifests.at(-1)}`);
+    await p.click('button[title^="Audio only"]');
+    await p.waitForFunction(() => !document.querySelector('.audiocover') && document.querySelector('video').videoWidth > 0, null, { timeout: 15000 });
+    check('...and turning it off brings the picture back', !manifests.at(-1).includes('audio_only'));
+
+    await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1.5×")');
+    const savedRates = await p.evaluate(() => JSON.parse(localStorage.getItem('rates') || '{}'));
+    check('speed is remembered for the channel', savedRates['UC' + 'a'.repeat(22)] === 1.5, JSON.stringify(savedRates));
+    await p.keyboard.press('c');
+    check('captions choice is remembered', (await p.evaluate(() => localStorage.getItem('captionLang'))) === 'en');
+    await p.goto(BASE + '/watch?v=e2eVIDEO001&src=direct');
+    await p.waitForFunction(() => document.querySelector('video')?.currentTime > 1, null, { timeout: 20000 });
+    await p.waitForFunction(() => [...document.querySelector('video').textTracks].some((x) => x.mode === 'showing'), null, { timeout: 8000 }).catch(() => {});
+    const restored = await p.evaluate(() => ({ rate: document.querySelector('video').playbackRate, cc: [...document.querySelector('video').textTracks].some((x) => x.mode === 'showing') }));
+    check('another video of that channel starts at its speed with the captions on', restored.rate === 1.5 && restored.cc, JSON.stringify(restored));
+    await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1×")');
+    await p.keyboard.press('c');
+    check('...and turning them back off is remembered too', (await p.evaluate(() => localStorage.getItem('captionLang'))) === '' && (await p.evaluate(() => JSON.parse(localStorage.getItem('rates') || '{}'))['UC' + 'a'.repeat(22)] === undefined));
+  }
+
+  // ---- topics on Home, Subscriptions filters, local search, OPML
+  await ctx.request.get(BASE + '/__seed_demo');
+  await p.goto(BASE + '/'); await p.waitForSelector('.grid:not(section .grid) .card');
+  const topicChips = await p.locator('.topics .chip').allInnerTexts();
+  check('Home offers topic chips built from the stored categories', topicChips[0] === 'All' && topicChips.length >= 3, JSON.stringify(topicChips));
+  const allCount = await p.locator('.grid:not(section .grid) .card').count();
+  await p.click(`.topics .chip:has-text("${topicChips[1]}")`);
+  const topicCount = await p.locator('.grid:not(section .grid) .card').count();
+  check('choosing a topic narrows the grid, and All brings everything back', topicCount > 0 && topicCount < allCount, `${topicCount} of ${allCount}`);
+  await p.click('.topics .chip:has-text("All")');
+  check('...All shows the whole grid again', (await p.locator('.grid:not(section .grid) .card').count()) === allCount);
+
+  await p.goto(BASE + '/subscriptions'); await p.waitForSelector('.grid .card');
+  check('Subscriptions groups its videos under day headings', (await p.locator('h2.section').count()) >= 2);
+  const subsAll = await p.locator('.grid .card').count();
+  await p.click('button.chip:has-text("Hide watched")');
+  const subsUnwatched = await p.locator('.grid .card').count();
+  check('Hide watched removes what you have watched (and is remembered)', subsUnwatched > 0 && subsUnwatched < subsAll && (await p.evaluate(() => localStorage.getItem('subsHideWatched'))) === '1', `${subsUnwatched} of ${subsAll}`);
+  await p.click('button.chip:has-text("Hide watched")');
+  const channelOptions = await p.locator('select[aria-label="Show one channel"] option').allInnerTexts();
+  await p.selectOption('select[aria-label="Show one channel"]', { index: 1 });
+  const channelsShown = new Set(await p.locator('.grid .card .chan').allInnerTexts());
+  check('the channel filter shows one channel', channelOptions[0] === 'All channels' && channelsShown.size === 1, JSON.stringify([...channelsShown]));
+
+  await p.goto(BASE + '/'); await p.waitForSelector('aside.side');
+  await p.focus('input[aria-label="Search"]');
+  await p.waitForFunction(() => document.querySelectorAll('#search-suggestions option').length > 0, null, { timeout: 5000 }).catch(() => {});
+  check('the search box suggests your own past searches', (await p.locator('#search-suggestions option').count()) > 0);
+
+  await p.goto(BASE + '/channel/' + 'UC' + 'b'.repeat(22)); await p.waitForSelector('input[aria-label="Search this channel"]');
+  await p.fill('input[aria-label="Search this channel"]', 'rain');
+  await p.waitForSelector('text=saved on this server');
+  const matches = await p.locator('.grid .card a.title').allInnerTexts();
+  check('searching inside a channel finds its saved videos, locally', matches.length >= 1 && matches.every((x) => /rain/i.test(x)), JSON.stringify(matches));
+
+  const opmlText = await (await ctx.request.get(BASE + '/api/subscriptions/export.opml')).text();
+  check('subscriptions export as OPML', opmlText.includes('<opml') && opmlText.includes('channel_id=UC'));
+  await p.goto(BASE + '/channels'); await p.waitForSelector('a:has-text("Export")');
+  await p.setInputFiles('input[type=file]', { name: 'subs.opml', mimeType: 'text/x-opml', buffer: Buffer.from(opmlText) });
+  await p.waitForSelector('text=already subscribed');
+  check('importing the same file says they are all already subscribed', /already/.test(await p.locator('.io span').innerText()));
 
   const hits = await (await ctx.request.get(BASE + '/__hits')).json();
   const gv = hits.filter(h => /^\/(v360|v180|aud|mux)$/.test(h[0]));

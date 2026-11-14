@@ -60,3 +60,13 @@ export function spent(sec) {
   if (m) return `${m}m ${String(s).padStart(2, '0')}s`
   return `${s}s`
 }
+
+/** "Today", "Yesterday", then the full date, in your own time zone. */
+export function dayLabel(ts) {
+  const d = new Date(ts * 1000)
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((start(new Date()) - start(d)) / 86400000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+}

@@ -3,7 +3,7 @@
   import { router, navigate, interceptLinks } from './lib/router.svelte.js'
   import { net } from './lib/net.svelte.js'
   import { auth, checkAuth, logout } from './lib/auth.svelte.js'
-  import { nav, setCollapsed, loadSubs, loadLists } from './lib/nav.svelte.js'
+  import { nav, setCollapsed, loadSubs, loadLists, loadNew } from './lib/nav.svelte.js'
   import Login from './routes/Login.svelte'
   import Feed from './routes/Feed.svelte'
   import Home from './routes/Home.svelte'
@@ -57,7 +57,7 @@
   let started = false
   $effect(() => {
     if (!auth.loggedIn) return
-    loadSubs(); loadLists(); loadQueue()           // the sidebar's channel list, your lists and the queue
+    loadSubs(); loadLists(); loadQueue(); loadNew()      // the sidebar's channel list, your lists, the queue and the new-uploads count
     if (!started) {                                // only when newtube is first opened, never on later visits to Home
       started = true
       if (router.pathname === '/for-you') navigate('/', { replace: true })           // the old address of Home

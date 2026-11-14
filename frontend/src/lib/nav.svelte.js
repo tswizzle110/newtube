@@ -47,3 +47,16 @@ export async function loadLists() {
     mylists.loaded = true
   } catch { /* keep what we had */ }
 }
+
+// New uploads from your subscriptions since you last opened Subscriptions (the number beside it in the sidebar).
+export const subsNew = $state({ count: 0 })
+
+export async function loadNew() {
+  try { subsNew.count = (await api.get('/api/subscriptions/new')).count } catch { /* keep what we had */ }
+}
+
+/** You opened Subscriptions: what is there is no longer new. */
+export async function markSubsSeen() {
+  subsNew.count = 0
+  try { await api.post('/api/subscriptions/seen') } catch { /* it will say again next time */ }
+}

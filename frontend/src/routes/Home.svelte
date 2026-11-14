@@ -9,6 +9,7 @@
   let videos = $state([])
   let resume = $state([])           // videos you started and did not finish: they live HERE, never in the grid below
   let showAllResume = $state(false)
+  let topic = $state('')           // the topic chip chosen ('' = all)
   const RESUME_ROW = 8
   const resumeRequest = uid()
   let shown = $state(PAGE)
@@ -24,6 +25,7 @@
       resume = started
       videos = recs
       shown = PAGE
+      if (topic && !videos.some((v) => v.category === topic)) topic = ''
     } catch (e) {
       error = e.message
     } finally {
@@ -31,6 +33,14 @@
     }
   }
   onMount(() => { document.title = 'newtube'; load() })
+
+  // Topic chips: the categories YouTube gave the recommended videos (known once a video's details have been stored).
+  const topics = $derived.by(() => {
+    const n = new Map()
+    for (const v of videos) if (v.category) n.set(v.category, (n.get(v.category) ?? 0) + 1)
+    return [...n].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name]) => name)
+  })
+  const filtered = $derived(topic ? videos.filter((v) => v.category === topic) : videos)
 
   // "Mark as watched": finished without watching the rest; it leaves the row.
   async function markWatched(v) {
@@ -79,16 +89,23 @@
     </section>
     <h2 class="section">Recommended</h2>
   {/if}
+  {#if topics.length > 1}
+    <div class="chips topics" role="group" aria-label="Topics">
+      <button class="chip" class:active={!topic} onclick={() => { topic = ''; shown = PAGE }}>All</button>
+      {#each topics as c}<button class="chip" class:active={topic === c} onclick={() => { topic = c; shown = PAGE }}>{c}</button>{/each}
+    </div>
+  {/if}
   <div class="grid">
-    {#each videos.slice(0, shown) as v, i (v.id)}
+    {#each filtered.slice(0, shown) as v, i (v.id)}
       <VideoCard video={v} surface="for_you" position={i} {requestId} why={v.why} ondismiss={(type) => dismiss(v, type)} />
     {/each}
   </div>
-  {#if videos.length > shown}<div use:nearEnd={() => (shown += PAGE)}></div>{/if}
+  {#if filtered.length > shown}<div use:nearEnd={() => (shown += PAGE)}></div>{/if}
   {#if loading}<p class="muted">Loading…</p>{/if}
 </div>
 
 <style>
   .page-head.sub { margin-bottom: 12px; min-height: 0; }
   section { margin-bottom: 8px; }
+  .topics { margin: 0 0 18px; }
 </style>

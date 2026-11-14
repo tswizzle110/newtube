@@ -5,6 +5,7 @@
   import { nearEnd } from '../lib/scroll.js'
   import VideoCard from '../components/VideoCard.svelte'
   import { historyNote } from '../lib/historyNote.js'
+  import { dayLabel } from '../lib/format.js'
 
   const PAGE = 60
   const requestId = uid()
@@ -44,15 +45,6 @@
     }
   }
 
-  // "Today", "Yesterday", then the date, in your own time zone.
-  function dayLabel(ts) {
-    const d = new Date(ts * 1000)
-    const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-    const days = Math.round((start(new Date()) - start(d)) / 86400000)
-    if (days === 0) return 'Today'
-    if (days === 1) return 'Yesterday'
-    return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-  }
   const timeOf = (ts) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 
   // Consecutive items with the same day label share a heading.
