@@ -946,6 +946,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
 
   // ---- player extras: hover previews, audio only, speed and captions remembered
   {
+    await p.evaluate(() => { localStorage.setItem('captionLang', ''); localStorage.removeItem('rates'); });      // (start from no remembered choices: earlier tests set them)
     const manifests = [];
     p.on('request', (r) => { if (r.url().includes('/api/dash/e2eLONG0001.mpd')) manifests.push(r.url()); });
     await p.goto(BASE + '/watch?v=e2eLONG0001&src=direct');
