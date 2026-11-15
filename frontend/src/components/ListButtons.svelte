@@ -101,7 +101,7 @@
 </div>
 
 <style>
-  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; position: relative; }
+  .actions { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; position: relative; }
   .btn.on { color: var(--accent); border-color: var(--accent); }
   .small { font-size: 13px; }
   .menu-wrap { position: relative; }

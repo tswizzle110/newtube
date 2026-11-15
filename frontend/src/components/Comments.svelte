@@ -137,26 +137,26 @@
 </section>
 
 <style>
-  .comments { margin-top: 28px; min-height: 120px; }
-  header { display: flex; align-items: baseline; gap: 20px; margin-bottom: 14px; }
+  .comments { margin-top: var(--space-7); min-height: 120px; }
+  header { display: flex; align-items: baseline; gap: var(--space-5); margin-bottom: var(--space-5); }
   h2 { font-size: 16px; margin: 0; }
   .sorts { display: flex; gap: 4px; }
   .sorts button { background: none; border: 0; padding: 4px 10px; border-radius: 999px; color: var(--text-dim); }
   .sorts button.on { background: var(--bg-hover); color: var(--text); }
-  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 18px; }
-  .comment { display: grid; grid-template-columns: 40px 1fr; gap: 12px; }
-  .reply { margin-top: 12px; grid-template-columns: 28px 1fr; }
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-5); }
+  .comment { display: grid; grid-template-columns: 40px 1fr; gap: var(--space-4); }
+  .reply { margin-top: var(--space-4); grid-template-columns: 28px 1fr; }
   .replies { grid-column: 2; }
   .avatar img, .avatar span { width: 100%; aspect-ratio: 1; border-radius: 50%; object-fit: cover; display: grid;
     place-items: center; background: var(--bg-hover); font-weight: 700; }
-  .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .head { display: flex; gap: var(--space-2) var(--space-3); align-items: baseline; flex-wrap: wrap; }
   .author { font-weight: 600; font-size: 13px; }
   .author.uploader { background: var(--bg-hover); padding: 0 6px; border-radius: 4px; }
   .badge { font-size: 12px; }
-  .text { white-space: pre-wrap; word-break: break-word; margin: 2px 0 4px; }
+  .text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin: var(--space-1) 0 var(--space-2); }
   .text a, .ts { color: var(--accent); }
   .ts { background: none; border: 0; padding: 0; }
-  .meta { display: flex; gap: 14px; align-items: center; }
+  .meta { display: flex; gap: var(--space-4); align-items: center; }
   .small { font-size: 13px; }
   .link { background: none; border: 0; padding: 0; color: var(--text-dim); font-weight: 600; }
   .link:hover { color: var(--text); }

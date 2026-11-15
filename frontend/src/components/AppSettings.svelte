@@ -189,7 +189,7 @@
   .tag.later { background: color-mix(in srgb, #d29922 22%, transparent); color: #d29922; }
   .tag.pending { background: color-mix(in srgb, #d29922 35%, transparent); color: #d29922; }
   .tag.lock { background: var(--bg-hover); color: var(--text-dim); }
-  .field { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .field { padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
   .field label { font-weight: 600; display: block; margin-bottom: 6px; }
   .field p { margin: 6px 0 0; }
   .control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

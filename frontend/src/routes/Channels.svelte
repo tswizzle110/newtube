@@ -118,8 +118,8 @@
   .io { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .add { display: flex; gap: 8px; margin-bottom: 12px; }
   .add .input { flex: 1; }
-  ul { list-style: none; padding: 0; margin: 16px 0; display: flex; flex-direction: column; gap: 4px; }
-  li { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px;
+  ul { list-style: none; padding: 0; margin: var(--space-5) 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  li { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4);
     border-radius: var(--radius); }
   li:hover { background: var(--bg-elev); }
   .who { display: flex; align-items: center; gap: 12px; min-width: 0; }

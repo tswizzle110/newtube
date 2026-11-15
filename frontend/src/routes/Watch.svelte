@@ -184,13 +184,13 @@
 <style>
   /* One column on a narrow window: video and details, then Up next, then comments. With room to spare,
      Up next sits in a column of its own beside the video and the comments. */
-  .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 0 24px;
+  .watch { max-width: 1280px; margin: 0 auto; padding: 20px 24px 80px; display: grid; gap: 0 var(--space-6);
     grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "details" "related" "comments"; }
   .stage { grid-area: stage; min-width: 0; position: relative; }
   /* the mini-player: just the video, with a small title bar on hover */
   @media (max-width: 699px) {
     .watch { padding: calc(52px + env(safe-area-inset-top)) 0 60px; }
-    .details, .related, .discussion { padding: 0 12px; }
+    .details, .related, .discussion { padding: 0 var(--space-4); }
   }
   .watch.mini { display: block; padding: 0; max-width: none; }
   .watch.mini .details, .watch.mini .related, .watch.mini .discussion { display: none; }
@@ -209,7 +209,7 @@
   .autonext.small .an-title { font-size: 13px; }
   .autonext.small .an-label { font-size: 12px; }
   .details { grid-area: details; min-width: 0; }
-  .related { grid-area: related; margin-top: 24px; min-width: 0; }
+  .related { grid-area: related; margin-top: var(--space-7); min-width: 0; }
   .discussion { grid-area: comments; min-width: 0; }
   @media (min-width: 1100px) {
     .watch { max-width: 1680px; grid-template-columns: minmax(0, 1fr) 380px;
@@ -218,26 +218,26 @@
     /* theater: the video takes the full width, the rest sits below it as before */
     .watch.theater { grid-template-areas: "stage stage" "details related" "comments related"; }
   }
-  h1 { font-size: 20px; margin: 16px 0 6px; }
-  h2 { font-size: 15px; margin: 0 0 8px; }
-  .byline { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+  h1 { font-size: 20px; line-height: 1.35; margin: var(--space-5) 0 var(--space-3); }
+  h2 { font-size: 15px; margin: 0 0 var(--space-3); }
+  .byline { display: flex; gap: var(--space-3) var(--space-4); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-5); }
   .spacer { flex: 1; }
   .chan { font-weight: 600; }
-  section { margin-top: 18px; }
+  section { margin-top: var(--space-6); }
   .chapters { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 2px 16px; }
-  .chapters button { width: 100%; display: flex; gap: 12px; text-align: left; background: none; border: 0; padding: 6px 8px;
+    gap: var(--space-1) var(--space-5); }
+  .chapters button { width: 100%; display: flex; gap: var(--space-3); text-align: left; background: none; border: 0; padding: var(--space-2) var(--space-3);
     border-radius: 6px; }
   .chapters button:hover { background: var(--bg-hover); }
   .current button { background: var(--bg-elev); color: var(--accent); font-weight: 600; }
   .ts { color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 4.5ch; }
   .plist ol { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow: auto;
     border: 1px solid var(--border); border-radius: var(--radius); }
-  .plist a { display: flex; gap: 12px; padding: 7px 12px; align-items: baseline; }
+  .plist a { display: flex; gap: var(--space-3); padding: var(--space-2) var(--space-4); align-items: baseline; }
   .plist a:hover { background: var(--bg-hover); }
   .plist li.current a { background: var(--bg-elev); color: var(--accent); font-weight: 600; }
   .plist .dur { margin-left: auto; font-variant-numeric: tabular-nums; }
-  .desc { background: var(--bg-elev); border-radius: var(--radius); padding: 14px 16px; }
-  .desc pre { font: inherit; white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; max-height: 6.5em; overflow: hidden; }
+  .desc { background: var(--bg-elev); border-radius: var(--radius); padding: var(--space-4) var(--space-5); }
+  .desc pre { font: inherit; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 0 0 var(--space-4); max-height: 6.5em; overflow: hidden; }
   .desc.open pre { max-height: none; }
 </style>

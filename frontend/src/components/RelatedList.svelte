@@ -71,10 +71,10 @@
 </section>
 
 <style>
-  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
   h2 { font-size: 15px; margin: 0; }
   .auto { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
-  .list { display: flex; flex-direction: column; gap: 12px; }
+  .list { display: flex; flex-direction: column; gap: var(--space-5); }
   .small { font-size: 13px; }
   .retry { font-size: 13px; padding: 4px 10px; }
 </style>

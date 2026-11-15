@@ -149,12 +149,12 @@
 </div>
 
 <style>
-  h2 { margin-top: 32px; }
+  h2 { margin-top: var(--space-7); }
   h3 { margin: 28px 0 8px; font-size: 15px; }
   .status { font-size: 13px; font-weight: 400; margin-left: 10px; }
-  .cats { border-spacing: 0 6px; } .cats td { padding-right: 24px; }
+  .cats { border-spacing: 0 var(--space-3); } .cats td { padding-right: 24px; }
   i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
-  .row { margin: 12px 0; } .num { width: 70px; padding: 4px 8px; }
+  .row { margin: var(--space-4) 0; } .num { width: 70px; padding: 4px 8px; }
   .warn { background: var(--bg-elev); border-left: 4px solid var(--danger); padding: 10px 14px; border-radius: 6px; }
   .over { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
   .over li { display: flex; gap: 14px; align-items: center; } .over .muted { flex: 1; font-size: 13px; }

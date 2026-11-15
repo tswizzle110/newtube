@@ -105,7 +105,7 @@
 </div>
 
 <style>
-  .page-head.sub { margin-bottom: 12px; min-height: 0; }
-  section { margin-bottom: 8px; }
-  .topics { margin: 0 0 18px; }
+  .page-head.sub { margin-bottom: var(--space-4); min-height: 0; }
+  section { margin-bottom: var(--space-5); }
+  .topics { margin: 0 0 var(--space-5); }
 </style>

@@ -25,8 +25,8 @@
 {/if}
 
 <style>
-  .queue { margin-bottom: 22px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
-  .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .queue { margin-bottom: var(--space-6); padding-bottom: var(--space-5); border-bottom: 1px solid var(--border); }
+  .head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--space-4); }
   .head h2 { margin: 0; font-size: 15px; }
-  .list { display: flex; flex-direction: column; gap: 12px; }
+  .list { display: flex; flex-direction: column; gap: var(--space-5); }
 </style>

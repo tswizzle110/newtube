@@ -106,9 +106,9 @@
 </div>
 
 <style>
-  .hero { margin: 4px 0 20px; }
+  .hero { margin: var(--space-2) 0 var(--space-6); }
   .big { font-size: 52px; font-weight: 800; letter-spacing: -1px; line-height: 1.1; }
-  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
   .facts div { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
   .facts b { font-size: 22px; }
   .facts span { font-size: 13px; }

@@ -90,9 +90,9 @@
 </article>
 
 <style>
-  .card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
   /* a small row (thumbnail left, text right), for the Up next column */
-  .card.compact { flex-direction: row; gap: 10px; align-items: flex-start; }
+  .card.compact { flex-direction: row; gap: var(--space-3); align-items: flex-start; }
   .compact .thumb { width: 168px; flex: none; }
   .compact .title { font-size: 14px; -webkit-line-clamp: 2; }
   .compact .meta { flex: 1; }
@@ -107,7 +107,7 @@
     border-radius: 4px; padding: 0 5px; font-size: 11px; }
   .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.25); }
   .bar span { display: block; height: 100%; background: var(--accent); }
-  .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .meta { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
   .titlerow { display: flex; align-items: flex-start; gap: 4px; }
   .titlerow :global(.menu) { margin: -4px -6px -4px 0; }
   @media (pointer: coarse) { .titlerow :global(.menu) { margin: -11px -11px -11px 0; } }       /* (a bigger button must not make the row taller) */
