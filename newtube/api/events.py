@@ -23,7 +23,7 @@ EVENT_TYPES = {
     "like", "unlike", "not_interested", "more_like_this", "dont_recommend_channel",
     "search", "search_click", "feed_refresh",
     "sb_skip", "sb_undo", "sb_manual_skip", "sb_vote", "sb_submit",
-    "mark_watched", "queue_add", "queue_remove", "autoplay_next", "autoplay_cancel", "pip", "audio_only",
+    "mark_watched", "queue_add", "queue_remove", "autoplay_next", "autoplay_cancel", "pip",
     "player_error", "player_frozen", "player_refresh",       # (what the player had to recover from: for finding patterns)
 }
 SURFACES = {"for_you", "subs", "search", "related", "channel", "playlist", "history", "continue", "queue"}

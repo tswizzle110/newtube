@@ -243,8 +243,7 @@ async def _ranges_for(ctx: Context, video_id: str, fmt: Format) -> Ranges | None
     return ranges
 
 
-async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None, *, avc_only: bool = False,
-                audio_only: bool = False):
+async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None, *, avc_only: bool = False):
     """The video and audio streams to offer (with their byte layout), re-extracting once if the signed URLs went stale.
     Returns (info, video reps, audio reps), or None when no combination a player can use exists."""
     prefs = playback.load(ctx.conn)            # ?codec= overrides the preference (the player's fallback)
@@ -254,14 +253,12 @@ async def _reps(ctx: Context, video_id: str, lang: str | None, codec: str | None
                                                 prefs["max_height"])
         if avc_only:
             video_fmts = [f for f in video_fmts if codec_family(f) == "avc1"]
-        if audio_only:
-            video_fmts = []                       # (audio only: no picture is asked for at all, which saves data)
         results = await asyncio.gather(*(_ranges_for(ctx, video_id, f)
                                          for f in video_fmts + audio_fmts))
         reps = {f.format_id: Rep(f, r) for f, r in zip(video_fmts + audio_fmts, results) if r}
         video = [reps[f.format_id] for f in video_fmts if f.format_id in reps]
         audio = [reps[f.format_id] for f in audio_fmts if f.format_id in reps]
-        if (video or audio_only) and audio:
+        if video and audio:
             return info, video, audio   # (a stale signed URL makes every probe fail; attempt 1 re-extracts once)
     return None
 
@@ -274,12 +271,12 @@ def _check_options(lang: str | None, codec: str | None = None) -> None:
 
 
 @router.get("/dash/{video_id}.mpd")
-async def dash_manifest(video_id: str, lang: str | None = None, codec: str | None = None, audio_only: bool = False,
+async def dash_manifest(video_id: str, lang: str | None = None, codec: str | None = None,
                         ctx: Context = Depends(get_ctx)) -> Response:
     """DASH manifest for adaptive playback (up to 1080p H.264). 404 means: use the muxed fallback."""
     valid_video_id(video_id)
     _check_options(lang, codec)
-    found = await _reps(ctx, video_id, lang, codec, audio_only=audio_only)
+    found = await _reps(ctx, video_id, lang, codec)
     if not found:
         raise HTTPException(404, "no DASH-compatible formats")
     info, video, audio = found

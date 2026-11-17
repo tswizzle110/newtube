@@ -415,9 +415,16 @@ All of these use data the server already has; the only thing that asks YouTube f
 - **Seek-bar previews:** hovering (or dragging on) the seek bar shows the frame at that moment. YouTube makes small picture sheets
   for this and lists them with the video's information. The server fetches a sheet from `i.ytimg.com` the first time you
   hover (one to three per video, depending on length), keeps it, and never hands YouTube's address to the browser.
-- **Player:** *Picture in picture* (⧉), **Audio only** (♪: asks for no picture at all, a fraction of the data), and on a touch
-  screen a **double tap** on the left or right side skips 10 seconds. The speed you choose is remembered **per channel**, and
-  your captions choice (language or off) is remembered and applied to later videos. All of it lives in this browser.
+- **Player on a phone:** the control row shows play, the time, then **CC**, the current **speed**, the current **quality** and full
+  screen (the mute button and volume slider are left out: the phone has its own buttons). Tapping speed, quality or CC pulls
+  **a vertical list up from the bottom of the screen**; tap an entry to choose it. A **double tap** on the left or right side of
+  the video skips 10 seconds. Held **sideways**, a phone starts in the **theater** view (the video fills the screen, the
+  details wait below it); the theater button switches to the ordinary view and back, and full screen is the other view.
+- **Picture in picture starts by itself** when you leave the app (swipe home, switch apps or tabs) while a video is playing; there is no
+  picture-in-picture button. Browsers allow that in different ways, so newtube asks in each of them (Chrome's automatic
+  mode, Safari's automatic flag, and a request when the page is hidden). Where a browser insists on a tap first, full screen
+  plus swiping home is the route Android Chrome allows. The speed you choose is remembered **per channel**, and your
+  captions choice (language or off) is remembered and applied to later videos. All of it lives in this browser.
 - **Export and import subscriptions** (Manage channels): an OPML file, the standard list feed readers and other YouTube apps use.
   Import asks YouTube for nothing (the file carries each channel's id and name); pictures and uploads then fill in by themselves.
 

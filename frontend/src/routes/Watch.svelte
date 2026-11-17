@@ -13,6 +13,7 @@
   import { prefs } from '../lib/prefs.svelte.js'
   import { loadQueue, dequeue } from '../lib/queue.svelte.js'
   import { trackEvent } from '../lib/tracker.js'
+  import { view } from '../lib/viewport.svelte.js'
 
   // The video to play comes from the host (App), not from the address bar, so the same page can keep playing in a
   // small corner player (`mini`) while you browse elsewhere. list: a YouTube playlist; mylist: one of your own lists.
@@ -24,7 +25,13 @@
   // Theater mode: the player spans the whole width and Up next moves below it. Remembered between visits.
   let theater = $state(readTheater())
   function readTheater() { try { return localStorage.getItem('theater') === '1' } catch { return false } }
+  // A phone held sideways starts in the theater view every time (the video fills the screen, the details wait below it); the
+  // theater button then switches between that and the ordinary view for as long as it stays sideways.
+  let landscapeTheater = $state(true)
+  $effect(() => { if (view.phoneLandscape) landscapeTheater = true })
+  const inTheater = $derived(view.phoneLandscape ? landscapeTheater : theater)
   function toggleTheater() {
+    if (view.phoneLandscape) { landscapeTheater = !landscapeTheater; return }
     theater = !theater
     try { localStorage.setItem('theater', theater ? '1' : '0') } catch { /* private mode */ }
   }
@@ -99,7 +106,7 @@
   onDestroy(() => clearInterval(ticker))
 </script>
 
-<div class="watch" class:theater class:mini>
+<div class="watch" class:theater={inTheater} class:mini class:landscape={view.phoneLandscape}>
   {#if error}
     <p class="error">{error}</p>
     {#if mini}<button class="btn" onclick={onclose}>Close</button>{:else}<p><button class="btn" onclick={() => location.reload()}>Try again</button> <a href="/" class="muted">Back home</a></p>{/if}
@@ -109,7 +116,7 @@
     <div class="stage">
     <Player {video} {source} startAt={video.resume_position} bind:api={player} onended={handleEnded}
       sb={sbData && sbSettings ? { data: sbData, settings: sbSettings, channelId: video.channel_id } : null}
-      {theater} ontheater={mini ? null : toggleTheater} compact={mini} keys={!mini} />
+      theater={inTheater} ontheater={mini ? null : toggleTheater} compact={mini} keys={!mini} />
       {#if target}
         <div class="autonext" class:small={mini} role="alert">
           <div class="an-label">Up next in {count}</div>
@@ -192,6 +199,10 @@
     .watch { padding: calc(52px + env(safe-area-inset-top)) 0 60px; }
     .details, .related, .discussion { padding: 0 var(--space-4); }
   }
+  /* a phone held sideways, in theater: the video fills the screen (as tall as the screen allows), the rest waits below it */
+  .watch.landscape.theater { padding: 0 0 60px; max-width: none; }
+  .watch.landscape.theater .details, .watch.landscape.theater .related, .watch.landscape.theater .discussion { padding: 0 var(--space-5); }
+  .watch.landscape.theater .stage :global(.player) { width: min(100%, calc(100vh * 16 / 9)); border-radius: 0; }
   .watch.mini { display: block; padding: 0; max-width: none; }
   .watch.mini .details, .watch.mini .related, .watch.mini .discussion { display: none; }
   .minibar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 2px; padding: 4px 6px 14px 10px;

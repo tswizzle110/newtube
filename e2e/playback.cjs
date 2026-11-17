@@ -918,20 +918,36 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     const centre = await m.evaluate(() => { const r = document.querySelector('.player').getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return e.tagName + '.' + e.className; });
     check('phone: the middle of the video is the video (or its play button), never the seek bar, so a tap there pauses', /^(VIDEO|BUTTON\.bigplay)/.test(centre), centre);
     const rowButtons = await m.evaluate(() => [...document.querySelectorAll('.player .row button')].filter((x) => x.offsetParent).map((x) => x.title));
-    check('phone: the control row is slim: play, volume, settings and full screen', rowButtons.join('|') === 'Play/pause (k)|Mute (m)|Settings|Fullscreen (f)', rowButtons.join('|'));
-    await m.tap('button[title="Settings"]');
-    await m.waitForSelector('.sheet');
-    const groups = await m.locator('.sheet .lab').allInnerTexts();
-    check('phone: Settings opens a sheet with speed, quality, captions and audio language', ['Speed', 'Quality', 'Captions', 'Audio language'].every((g) => groups.includes(g)), JSON.stringify(groups));
-    await m.tap('.sheet .opts button:has-text("1.5×")');
-    await m.waitForFunction(() => !document.querySelector('.sheet'));
+    check('phone: the control row is slim, with no mute, settings, audio-only or picture-in-picture button',
+      !rowButtons.some((t) => /^(Mute|Settings|Audio only|Picture)/.test(t)) && rowButtons[0] === 'Play/pause (k)' && rowButtons.at(-1).startsWith('Fullscreen') && rowButtons.some((t) => t.startsWith('Speed')) && rowButtons.includes('Quality'), rowButtons.join('|'));
+    check('phone: the speed button shows the current speed', (await m.locator('button[title^="Speed"]').innerText()).trim() === '1×');
+    await m.tap('button[title^="Speed"]');
+    await m.waitForSelector('ul.menu');
+    const mb = await m.evaluate(() => { const r = document.querySelector('ul.menu').getBoundingClientRect(); const b = document.querySelector('ul.menu button').getBoundingClientRect(); return { n: document.querySelectorAll('ul.menu button').length, bottomGap: innerHeight - r.bottom, h: b.height, fixed: getComputedStyle(document.querySelector('ul.menu')).position }; });
+    check('phone: tapping speed pulls up a vertical list of speeds from the bottom, with big targets', mb.fixed === 'fixed' && mb.n >= 6 && mb.h >= 44 && mb.bottomGap < 40, JSON.stringify(mb));
+    await m.tap('ul.menu button:has-text("1.5×")');
+    await m.waitForFunction(() => !document.querySelector('ul.menu'));
     await m.waitForFunction(() => document.querySelector('video').playbackRate === 1.5, null, { timeout: 8000 }).catch(() => {});
-    check('phone: choosing a speed in the sheet applies it and closes the sheet', (await m.evaluate(() => document.querySelector('video').playbackRate)) === 1.5);
-    await m.tap('button[title="Settings"]'); await m.waitForSelector('.sheet');
-    await m.tap('.sheet .opts button:has-text("1×")'); await m.waitForFunction(() => !document.querySelector('.sheet'));
+    check('phone: choosing a speed applies it, closes the list and shows on the button', (await m.evaluate(() => document.querySelector('video').playbackRate)) === 1.5 && (await m.locator('button[title^="Speed"]').innerText()).trim() === '1.5×');
+    await m.tap('button[title^="Speed"]'); await m.waitForSelector('ul.menu');
+    await m.tap('ul.menu button:has-text("1×")'); await m.waitForFunction(() => !document.querySelector('ul.menu'));
+    await m.tap('button[title="Quality"]'); await m.waitForSelector('ul.menu');
+    check('phone: tapping quality lists the available qualities', (await m.locator('ul.menu button').count()) >= 2);
+    await m.tap('button[title="Quality"]');
+    await m.tap('button[title^="Captions"]'); await m.waitForSelector('ul.menu');
+    check('phone: the captions button just says CC and opens a list', (await m.locator('ul.menu').count()) === 1 && (await m.locator('button[title^="Captions"]').innerText()).trim() === 'CC');
+    await m.tap('button[title^="Captions"]');
     await m.evaluate(() => document.querySelector('video').pause());
   }
   check('phone: player buttons are big enough to tap (at least 40px tall)', targets.length >= 4 && targets.every((h) => h >= 40), JSON.stringify(targets));
+  {
+    await m.setViewportSize({ width: 844, height: 390 }); await m.waitForTimeout(500);
+    const ls = await m.evaluate(() => ({ theater: !!document.querySelector('.watch.theater'), land: !!document.querySelector('.watch.landscape'),
+      tb: !!document.querySelector('.player .theater')?.offsetParent, fs: !!document.querySelector('.player .fsbtn')?.offsetParent }));
+    check('phone sideways: the video starts in the theater view, with theater and full screen buttons', ls.theater && ls.land && ls.tb && ls.fs, JSON.stringify(ls));
+    await m.setViewportSize({ width: 390, height: 844 }); await m.waitForTimeout(500);
+    check('phone upright: back to the ordinary layout', !(await m.evaluate(() => !!document.querySelector('.watch.landscape'))));
+  }
   await m.tap('.reopen'); await m.waitForSelector('aside.side'); await m.tap('aside.side a:has-text("Settings")');
   await m.waitForSelector('.watchhost.mini');
   const mm = await m.evaluate(() => { const r = document.querySelector('.watchhost').getBoundingClientRect(); return { w: r.width, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight,
@@ -1001,18 +1017,14 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     check('hovering the seek bar shows a preview picture from the stored sheet', prev.img.includes('/api/sb/e2eLONG0001/0') && prev.w === '160px' && prev.h === '90px' && prev.size === '800px 450px', JSON.stringify(prev));
     const sbHits = (await (await ctx.request.get(BASE + '/__hits')).json()).filter((h) => h[0].startsWith('/sb/'));
     check('...fetched from YouTube once, however often you hover', sbHits.length === 1, JSON.stringify(sbHits));
-    const before = manifests.length;
-    await p.hover('.player video');                                   // (the controls show while the pointer is over the player)
-    await p.click('button[title^="Audio only"]');
-    await p.waitForSelector('.audiocover');
-    await p.waitForTimeout(1800);
-    const audioT = await p.evaluate(() => document.querySelector('video').currentTime);
-    await p.waitForTimeout(1200);
-    const audioT2 = await p.evaluate(() => document.querySelector('video').currentTime);
-    check('Audio only asks for a manifest without any picture, and keeps playing', manifests.length > before && manifests.at(-1).includes('audio_only=true') && audioT2 > audioT, `${audioT} -> ${audioT2} ${manifests.at(-1)}`);
-    await p.hover('.player video'); await p.click('button[title^="Audio only"]');
-    await p.waitForFunction(() => !document.querySelector('.audiocover') && document.querySelector('video').videoWidth > 0, null, { timeout: 15000 });
-    check('...and turning it off brings the picture back', !manifests.at(-1).includes('audio_only'));
+    await p.hover('.player video');
+    check('desktop: no Audio only or Picture in picture button exists', (await p.locator('button[title^="Audio only"], button[title^="Picture"]').count()) === 0 && (await p.locator('.audiocover').count()) === 0);
+    check('desktop: the manifest never asks for audio only', manifests.every((u) => !u.includes('audio_only')));
+    await p.evaluate(() => { window.__pip = 0; HTMLVideoElement.prototype.requestPictureInPicture = function () { window.__pip++; return Promise.resolve({}); }; });
+    await p.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
+    await p.waitForTimeout(400);
+    check('leaving the page while a video plays starts picture in picture by itself', (await p.evaluate(() => window.__pip)) === 1);
+    await p.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
 
     await p.hover('.player video'); await p.click('button[title^="Speed"]'); await p.click('.menu button:has-text("1.5×")');
     const savedRates = await p.evaluate(() => JSON.parse(localStorage.getItem('rates') || '{}'));

@@ -18,6 +18,7 @@
   import Settings from './routes/Settings.svelte'
   import Queue from './routes/Queue.svelte'
   import { toast } from './lib/toast.svelte.js'
+  import { view } from './lib/viewport.svelte.js'
   import { loadQueue } from './lib/queue.svelte.js'
   import Sidebar from './components/Sidebar.svelte'
 
@@ -105,7 +106,7 @@
     {#if !nav.collapsed}
       <button class="backdrop" aria-label="Close the menu" onclick={() => setCollapsed(true)}></button>
       <Sidebar bind:this={sidebar} {theme} ontheme={() => (theme = theme === 'dark' ? 'light' : 'dark')} onlogout={logout} />
-    {:else}
+    {:else if !(view.phoneLandscape && onWatch)}
       <button class="reopen" title="Show the sidebar" aria-label="Show the sidebar" onclick={() => setCollapsed(false)}>☰</button>
     {/if}
     <main>

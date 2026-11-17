@@ -58,8 +58,6 @@
   let error = $state('')
   let qualities = $state([]) // [{ h: height, fps }], high to low
   let chosenQuality = $state('auto')
-  const pipOk = typeof document !== 'undefined' && !!document.pictureInPictureEnabled
-  let audioOnly = $state(false)  // sound only: no picture is fetched at all (saves data; a cover is shown)
   let activeHeight = $state(0)   // the quality Shaka is fetching NEXT (it buffers well ahead of what you see)
   let shownHeight = $state(0)    // the quality of the picture on screen right now (what the label should say)
   let capLang = $state(null)
@@ -133,30 +131,10 @@
     const q = []
     if (lang && lang !== 'original') q.push(`lang=${encodeURIComponent(lang)}`)
     if (codec) q.push(`codec=${codec}`)
-    if (audioOnly) q.push('audio_only=true')
     return `/api/dash/${video.id}.mpd` + (q.length ? '?' + q.join('&') : '')
   }
   // "1080p60", "1440p (2K)", "2160p (4K)"
   const qname = (h, fps = 0) => `${h}p${fps >= 50 ? Math.round(fps) : ''}${h >= 2160 ? ' (4K)' : h >= 1440 ? ' (2K)' : ''}`
-
-  // Sound only, from here: the same stream without any picture (a quarter of the data, and the screen can stay off).
-  async function toggleAudioOnly() {
-    if (!shakaPlayer || mode !== 'dash' || refreshing || recovering) return
-    audioOnly = !audioOnly
-    const at = el.currentTime, wasPlaying = !el.paused
-    trackEvent('audio_only', { video_id: video.id, payload: { on: audioOnly } })
-    say(audioOnly ? 'Audio only' : 'Video on')
-    try {
-      await shakaPlayer.load(manifestUrl(audioLang, codecUsed), at)
-      applyRate()
-      syncQualities()
-      if (wasPlaying) el.play().catch(() => {})
-    } catch (e) {
-      audioOnly = !audioOnly
-      say('Could not switch')
-      console.warn(e)
-    }
-  }
 
   async function setAudio(lang) {
     menu = null
@@ -258,6 +236,9 @@
       }
     })()
     watchdog = setInterval(watch, 1000)
+    try { el.autoPictureInPicture = true; el.setAttribute('autopictureinpicture', '') } catch { /* not supported */ }
+    try { navigator.mediaSession?.setActionHandler('enterpictureinpicture', enterPip) } catch { /* this browser has no such action */ }
+    document.addEventListener('visibilitychange', pageVisibility)
     // Every picture actually shown calls this; if it stops while time moves, the picture is frozen (see watch()).
     const frame = () => { lastFrameAt = Date.now(); vfc = el.requestVideoFrameCallback(frame) }
     if (el.requestVideoFrameCallback) vfc = el.requestVideoFrameCallback(frame)
@@ -265,6 +246,8 @@
     document.addEventListener('visibilitychange', visible)
     return () => {
       document.removeEventListener('visibilitychange', visible)
+      document.removeEventListener('visibilitychange', pageVisibility)
+      try { navigator.mediaSession?.setActionHandler('enterpictureinpicture', null) } catch { /* nothing was set */ }
       try { el.cancelVideoFrameCallback?.(vfc) } catch { /* ignore */ }
       gone = true
       destroyed = true
@@ -507,15 +490,26 @@
     const i = SPEEDS.indexOf(rate)
     setRate(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 3 : i) + dir))])
   }
-  async function togglePip() {
-    try {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture()
-      else await el.requestPictureInPicture()
-      trackEvent('pip', { video_id: video.id })
-    } catch { say("Picture in picture isn't available here") }
-  }
   // Full screen. Browsers differ: most let the whole player (with its controls) go full screen; Safari on an iPhone only lets
   // the VIDEO itself do it (it then uses the system player's own controls). Try the player, then the video, then say so.
+  // Picture in picture on its own: leave the app (swipe home, switch apps or tabs) while a video plays and it carries on in a
+  // small window. Browsers allow that in different ways, so each is offered and whichever this one supports acts: the Media
+  // Session "enterpictureinpicture" action (Chrome's automatic mode), the autoPictureInPicture flag (Safari), and, as a last
+  // try, asking when the page is hidden (works where the browser permits it without a tap).
+  async function enterPip() {
+    if (!el || el.paused || el.ended || document.pictureInPictureElement) return
+    try {
+      if (el.requestPictureInPicture && document.pictureInPictureEnabled !== false) await el.requestPictureInPicture()
+      else if (el.webkitSupportsPresentationMode?.('picture-in-picture')) el.webkitSetPresentationMode('picture-in-picture')
+      else return
+      trackEvent('pip', { video_id: video.id })
+    } catch { /* not allowed without a tap here: the browser's own automatic mode is what applies */ }
+  }
+  function pageVisibility() {
+    if (document.visibilityState === 'hidden') enterPip()
+    else if (document.pictureInPictureElement === el) document.exitPictureInPicture?.().catch(() => {})   // back in the app: back in the page
+  }
+
   async function toggleFullscreen() {
     trackEvent('fullscreen', { video_id: video.id })
     const d = document
@@ -767,7 +761,6 @@
     onpointerdown={fingerDown} onclick={videoClick} ondblclick={() => lastPointer !== 'touch' && toggleFullscreen()}
     onerror={() => mode === 'muxed' && (stuckFor = Math.max(stuckFor, STUCK_AFTER - 1000))}></video>
 
-  {#if audioOnly}<div class="audiocover" style:background-image={`url(/api/thumb/${video.id}/best)`}><span>Audio only</span></div>{/if}
   {#if mode === 'loading'}<div class="center muted">Loading…</div>{/if}
   {#if mode === 'error' || error}
     <div class="center error"><div class="errbox">{error}{#if botBlock} <button class="errbtn" onclick={() => location.reload()}>Try again</button>{/if}</div></div>
@@ -875,14 +868,14 @@
 
     <div class="row">
       <button title="Play/pause (k)" onclick={toggle}>{paused ? '▶' : '❚❚'}</button>
-      <button title="Mute (m)" onclick={toggleMute}>{muted || volume === 0 ? '🔇' : '🔊'}</button>
+      <button class="mutebtn" title="Mute (m)" onclick={toggleMute}>{muted || volume === 0 ? '🔇' : '🔊'}</button>
       <input class="vol" type="range" min="0" max="1" step="0.05" value={muted ? 0 : volume}
         oninput={(e) => setVolume(Number(e.target.value))} aria-label="Volume" />
       <span class="time">{fmt(t)} / {fmt(total)}</span>
       {#if currentChapter}<span class="chap">• {currentChapter.title}</span>{/if}
       <span class="spacer"></span>
 
-      <div class="menuwrap desk">
+      <div class="menuwrap">
         {#if video.captions.length}
           <button class:on={capLang} title="Captions (c)" onclick={() => (menu = menu === 'captions' ? null : 'captions')}>CC</button>
           {#if menu === 'captions'}
@@ -894,10 +887,10 @@
         {/if}
       </div>
       {#if sb?.data?.segments?.length}
-        <button class="desk" class:on={sbOn} title="SponsorBlock for this video: {sbOn ? 'on' : 'off'}" onclick={() => { sbOn = !sbOn; sbButton = null }}>SB</button>
+        <button class:on={sbOn} title="SponsorBlock for this video: {sbOn ? 'on' : 'off'}" onclick={() => { sbOn = !sbOn; sbButton = null }}>SB</button>
       {/if}
       {#if audioTracks.length > 1 && mode === 'dash'}
-        <div class="menuwrap desk">
+        <div class="menuwrap">
           <button title="Audio language" onclick={() => (menu = menu === 'audio' ? null : 'audio')}>
             {audioLang === 'original' ? 'Audio' : audioLang}
           </button>
@@ -913,13 +906,13 @@
           {/if}
         </div>
       {/if}
-      <div class="menuwrap desk">
+      <div class="menuwrap">
         <button title="Speed (&lt; &gt;)" onclick={() => (menu = menu === 'speed' ? null : 'speed')}>{rate}×</button>
         {#if menu === 'speed'}
           <ul class="menu">{#each SPEEDS as s}<li><button class:sel={rate === s} onclick={() => setRate(s)}>{s}×</button></li>{/each}</ul>
         {/if}
       </div>
-      <div class="menuwrap desk">
+      <div class="menuwrap">
         <button title="Quality"
                 onclick={() => (menu = menu === 'quality' ? null : 'quality')}>
           {chosenQuality === 'auto' ? `Auto${(shownHeight || activeHeight) ? ` ${shownHeight || activeHeight}p` : ''}` : qname(chosenQuality, qualities.find((x) => x.h === chosenQuality)?.fps)}
@@ -936,36 +929,6 @@
         <button class="theater" class:on={theater} aria-pressed={theater} title={theater ? 'Default view (t)' : 'Theater mode (t)'}
                 onclick={ontheater}>▭</button>
       {/if}
-      {#if mode === 'dash'}<button class="desk" class:on={audioOnly} aria-pressed={audioOnly} title="Audio only: no picture, much less data" onclick={toggleAudioOnly}>♪</button>{/if}
-      {#if pipOk}<button class="desk" title="Picture in picture" onclick={togglePip}>⧉</button>{/if}
-      <div class="menuwrap phone">
-        <button class="settingsbtn" title="Settings" aria-label="Settings" onclick={() => (menu = menu === 'settings' ? null : 'settings')}>⚙</button>
-        {#if menu === 'settings'}
-          <div class="sheet" role="menu">
-            <div class="grp"><span class="lab">Speed</span>
-              <div class="opts">{#each SPEEDS as s}<button class:sel={rate === s} onclick={() => setRate(s)}>{s}×</button>{/each}</div></div>
-            <div class="grp"><span class="lab">Quality</span>
-              <div class="opts">
-                {#if mode === 'dash'}<button class:sel={chosenQuality === 'auto'} onclick={() => setQuality('auto')}>Auto</button>{/if}
-                {#each qualities as q (q.h)}<button class:sel={chosenQuality === q.h || (mode === 'muxed' && activeHeight === q.h)} onclick={() => setQuality(q.h)}>{qname(q.h, q.fps)}</button>{/each}
-              </div></div>
-            {#if video.captions.length}
-              <div class="grp"><span class="lab">Captions</span>
-                <div class="opts"><button class:sel={!capLang} onclick={() => setCaptions(null)}>Off</button>
-                  {#each video.captions as c}<button class:sel={capLang === c.lang} onclick={() => setCaptions(c.lang)}>{c.name}</button>{/each}</div></div>
-            {/if}
-            {#if audioTracks.length > 1 && mode === 'dash'}
-              <div class="grp"><span class="lab">Audio language</span>
-                <div class="opts">{#each audioTracks as a}{@const key = a.original ? 'original' : a.lang}<button class:sel={audioLang === key} onclick={() => setAudio(key)}>{a.name}{a.original ? ' (original)' : ''}</button>{/each}</div></div>
-            {/if}
-            <div class="grp"><div class="opts">
-              {#if mode === 'dash'}<button class:sel={audioOnly} onclick={() => { menu = null; toggleAudioOnly() }}>♪ Audio only</button>{/if}
-              {#if pipOk}<button onclick={() => { menu = null; togglePip() }}>⧉ Picture in picture</button>{/if}
-              {#if sb?.data?.segments?.length}<button class:sel={sbOn} onclick={() => { sbOn = !sbOn; sbButton = null; menu = null }}>SponsorBlock {sbOn ? 'on' : 'off'}</button>{/if}
-            </div></div>
-          </div>
-        {/if}
-      </div>
       <button class="fsbtn" title="Fullscreen (f)" aria-label="Full screen" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
     </div>
   </div>
@@ -1031,8 +994,6 @@
   .sbskip:hover { background: var(--accent); color: var(--accent-fg); }
   .sbtoast button { margin-left: 10px; background: none; border: 0; color: var(--accent); font-weight: 700; }
   kbd { font: inherit; font-size: 11px; opacity: 0.7; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
-  .audiocover { position: absolute; inset: 0; background-size: cover; background-position: center; pointer-events: none; display: grid; place-items: end start; }
-  .audiocover span { margin: 12px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 2px 10px; border-radius: 4px; font-size: 13px; }
   .thumbprev { margin: 0 auto 4px; border-radius: 4px; background-repeat: no-repeat; background-color: #111; }
   .tip { position: absolute; bottom: 22px; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); padding: 3px 8px;
     border-radius: 6px; font-size: 12px; text-align: center; pointer-events: none; white-space: nowrap; }
@@ -1048,33 +1009,25 @@
   .spacer { flex: 1; }
   .vol { width: 70px; accent-color: var(--accent); }
   .menuwrap { position: relative; }
-  /* a sheet over the bottom of the screen (not inside the small player, which would cut it off) */
-  .sheet { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); max-height: 68vh; overflow-y: auto; z-index: 90;
-    background: rgba(20, 20, 24, 0.98); color: #fff; border-radius: 14px; padding: 6px 14px 12px; box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.6); }
-  .grp { padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
-  .grp:last-child { border-bottom: 0; }
-  .lab { display: block; font-size: 12px; opacity: 0.7; margin-bottom: 6px; }
-  .opts { display: flex; flex-wrap: wrap; gap: 6px; }
-  .opts button { background: rgba(255, 255, 255, 0.1); border-radius: 999px; padding: 9px 14px; min-height: 40px; }
-  .opts button.sel { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
-  .player.compact .phone { display: none; }
   .menu { position: absolute; right: 0; bottom: 40px; list-style: none; margin: 0; padding: 4px; min-width: 110px;
     background: rgba(20, 20, 24, 0.96); border-radius: 8px; max-height: 260px; overflow: auto; }
   .menu button { width: 100%; text-align: left; }
   .menu button.sel { color: var(--accent); font-weight: 700; }
 
   /* (last, so these beat the base rules above) */
-  /* touch screens: bigger targets, no volume slider (the phone has buttons) */
+  /* touch screens: bigger targets; no volume slider and no mute button (the phone has its own buttons); and the speed, quality
+     and captions lists are PULLED UP from the bottom of the screen as one vertical list with room for a thumb (a small player
+     could not hold them) */
   @media (pointer: coarse), (max-width: 699px) {      /* (a small window counts too: emulators and some browsers do not report 'coarse') */
     .row button { padding: 11px 12px; }
-    .vol, .helpbtn { display: none; }                 /* (no keyboard to get help for) */
+    .vol, .helpbtn, .mutebtn { display: none; }
     .bar { height: 26px; }
+    .menu { position: fixed; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); min-width: 160px; max-height: min(70vh, 440px);
+      padding: 6px; border-radius: 14px; z-index: 90; background: rgba(20, 20, 24, 0.98); box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.6); }
+    .menu button { padding: 12px 16px; min-height: 44px; font-size: 15px; }
   }
-  .phone { display: none; }
-  @media (max-width: 699px) {                         /* a phone: one slim row; the rest is under the settings button */
+  @media (max-width: 699px) {                         /* a phone held upright: one slim row */
     .row { gap: 0; }
-    .desk { display: none; }
-    .phone { display: block; }
     .row button { padding: 11px 9px; }
     .time { white-space: nowrap; margin: 0 6px; }
     .chap, .theater { display: none; }
