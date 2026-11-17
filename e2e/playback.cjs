@@ -910,9 +910,11 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     await m.evaluate(() => document.querySelector('video').pause());
   }
   {
-    await m.evaluate(() => document.querySelector('video').play());
-    await m.waitForTimeout(400);
-    await m.tap('.player video'); await m.waitForTimeout(450);
+    await m.evaluate(async () => { try { await document.querySelector('video').play(); } catch {} });
+    await m.waitForFunction(() => !document.querySelector('video').paused, null, { timeout: 8000 }).catch(() => {});
+    const vb = await m.locator('.player video').boundingBox();
+    await m.touchscreen.tap(vb.x + vb.width / 2, vb.y + vb.height * 0.2);          // (a spot the play button does not cover)
+    await m.waitForTimeout(450);
     const centre = await m.evaluate(() => { const r = document.querySelector('.player').getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return e.tagName + '.' + e.className; });
     check('phone: the middle of the video is the video (or its play button), never the seek bar, so a tap there pauses', /^(VIDEO|BUTTON\.bigplay)/.test(centre), centre);
     const rowButtons = await m.evaluate(() => [...document.querySelectorAll('.player .row button')].filter((x) => x.offsetParent).map((x) => x.title));
