@@ -891,7 +891,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
   {
     await m.evaluate(() => document.querySelector('video').play());
     await m.waitForTimeout(300);
-    await m.tap('.player video'); await m.waitForTimeout(450);
+    await (async () => { const vb = await m.locator('.player video').boundingBox(); await m.touchscreen.tap(vb.x + vb.width / 2, vb.y + vb.height * 0.2); await m.waitForTimeout(450); })();
     const fit = await m.evaluate(() => {
       const pl = document.querySelector('.player').getBoundingClientRect();
       const btns = [...document.querySelectorAll('.player .row button')].filter((x) => x.offsetParent);
@@ -903,7 +903,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     check('phone: the full screen button puts the player in full screen', await m.evaluate(() => document.fullscreenElement?.classList.contains('player') === true));
     await m.evaluate(() => document.exitFullscreen());
     await m.waitForTimeout(300);
-    await m.tap('.player video'); await m.waitForTimeout(450);
+    await (async () => { const vb = await m.locator('.player video').boundingBox(); await m.touchscreen.tap(vb.x + vb.width / 2, vb.y + vb.height * 0.2); await m.waitForTimeout(450); })();
     await m.evaluate(() => { const pl = document.querySelector('.player'); pl.requestFullscreen = undefined; pl.webkitRequestFullscreen = undefined; window.__ef = 0; document.querySelector('video').webkitEnterFullscreen = () => { window.__ef++; }; });
     await m.tap('button[title^="Fullscreen"]'); await m.waitForTimeout(500);
     check('phone: where only the video itself can go full screen (iPhone Safari), that is used instead', (await m.evaluate(() => window.__ef)) === 1);
