@@ -909,6 +909,26 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     check('phone: where only the video itself can go full screen (iPhone Safari), that is used instead', (await m.evaluate(() => window.__ef)) === 1);
     await m.evaluate(() => document.querySelector('video').pause());
   }
+  {
+    await m.evaluate(() => document.querySelector('video').play());
+    await m.waitForTimeout(400);
+    await m.tap('.player video'); await m.waitForTimeout(450);
+    const centre = await m.evaluate(() => { const r = document.querySelector('.player').getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return e.tagName + '.' + e.className; });
+    check('phone: the middle of the video is the video (or its play button), never the seek bar, so a tap there pauses', /^(VIDEO|BUTTON\.bigplay)/.test(centre), centre);
+    const rowButtons = await m.evaluate(() => [...document.querySelectorAll('.player .row button')].filter((x) => x.offsetParent).map((x) => x.title));
+    check('phone: the control row is slim: play, volume, settings and full screen', rowButtons.join('|') === 'Play/pause (k)|Mute (m)|Settings|Fullscreen (f)', rowButtons.join('|'));
+    await m.tap('button[title="Settings"]');
+    await m.waitForSelector('.sheet');
+    const groups = await m.locator('.sheet .lab').allInnerTexts();
+    check('phone: Settings opens a sheet with speed, quality, captions and audio language', ['Speed', 'Quality', 'Captions', 'Audio language'].every((g) => groups.includes(g)), JSON.stringify(groups));
+    await m.tap('.sheet .opts button:has-text("1.5×")');
+    await m.waitForFunction(() => !document.querySelector('.sheet'));
+    await m.waitForFunction(() => document.querySelector('video').playbackRate === 1.5, null, { timeout: 8000 }).catch(() => {});
+    check('phone: choosing a speed in the sheet applies it and closes the sheet', (await m.evaluate(() => document.querySelector('video').playbackRate)) === 1.5);
+    await m.tap('button[title="Settings"]'); await m.waitForSelector('.sheet');
+    await m.tap('.sheet .opts button:has-text("1×")'); await m.waitForFunction(() => !document.querySelector('.sheet'));
+    await m.evaluate(() => document.querySelector('video').pause());
+  }
   check('phone: player buttons are big enough to tap (at least 40px tall)', targets.length > 4 && targets.every((h) => h >= 40), JSON.stringify(targets));
   await m.tap('.reopen'); await m.waitForSelector('aside.side'); await m.tap('aside.side a:has-text("Settings")');
   await m.waitForSelector('.watchhost.mini');

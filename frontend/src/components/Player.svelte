@@ -874,16 +874,15 @@
     </div>
 
     <div class="row">
-      <button class="first" title="Play/pause (k)" onclick={toggle}>{paused ? '▶' : '❚❚'}</button>
-      <button class="first" title="Mute (m)" onclick={toggleMute}>{muted || volume === 0 ? '🔇' : '🔊'}</button>
+      <button title="Play/pause (k)" onclick={toggle}>{paused ? '▶' : '❚❚'}</button>
+      <button title="Mute (m)" onclick={toggleMute}>{muted || volume === 0 ? '🔇' : '🔊'}</button>
       <input class="vol" type="range" min="0" max="1" step="0.05" value={muted ? 0 : volume}
         oninput={(e) => setVolume(Number(e.target.value))} aria-label="Volume" />
-      <span class="time first">{fmt(t)} / {fmt(total)}</span>
+      <span class="time">{fmt(t)} / {fmt(total)}</span>
       {#if currentChapter}<span class="chap">• {currentChapter.title}</span>{/if}
-      <span class="spacer first"></span>
-      <span class="rowbreak" aria-hidden="true"></span>
+      <span class="spacer"></span>
 
-      <div class="menuwrap">
+      <div class="menuwrap desk">
         {#if video.captions.length}
           <button class:on={capLang} title="Captions (c)" onclick={() => (menu = menu === 'captions' ? null : 'captions')}>CC</button>
           {#if menu === 'captions'}
@@ -895,10 +894,10 @@
         {/if}
       </div>
       {#if sb?.data?.segments?.length}
-        <button class:on={sbOn} title="SponsorBlock for this video: {sbOn ? 'on' : 'off'}" onclick={() => { sbOn = !sbOn; sbButton = null }}>SB</button>
+        <button class="desk" class:on={sbOn} title="SponsorBlock for this video: {sbOn ? 'on' : 'off'}" onclick={() => { sbOn = !sbOn; sbButton = null }}>SB</button>
       {/if}
       {#if audioTracks.length > 1 && mode === 'dash'}
-        <div class="menuwrap">
+        <div class="menuwrap desk">
           <button title="Audio language" onclick={() => (menu = menu === 'audio' ? null : 'audio')}>
             {audioLang === 'original' ? 'Audio' : audioLang}
           </button>
@@ -914,13 +913,13 @@
           {/if}
         </div>
       {/if}
-      <div class="menuwrap">
+      <div class="menuwrap desk">
         <button title="Speed (&lt; &gt;)" onclick={() => (menu = menu === 'speed' ? null : 'speed')}>{rate}×</button>
         {#if menu === 'speed'}
           <ul class="menu">{#each SPEEDS as s}<li><button class:sel={rate === s} onclick={() => setRate(s)}>{s}×</button></li>{/each}</ul>
         {/if}
       </div>
-      <div class="menuwrap">
+      <div class="menuwrap desk">
         <button title="Quality"
                 onclick={() => (menu = menu === 'quality' ? null : 'quality')}>
           {chosenQuality === 'auto' ? `Auto${(shownHeight || activeHeight) ? ` ${shownHeight || activeHeight}p` : ''}` : qname(chosenQuality, qualities.find((x) => x.h === chosenQuality)?.fps)}
@@ -937,9 +936,37 @@
         <button class="theater" class:on={theater} aria-pressed={theater} title={theater ? 'Default view (t)' : 'Theater mode (t)'}
                 onclick={ontheater}>▭</button>
       {/if}
-      {#if mode === 'dash'}<button class:on={audioOnly} aria-pressed={audioOnly} title="Audio only: no picture, much less data" onclick={toggleAudioOnly}>♪</button>{/if}
-      {#if pipOk}<button title="Picture in picture" onclick={togglePip}>⧉</button>{/if}
-      <button class="fsbtn first" title="Fullscreen (f)" aria-label="Full screen" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
+      {#if mode === 'dash'}<button class="desk" class:on={audioOnly} aria-pressed={audioOnly} title="Audio only: no picture, much less data" onclick={toggleAudioOnly}>♪</button>{/if}
+      {#if pipOk}<button class="desk" title="Picture in picture" onclick={togglePip}>⧉</button>{/if}
+      <div class="menuwrap phone">
+        <button class="settingsbtn" title="Settings" aria-label="Settings" onclick={() => (menu = menu === 'settings' ? null : 'settings')}>⚙</button>
+        {#if menu === 'settings'}
+          <div class="sheet" role="menu">
+            <div class="grp"><span class="lab">Speed</span>
+              <div class="opts">{#each SPEEDS as s}<button class:sel={rate === s} onclick={() => setRate(s)}>{s}×</button>{/each}</div></div>
+            <div class="grp"><span class="lab">Quality</span>
+              <div class="opts">
+                {#if mode === 'dash'}<button class:sel={chosenQuality === 'auto'} onclick={() => setQuality('auto')}>Auto</button>{/if}
+                {#each qualities as q (q.h)}<button class:sel={chosenQuality === q.h || (mode === 'muxed' && activeHeight === q.h)} onclick={() => setQuality(q.h)}>{qname(q.h, q.fps)}</button>{/each}
+              </div></div>
+            {#if video.captions.length}
+              <div class="grp"><span class="lab">Captions</span>
+                <div class="opts"><button class:sel={!capLang} onclick={() => setCaptions(null)}>Off</button>
+                  {#each video.captions as c}<button class:sel={capLang === c.lang} onclick={() => setCaptions(c.lang)}>{c.name}</button>{/each}</div></div>
+            {/if}
+            {#if audioTracks.length > 1 && mode === 'dash'}
+              <div class="grp"><span class="lab">Audio language</span>
+                <div class="opts">{#each audioTracks as a}{@const key = a.original ? 'original' : a.lang}<button class:sel={audioLang === key} onclick={() => setAudio(key)}>{a.name}{a.original ? ' (original)' : ''}</button>{/each}</div></div>
+            {/if}
+            <div class="grp"><div class="opts">
+              {#if mode === 'dash'}<button class:sel={audioOnly} onclick={() => { menu = null; toggleAudioOnly() }}>♪ Audio only</button>{/if}
+              {#if pipOk}<button onclick={() => { menu = null; togglePip() }}>⧉ Picture in picture</button>{/if}
+              {#if sb?.data?.segments?.length}<button class:sel={sbOn} onclick={() => { sbOn = !sbOn; sbButton = null; menu = null }}>SponsorBlock {sbOn ? 'on' : 'off'}</button>{/if}
+            </div></div>
+          </div>
+        {/if}
+      </div>
+      <button class="fsbtn" title="Fullscreen (f)" aria-label="Full screen" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
     </div>
   </div>
 </div>
@@ -1021,6 +1048,16 @@
   .spacer { flex: 1; }
   .vol { width: 70px; accent-color: var(--accent); }
   .menuwrap { position: relative; }
+  /* a sheet over the bottom of the screen (not inside the small player, which would cut it off) */
+  .sheet { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); max-height: 68vh; overflow-y: auto; z-index: 90;
+    background: rgba(20, 20, 24, 0.98); color: #fff; border-radius: 14px; padding: 6px 14px 12px; box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.6); }
+  .grp { padding: 8px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+  .grp:last-child { border-bottom: 0; }
+  .lab { display: block; font-size: 12px; opacity: 0.7; margin-bottom: 6px; }
+  .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .opts button { background: rgba(255, 255, 255, 0.1); border-radius: 999px; padding: 9px 14px; min-height: 40px; }
+  .opts button.sel { background: var(--accent); color: var(--accent-fg); font-weight: 700; }
+  .player.compact .phone { display: none; }
   .menu { position: absolute; right: 0; bottom: 40px; list-style: none; margin: 0; padding: 4px; min-width: 110px;
     background: rgba(20, 20, 24, 0.96); border-radius: 8px; max-height: 260px; overflow: auto; }
   .menu button { width: 100%; text-align: left; }
@@ -1033,13 +1070,11 @@
     .vol, .helpbtn { display: none; }                 /* (no keyboard to get help for) */
     .bar { height: 26px; }
   }
-  .rowbreak { display: none; }
-  @media (max-width: 699px) {                         /* a phone: two lines (play, time and full screen on the first), so nothing is pushed off the edge */
-    .row { gap: 0; flex-wrap: wrap; }
-    .row > * { order: 3; }
-    .row > .first { order: 1; }
-    .row > .rowbreak { display: block; order: 2; flex-basis: 100%; height: 0; }
-    .row > .spacer { min-width: 0; }
+  .phone { display: none; }
+  @media (max-width: 699px) {                         /* a phone: one slim row; the rest is under the settings button */
+    .row { gap: 0; }
+    .desk { display: none; }
+    .phone { display: block; }
     .row button { padding: 11px 9px; }
     .time { white-space: nowrap; margin: 0 6px; }
     .chap, .theater { display: none; }
