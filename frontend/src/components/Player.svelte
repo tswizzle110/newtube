@@ -514,10 +514,30 @@
       trackEvent('pip', { video_id: video.id })
     } catch { say("Picture in picture isn't available here") }
   }
-  function toggleFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen()
-    else box.requestFullscreen?.()
+  // Full screen. Browsers differ: most let the whole player (with its controls) go full screen; Safari on an iPhone only lets
+  // the VIDEO itself do it (it then uses the system player's own controls). Try the player, then the video, then say so.
+  async function toggleFullscreen() {
     trackEvent('fullscreen', { video_id: video.id })
+    const d = document
+    if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen ?? d.webkitExitFullscreen)?.call(d); return }
+    if (el.webkitDisplayingFullscreen) { el.webkitExitFullscreen?.(); return }
+    const ask = box.requestFullscreen ?? box.webkitRequestFullscreen
+    if (ask) {
+      try {
+        await ask.call(box)
+        // a landscape video on a phone: turn the screen sideways, as YouTube does (not allowed everywhere; then it stays as is)
+        if (el.videoWidth >= el.videoHeight) { try { await screen.orientation?.lock?.('landscape') } catch { /* not permitted here */ } }
+        return
+      } catch { /* fall through to the video's own full screen */ }
+    }
+    if (el.webkitEnterFullscreen) {
+      try { el.webkitEnterFullscreen(); return } catch { /* below */ }
+    }
+    say("Full screen isn't available in this browser")
+  }
+  function fullscreenChanged() {
+    fullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || el?.webkitDisplayingFullscreen)
+    if (!fullscreen) { try { screen.orientation?.unlock?.() } catch { /* nothing was locked */ } }
   }
   function jumpChapter(dir) {
     if (!chapters.length) return
@@ -731,7 +751,7 @@
   const chapterAt = (s) => chapters.findLast?.((c) => c.start <= s)?.title ?? ''
 </script>
 
-<svelte:window onkeydown={onKey} ononline={backOnline} onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)} />
+<svelte:window onkeydown={onKey} ononline={backOnline} onfullscreenchange={fullscreenChanged} onwebkitfullscreenchange={fullscreenChanged} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="player" class:compact class:idle={!showControls && !paused} bind:this={box} onmousemove={wake} onmouseleave={() => !paused && (showControls = false)}>
@@ -740,6 +760,7 @@
     bind:paused bind:volume bind:muted
     ontimeupdate={onTime} onprogress={onTime}
     ondurationchange={() => Number.isFinite(el.duration) && (dur = el.duration)}
+    onwebkitbeginfullscreen={fullscreenChanged} onwebkitendfullscreen={fullscreenChanged}
     onpause={onPause} onplay={onPlay} onresize={() => (shownHeight = el.videoHeight || shownHeight)}
     onplaying={wake}                                  /* start the hide timer: a touch screen has no mouse movement to do it */
     onended={() => onended?.()}
@@ -853,13 +874,14 @@
     </div>
 
     <div class="row">
-      <button title="Play/pause (k)" onclick={toggle}>{paused ? '▶' : '❚❚'}</button>
-      <button title="Mute (m)" onclick={toggleMute}>{muted || volume === 0 ? '🔇' : '🔊'}</button>
+      <button class="first" title="Play/pause (k)" onclick={toggle}>{paused ? '▶' : '❚❚'}</button>
+      <button class="first" title="Mute (m)" onclick={toggleMute}>{muted || volume === 0 ? '🔇' : '🔊'}</button>
       <input class="vol" type="range" min="0" max="1" step="0.05" value={muted ? 0 : volume}
         oninput={(e) => setVolume(Number(e.target.value))} aria-label="Volume" />
-      <span class="time">{fmt(t)} / {fmt(total)}</span>
+      <span class="time first">{fmt(t)} / {fmt(total)}</span>
       {#if currentChapter}<span class="chap">• {currentChapter.title}</span>{/if}
-      <span class="spacer"></span>
+      <span class="spacer first"></span>
+      <span class="rowbreak" aria-hidden="true"></span>
 
       <div class="menuwrap">
         {#if video.captions.length}
@@ -917,7 +939,7 @@
       {/if}
       {#if mode === 'dash'}<button class:on={audioOnly} aria-pressed={audioOnly} title="Audio only: no picture, much less data" onclick={toggleAudioOnly}>♪</button>{/if}
       {#if pipOk}<button title="Picture in picture" onclick={togglePip}>⧉</button>{/if}
-      <button title="Fullscreen (f)" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
+      <button class="fsbtn first" title="Fullscreen (f)" aria-label="Full screen" onclick={toggleFullscreen}>{fullscreen ? '🗗' : '⛶'}</button>
     </div>
   </div>
 </div>
@@ -1011,8 +1033,13 @@
     .vol, .helpbtn { display: none; }                 /* (no keyboard to get help for) */
     .bar { height: 26px; }
   }
-  @media (max-width: 699px) {                         /* a phone: everything must fit on one row */
-    .row { gap: 0; }
+  .rowbreak { display: none; }
+  @media (max-width: 699px) {                         /* a phone: two lines (play, time and full screen on the first), so nothing is pushed off the edge */
+    .row { gap: 0; flex-wrap: wrap; }
+    .row > * { order: 3; }
+    .row > .first { order: 1; }
+    .row > .rowbreak { display: block; order: 2; flex-basis: 100%; height: 0; }
+    .row > .spacer { min-width: 0; }
     .row button { padding: 11px 9px; }
     .time { white-space: nowrap; margin: 0 6px; }
     .chap, .theater { display: none; }
