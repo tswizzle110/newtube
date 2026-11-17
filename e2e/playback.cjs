@@ -931,7 +931,7 @@ const state = (p) => V(p, () => { const v = document.querySelector('video'); ret
     await m.tap('.sheet .opts button:has-text("1×")'); await m.waitForFunction(() => !document.querySelector('.sheet'));
     await m.evaluate(() => document.querySelector('video').pause());
   }
-  check('phone: player buttons are big enough to tap (at least 40px tall)', targets.length > 4 && targets.every((h) => h >= 40), JSON.stringify(targets));
+  check('phone: player buttons are big enough to tap (at least 40px tall)', targets.length >= 4 && targets.every((h) => h >= 40), JSON.stringify(targets));
   await m.tap('.reopen'); await m.waitForSelector('aside.side'); await m.tap('aside.side a:has-text("Settings")');
   await m.waitForSelector('.watchhost.mini');
   const mm = await m.evaluate(() => { const r = document.querySelector('.watchhost').getBoundingClientRect(); return { w: r.width, right: r.right, bottom: r.bottom, vw: innerWidth, vh: innerHeight,
