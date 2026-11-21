@@ -32,7 +32,23 @@
       loading = false
     }
   }
-  onMount(() => { document.title = 'newtube'; load() })
+  // Cards whose date or channel is not known yet (the server fills them in slowly, in the background): look again a few
+  // times, quietly, and only swap in the details (the order and anything you dismissed stay as they are).
+  let polls = 0
+  async function fillGaps() {
+    const missing = videos.slice(0, shown).filter((v) => !v.published_at || !v.channel_title)
+    if (!missing.length || polls >= 6) return
+    polls++
+    setTimeout(async () => {
+      try {
+        const fresh = new Map((await api.get('/api/recommendations?limit=240')).map((v) => [v.id, v]))
+        videos = videos.map((v) => (!v.published_at || !v.channel_title) && fresh.has(v.id)
+          ? { ...v, published_at: fresh.get(v.id).published_at, channel_title: fresh.get(v.id).channel_title, channel_id: fresh.get(v.id).channel_id } : v)
+      } catch {}
+      fillGaps()
+    }, 20000 + polls * 10000)
+  }
+  onMount(() => { document.title = 'newtube'; load().then(fillGaps) })
 
   // Topic chips: the categories YouTube gave the recommended videos (known once a video's details have been stored).
   const topics = $derived.by(() => {

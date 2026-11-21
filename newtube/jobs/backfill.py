@@ -51,9 +51,22 @@ WITH ranked AS (
 SELECT id FROM ranked ORDER BY tier, last_ts DESC, id LIMIT ?
 """
 
+# Videos that other lists (related, search) put in the database without a date or channel: they would show up on Home
+# without them, so they go before the imported history (there are only ever a few).
+_UNDATED_SQL = """
+SELECT v.id FROM videos v LEFT JOIN backfill_state b ON b.video_id = v.id
+WHERE v.detail_fetched_at IS NULL AND v.from_import = 0 AND v.title <> '' AND (v.published_at IS NULL OR v.channel_id IS NULL)
+  AND (b.video_id IS NULL OR (b.status = 'retry' AND b.next_try_at <= ?))
+ORDER BY v.first_seen_at DESC LIMIT ?
+"""
+
 
 def next_ids(conn: sqlite3.Connection, now: int | None = None, limit: int = 1) -> list[str]:
-    return [r[0] for r in conn.execute(_QUEUE_SQL, (now if now is not None else int(time.time()), limit))]
+    now = now if now is not None else int(time.time())
+    first = [r[0] for r in conn.execute(_UNDATED_SQL, (now, limit))]
+    if len(first) >= limit:
+        return first
+    return first + [r[0] for r in conn.execute(_QUEUE_SQL, (now, limit - len(first)))]
 
 
 def used_last_day(conn: sqlite3.Connection, now: int | None = None) -> int:

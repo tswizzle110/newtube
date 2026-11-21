@@ -65,6 +65,11 @@ class Weights:
     watched_channel_days: int = 365          # ...and other videos from channels you watch but do not subscribe to
     watched_channels: int = 80               # how many such channels (the ones you watch most) are consulted
     explore_share: float = 0.4               # at least this share of the page is NOT subscribed channels, when there is enough
+    new_count: int = 5                       # this many NEW uploads from the channels you watch most open the page
+    new_days: float = 4.0                    # "new" = uploaded within this many days
+    new_channels: int = 12                   # "the channels you watch most" = this many, by interest
+    new_min_affinity: float = 0.25           # ...and only ones you really do watch (0..1, the top channel is 1)
+    new_per_channel: int = 2
     fatigue_days: int = 14
     fatigue_full_at: int = 5                 # this many unclicked impressions = the full penalty
 
@@ -88,6 +93,7 @@ class Recommendation:
     score: float
     reasons: list[Reason] = field(default_factory=list)
     explore: bool = False             # from a channel you do not subscribe to (and not saved): see Weights.explore_share
+    affinity: float = 0.0             # how much you watch this video's channel (0..1)
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.video, "why": {"score": round(self.score, 2),
@@ -285,11 +291,36 @@ def recommend(conn: sqlite3.Connection, *, limit: int = 60, now: int | None = No
         video["completed"] = False
         video["seen"] = bool(r["watched_before"])
         scored.append(Recommendation(video, sum(x.points for x in reasons), reasons,
-                                     explore=not r["subscribed"] and not r["saved"]))
+                                     explore=not r["subscribed"] and not r["saved"], affinity=affinity))
 
     # Best first; ties broken by newer then id so the order is stable between requests.
     scored.sort(key=lambda x: (-x.score, -(x.video["published_at"] or 0), x.video["id"]))
-    return _diversify(scored, w.repeat_factor, limit, w.explore_share)
+    lead = _new_from_favourites(scored, interest, now, w)
+    taken = {id(x) for x in lead}
+    rest = _diversify([x for x in scored if id(x) not in taken], w.repeat_factor, max(0, limit - len(lead)), w.explore_share)
+    return lead + rest
+
+
+def _new_from_favourites(scored: list[Recommendation], interest: dict[str, float], now: int, w: Weights) -> list[Recommendation]:
+    """The first few cards: fresh uploads from the channels you watch most (most-watched channel first, newest first
+    within it, at most ``new_per_channel`` of one channel), so what you care about is never buried."""
+    if w.new_count <= 0:
+        return []
+    favourites = {c for c, a in sorted(interest.items(), key=lambda kv: -kv[1])[: w.new_channels] if a >= w.new_min_affinity}
+    fresh = [x for x in scored if x.video["channel_id"] in favourites and x.video["published_at"]
+             and 0 <= now - x.video["published_at"] <= w.new_days * DAY]
+    fresh.sort(key=lambda x: (-x.affinity, -x.video["published_at"], x.video["id"]))
+    out: list[Recommendation] = []
+    per: dict[str | None, int] = defaultdict(int)
+    for x in fresh:
+        if len(out) >= w.new_count:
+            break
+        if per[x.video["channel_id"]] >= w.new_per_channel:
+            continue
+        per[x.video["channel_id"]] += 1
+        x.reasons.insert(0, Reason(f"New from {x.video['channel_title']}, one of your most-watched channels", 0.0))
+        out.append(x)
+    return out
 
 
 def _diversify(ranked: list[Recommendation], factor: float, limit: int, explore_share: float = 0.0) -> list[Recommendation]:
